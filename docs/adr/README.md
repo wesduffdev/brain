@@ -6,3 +6,4 @@ ADR — supersede it with a new one and update both statuses.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-minimal-being-state-and-config-driven-drift.md) | Minimal being state: config-driven need drift and derived emotion | Accepted |
+| [0003](0003-transport-and-clock-seam.md) | FastAPI/WebSocket transport and an injectable clock seam | Accepted |

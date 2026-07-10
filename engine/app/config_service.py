@@ -220,6 +220,72 @@ class ConfigService:
             )
         return catalog
 
+    def resolve_object(self, selector: str) -> str:
+        """Map a human-typed selector (`ball`, `Red Ball`, `obj_red_ball`) to a
+        catalogued object id. Matches an exact id, the id without its `obj_`
+        prefix, or a unique substring of either the id or the developer label —
+        so `make demo OBJ=ball` finds `obj_red_ball`. Fails loud (same discipline
+        as the catalog) when nothing matches or the match is ambiguous."""
+        catalog = self.object_catalog()
+        norm = selector.strip().lstrip("-").strip().lower().replace(" ", "_")
+        if not norm:
+            raise ValueError("empty object selector")
+
+        def short(object_id: str) -> str:
+            return object_id.lower()[4:] if object_id.lower().startswith("obj_") else object_id.lower()
+
+        for object_id in catalog:
+            if norm in (object_id.lower(), short(object_id)):
+                return object_id
+
+        matches = [
+            object_id
+            for object_id, obj in catalog.items()
+            if norm in short(object_id) or norm in obj.developer_label.lower().replace(" ", "_")
+        ]
+        if len(matches) == 1:
+            return matches[0]
+
+        choices = ", ".join(sorted(short(object_id) for object_id in catalog))
+        if not matches:
+            raise ValueError(f"no object matches {selector!r}; try one of: {choices}")
+        raise ValueError(
+            f"object selector {selector!r} is ambiguous ({', '.join(sorted(matches))}); "
+            f"be more specific — one of: {choices}"
+        )
+
+    def with_room_contents(self, object_ids: List[str]) -> "ConfigService":
+        """Return a copy of this config whose room contains exactly `object_ids`
+        and nothing else — the seam the demo uses to put the being alone with one
+        object. Every id must be catalogued (fail-loud). All other config
+        (needs, actions, safety, the room's own conditions) is carried through
+        unchanged."""
+        import copy  # noqa: PLC0415 — only needed on this rarely-used path
+
+        ids = list(object_ids)
+        catalog = self.object_catalog()
+        unknown = [object_id for object_id in ids if object_id not in catalog]
+        if unknown:
+            known = ", ".join(sorted(catalog))
+            raise ValueError(f"unknown object id(s) {unknown}; known objects: {known}")
+
+        rooms = copy.deepcopy(dict(self._rooms)) if self._rooms else {}
+        room = dict(rooms.get("room") or {})
+        room["contains"] = ids
+        rooms["room"] = room
+        return ConfigService(
+            self._tick_rates,
+            self._emotions,
+            rooms,
+            self._objects,
+            self._environment,
+            self._render_hints,
+            self._commands,
+            self._outcome,
+            self._actions,
+            self._safety,
+        )
+
     # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
 
     def action_policies(self) -> Dict[str, ActionPolicy]:

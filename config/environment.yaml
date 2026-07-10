@@ -1,0 +1,38 @@
+# How a room's environmental conditions push the being's CONTEXTUAL needs.
+# This is the tuning surface for the environment — change values here, never in
+# service code (ADR 0006).
+#
+# A room (config/rooms.yaml) names one category per dimension (light / sound /
+# temperature). Each category below carries the per-application delta it applies
+# to a contextual need:
+#   safety  — a dark, too-bright, loud, or unknown-sound room lowers it; when it
+#             crosses the `scared` threshold in emotions.yaml, fear becomes the
+#             dominant emotion.
+#   warmth  — a cool room lowers it, a warm room raises it.
+# Contextual needs have no drift of their own (tick_rates.yaml) — these deltas
+# are the ONLY thing that moves them. Values are clamped to each need's own band
+# (min/max in tick_rates.yaml), so the need's floor/ceiling has one home.
+#
+# every_ticks: apply the deltas when tick % every_ticks == 0 (0 birth never moves).
+
+every_ticks: 10
+
+light:
+  dark:        { safety: -6 }
+  too_low:     { safety: -3 }
+  dim:         { safety: -1 }
+  comfortable: { safety:  0 }
+  bright:      { safety:  0 }
+  too_bright:  { safety: -2 }
+
+sound:
+  silent:        { safety:  0 }
+  quiet:         { safety:  0 }
+  normal:        { safety:  0 }
+  loud:          { safety: -5 }
+  unknown_sound: { safety: -6 }
+
+temperature:
+  cool:        { warmth: -4 }
+  comfortable: { warmth:  0 }
+  warm:        { warmth:  2 }

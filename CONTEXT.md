@@ -49,9 +49,38 @@ convenience the being never knows.
 _Avoid_: item, entity, thing.
 
 **Room**:
-The local place the being occupies and perceives; holds objects and (later)
+The local place the being occupies and perceives; holds objects and its
 environmental conditions.
 _Avoid_: level, scene, map, area.
+
+**Environment**:
+The room's ambient conditions the being is situated in — its light, sound, and
+temperature — distinct from the objects the room contains. The environment has
+no drive of its own; it pushes the being's contextual needs (safety, warmth).
+_Avoid_: surroundings, ambience, atmosphere, weather.
+
+**Environmental condition**:
+One category the environment currently holds along a single dimension — e.g.
+light is `dark`, sound is `loud`, temperature is `cool`. Each condition carries
+a per-tick push on a contextual need, and a dark or loud room can push safety
+low enough that the being reads as scared.
+_Avoid_: setting, status, modifier, effect.
+
+**Light**:
+The environment's illumination dimension, a category from `dark` to
+`too_bright`; darkness lowers the being's safety.
+_Avoid_: brightness, lighting, lux.
+
+**Sound**:
+The environment's auditory dimension, a category from `silent` through `normal`
+to `loud`/`unknown_sound`; loud or unknown sound lowers safety.
+_Avoid_: noise, audio, volume.
+
+**Temperature**:
+The environment's thermal dimension, a category (`cool`/`comfortable`/`warm`);
+it shifts the being's warmth need. Temperature is the condition; warmth is the
+need it moves — they are not the same term.
+_Avoid_: heat, climate, warmth (that is the need, not the condition).
 
 **Simulation**:
 The being-in-its-world advanced through ticks — the single public surface over

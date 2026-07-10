@@ -377,7 +377,13 @@ branch `wave/<n>` off `main`; each parallel slice runs in its own worktree on
 `slice/<ticket>` under `.claude/worktrees/<ticket>/`. Sub-agents commit only in
 their worktree; the orchestrator merges each finished slice into `wave/<n>` and,
 once the whole wave is in, opens a **single PR** `wave/<n>` → `main` for a human
-to merge. See `CLAUDE.md` → "Parallel execution — git worktrees and wave PRs".
+to merge. Defects found in review or in an open wave PR are ticketed and fixed by
+a sub-agent on a `hotfix/<ticket>` branch that, once verified, merges back into
+the wave branch (updating the PR in place) — the loop is **self-diagnosing**
+(verification → bug ticket) and **self-healing** (ticket → sub-agent fix), and
+nothing merges unless green, so the open PR stays **pristine and merge-ready to
+`main` at all times**. See `CLAUDE.md` → "Parallel execution — git worktrees and
+wave PRs" and "Bugs found during a wave".
 
 ### 6.1 Orchestrator agent (one long-lived session)
 

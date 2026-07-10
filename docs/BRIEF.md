@@ -4,10 +4,8 @@ Version: 0.2
 Purpose: Feed this document to a Claude Code agent so it can break the
 project into features, refactors, and implementation issues.
 
-> **Direction (v0.2).** This supersedes an earlier baby-centric draft. The
-> simulated being is **human-like in psychology** — it has needs, emotions,
-> curiosity, memory, and learned expectations — but it is **not a baby, not
-> tied to any age or life-stage, and not a literal person**. Throughout this
+> **Direction.** The simulated being is **human-like in psychology** — it has
+> needs, emotions, curiosity, memory, and learned expectations. Throughout this
 > document, "the being" means this generic situated agent. Its form and
 > appearance are open; only its psychology is modeled here.
 
@@ -31,8 +29,7 @@ The core goal is to create a being that can:
 - Exist in a simulated world.
 - Perceive objects and environmental conditions (light/dark, sound,
   temperature, and so on).
-- Have needs such as hunger, sleep, comfort, safety, warmth, curiosity, and
-  hygiene.
+- Have needs such as hunger, sleep, comfort, safety, warmth, and curiosity.
 - React emotionally to internal and external state, including **fear**.
 - Interact with objects.
 - Store experiences.
@@ -52,11 +49,11 @@ The being is human-like in psychology — needs, moods, attachment, sensory
 learning, curiosity, and a developing temperament — but it is not a literal
 person and is not tied to an age or life-stage.
 
-The simulation may model high-stress situations, attentive care, poor care,
-neglect-like conditions, and consequences to trust, stress response, and
+The simulation may model high-stress situations, supportive and harsh
+conditions, deprivation, and consequences to trust, stress response, and
 temperament. These are simulation outcomes, not endorsements.
 
-Harm is abstract. Negative caregiver actions and hazards are represented as
+Harm is abstract. Negative actions and hazards are represented as
 state changes (trust / stress / comfort / pain / fear deltas), warnings,
 recovery paths, and behavior consequences — never step-by-step depictions of
 real-world harm. Every harmful path has a visible consequence and a recovery
@@ -473,7 +470,7 @@ Defines the local place where the being exists.
   "worldId": "world_001",
   "lightLevel": "comfortable",
   "temperature": "comfortable",
-  "contains": ["being_001", "obj_red_ball", "obj_bottle"]
+  "contains": ["being_001", "obj_red_ball", "obj_cup"]
 }
 ```
 
@@ -506,7 +503,7 @@ dark room
   → uncertainty rises
   → safety need rises
   → scared emotion may become dominant
-  → action bias shifts toward cry / seek caregiver / freeze
+  → action bias shifts toward withdraw / freeze
 ```
 
 That is much better than `dark = scared`.
@@ -556,8 +553,7 @@ Current state of the being. No age or life-stage.
     "comfort": 75,
     "warmth": 20,
     "curiosity": 82,
-    "safety": 70,
-    "hygiene": 90
+    "safety": 70
   },
   "emotion": { "dominant": "curious", "intensity": 0.7 },
   "currentAction": { "type": "observe", "targetId": "obj_red_ball" }
@@ -582,8 +578,8 @@ Only one emotion is dominant at a time in v0. Emotion is **derived** from
 needs, events, predictions, and environment — never set manually.
 
 ```text
-dark + low caregiver trust + unknown sound → scared
-dark + caregiver present + soft blanket    → comforted / sleepy
+dark + unfamiliar surroundings + unknown sound → scared
+dim + familiar surroundings + soft blanket     → comforted / sleepy
 bright + colorful moving object            → curious / excited
 ```
 
@@ -636,15 +632,14 @@ needs:
   warmth:    { direction: contextual,  amount: 1, every_ticks: 30, min: 0, max: 100 }
   curiosity: { direction: increase,    amount: 1, every_ticks: 15, min: 0, max: 100 }
   safety:    { direction: contextual,  amount: 1, every_ticks: 10, min: 0, max: 100 }
-  hygiene:   { direction: decrease,    amount: 1, every_ticks: 60, min: 0, max: 100 }
 
 actions:
-  observe: { duration_ticks: 3,   cooldown_ticks: 1 }
-  crawl:   { duration_ticks: 5,   cooldown_ticks: 2 }
-  reach:   { duration_ticks: 2,   cooldown_ticks: 1 }
-  grab:    { duration_ticks: 2,   cooldown_ticks: 1 }
-  cry:     { duration_ticks: 6,   cooldown_ticks: 0 }
-  sleep:   { duration_ticks: 120, cooldown_ticks: 10 }
+  observe:  { duration_ticks: 3,   cooldown_ticks: 1 }
+  approach: { duration_ticks: 5,   cooldown_ticks: 2 }
+  reach:    { duration_ticks: 2,   cooldown_ticks: 1 }
+  grab:     { duration_ticks: 2,   cooldown_ticks: 1 }
+  withdraw: { duration_ticks: 6,   cooldown_ticks: 0 }
+  sleep:    { duration_ticks: 120, cooldown_ticks: 10 }
 ```
 
 ### Interfaces to Protect Fine-Tuning
@@ -705,7 +700,7 @@ outcomes:
 
 ```text
 drop rubber ball  → falls + bounces + rolls
-shake rattle      → makes_noise + pleasant
+shake a container → makes_noise + pleasant
 touch hot object  → causes_pain + scary
 ```
 
@@ -751,13 +746,13 @@ memories, prediction output, safety rules, curiosity, action cooldowns.
 Output:
 
 ```json
-{ "action": "crawl", "targetId": "obj_red_ball", "emotion": "curious",
+{ "action": "approach", "targetId": "obj_red_ball", "emotion": "curious",
   "reason": "Curiosity is high and predicted risk is low." }
 ```
 
 Example: for a hot object where touch predicts pain, safety rules block or
-heavily penalize touch, and the being chooses observe / move away / cry /
-seek caregiver instead. Learned predictions never bypass safety.
+heavily penalize touch, and the being chooses observe / move away / withdraw
+instead. Learned predictions never bypass safety.
 
 ---
 
@@ -797,7 +792,7 @@ Python sends render state over WebSocket:
   "beingId": "being_001",
   "tick": 1024,
   "emotion": "curious",
-  "pose": "crawl",
+  "pose": "approach",
   "action": "observe",
   "intensity": 0.7,
   "needs": { "hunger": 35, "sleep": 40, "comfort": 75, "curiosity": 82 },
@@ -842,7 +837,7 @@ Behavior-driven tests and TDD around service seams.
 ```text
 Tick policy:   hunger rises every 30 ticks → unchanged at 29, +1 at 30.
 Need service:  hunger 99, +5 → capped at 100.
-Action timing: crawl cooldown 2 → not selectable until cooldown expires.
+Action timing: approach cooldown 2 → not selectable until cooldown expires.
 Shadow mode:   model predicts bounce, actual is bounce → record marked correct.
 Decision:      hot object + touch-predicts-pain → touch blocked/penalized.
 Learning:      event expected roll + observed roll → training example created.

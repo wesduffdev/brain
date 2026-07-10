@@ -50,10 +50,9 @@ end-to-end via `docker compose up` (plus the training profile).
 - **Deep modules / seams.** One public class per module; don't add a port until
   something varies across it (ADR-worthy when you do). Prefer deepening
   `Simulation` over adding shallow pass-throughs.
-- **No caregiver mechanics.** The being has **no caregiver**. The brief's legacy
-  "seek caregiver" / "cry to summon" phrasing (§9, §12, the light example) is
-  **superseded by ADR 0001 and `CLAUDE.md`**. Actions are self- and
-  world-directed only (observe / approach / withdraw / touch / grasp / push …).
+- **Self- and world-directed only.** The being acts on its own state and the
+  world; there are no actions that summon or depend on an external actor. Actions
+  are things like observe / approach / withdraw / touch / grasp / push.
 - **Design boundary.** Harm stays abstract (state deltas + visible consequence +
   recovery path). See [`docs/design_boundary.md`](design_boundary.md).
 - **ADR in the same slice.** Any ticket that adds or changes an interface
@@ -121,9 +120,8 @@ one-sentence **Outcome**, **Acceptance criteria**, and **links to files/ADRs**.
   - Behavior test: dark/loud room → `safety` falls → emotion becomes `scared`
     (e.g. `test_dark_room_lowers_safety_until_being_is_scared`); a comfortable
     room keeps it calm. Retuning the threshold is a config-only change (test).
-  - **No caregiver / "freeze" action** from the brief's light example — this
-    ticket only moves needs and lets emotion re-derive. `pytest` green; demo shows
-    the shift.
+  - **No external-actor or "freeze" action** — this ticket only moves needs and
+    lets emotion re-derive. `pytest` green; demo shows the shift.
 - **Files/refs:** `engine/app/services/perception_service.py`,
   `config/environment.yaml`, `config/rooms.yaml`, `config/emotions.yaml`
   (existing `scared` rule), BRIEF §9 (Environmental Conditions), ADR 0001.
@@ -153,7 +151,7 @@ one-sentence **Outcome**, **Acceptance criteria**, and **links to files/ADRs**.
     touch predicts pain → touch blocked** and a safe action chosen instead;
     action respects cooldown. Red first.
   - `state()` gains `currentAction`; demo prints action + reason each tick.
-    **No caregiver-directed actions.** ADR added. `pytest` green.
+    **Actions are self- and world-directed only.** ADR added. `pytest` green.
 - **Files/refs:** `engine/app/services/{decision_service,safety_service}.py`,
   `engine/app/domain/{action,interaction_event}.py`,
   `config/{actions,safety_rules,outcome_labels}.yaml`, BRIEF §12, §13, §16.
@@ -437,8 +435,8 @@ contract still hold, and nested agents must not write the same files at once.
 7. **Commit / open PR**; comment the card with the commit/PR ref.
 8. **Report** the completion (§6.3) back to the orchestrator. Do **not** move the
    card yourself beyond what the flow allows; the orchestrator moves it to Review.
-9. Honor every standing constraint (§3): config-driven, deep-module seams, **no
-   caregiver mechanics**, design boundary.
+9. Honor every standing constraint (§3): config-driven, deep-module seams,
+   self-/world-directed actions, design boundary.
 
 ### 6.3 Vertical-slice completion report (sub-agent → orchestrator)
 

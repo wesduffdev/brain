@@ -21,8 +21,6 @@ needs:
   warmth:    { direction: increase,   amount: 1, every_ticks: 30, min: 0, max: 100, start: 20 }
   curiosity: { direction: increase,   amount: 1, every_ticks: 15, min: 0, max: 100, start: 55 }
   safety:    { direction: contextual, amount: 1, every_ticks: 10, min: 0, max: 100, start: 80 }
-  hygiene:   { direction: decrease,   amount: 1, every_ticks: 60, min: 0, max: 100, start: 90 }
 
 # Note: actions and their tick durations/cooldowns are intentionally NOT here
-# yet. Actions arrive in a later slice, once the being's state exists. No
-# caregiver-directed actions.
+# yet. Actions arrive in a later slice, once the being's state exists.

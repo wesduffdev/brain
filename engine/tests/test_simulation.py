@@ -18,7 +18,7 @@ def test_state_reports_tick_needs_and_emotion():
     state = _fresh().state()
     assert state["tick"] == 0
     assert state["beingId"] == "being_001"
-    assert {"hunger", "sleep", "comfort", "warmth", "curiosity", "safety", "hygiene"} <= set(state["needs"])
+    assert {"hunger", "sleep", "comfort", "warmth", "curiosity", "safety"} <= set(state["needs"])
     assert isinstance(state["emotion"], str)
 
 

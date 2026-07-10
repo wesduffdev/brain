@@ -3,11 +3,9 @@
 ## What this is
 
 A situated-being simulation built to learn ML. The being is **human-like in
-psychology** — needs, emotions, curiosity, memory, learned expectations — but
-it is **not a baby, not tied to an age or life-stage, and not a literal
-person**. There is **no "caregiver"** concept and no caregiver-directed actions
-(no "seek caregiver", no crying to summon one); the being acts on its own state
-and its world. The full target architecture is `docs/BRIEF.md`.
+psychology** — needs, emotions, curiosity, memory, learned expectations. It
+acts on its own internal state and the world around it. The full target
+architecture is `docs/BRIEF.md`.
 
 ## Design boundary (applies to every change)
 

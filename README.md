@@ -1,8 +1,7 @@
 # jarvis — situated-being ML simulation
 
 A simulated **being** — human-like in psychology (needs, emotions, curiosity,
-memory, learned expectations), but not a baby, not tied to an age or
-life-stage, and not a literal person. The long-term goal is a hybrid brain:
+memory, learned expectations). The long-term goal is a hybrid brain:
 authored rules + a small neural network for narrow prediction, rendered in 2D,
 running across Docker services. The near-term goal is to learn ML by building
 that loop one honest slice at a time.
@@ -54,8 +53,7 @@ python -m pytest
 2. Objects + a room; the being perceives what is near.
 3. Environmental conditions (light/dark, sound, temperature) that move
    contextual needs like safety — this is what makes `scared`/fear fire.
-4. Actions + a simple rule/utility decision (generic object interactions; no
-   caregiver-directed actions).
+4. Actions + a simple rule/utility decision (generic object interactions).
 5. FastAPI engine: REST `/state` + a WebSocket tick stream. Reintroduce
    `docker-compose.yml` (engine + postgres).
 6. Postgres persistence: interaction events + training examples.

@@ -16,10 +16,9 @@ predictor in shadow mode, and a PixiJS renderer, all on Docker Compose. Trying
 to stand all of that up at once is a big-bang with nothing observable until the
 end.
 
-We also deliberately moved away from the earlier baby-centric framing. The
-being is human-like in psychology but is not a baby, has no age or life-stage,
-and there is no caregiver concept. The first thing built must set that tone and
-avoid smuggling in baby/care-flavored mechanics (e.g. "seek caregiver").
+The being is human-like in psychology and acts on its own internal state and the
+world around it. The first thing built must set that tone and keep the mechanics
+generic — the being reacts to its needs and its environment, nothing more.
 
 We need a first slice that is minimal, observable, fully tested, and that
 establishes the load-bearing design idea: **fine-tuning lives in config, not in
@@ -43,8 +42,7 @@ The first slice is the being's minimal internal state only:
 
 Explicitly **out of this slice** (each its own later slice): transport
 (FastAPI/WebSocket), persistence (Postgres), the neural net + trainer, the
-renderer, objects/rooms/environment, and **actions/decisions** — including any
-caregiver-directed action.
+renderer, objects/rooms/environment, and **actions/decisions**.
 
 No `ClockPort`/`ConfigProvider` protocol is introduced yet: nothing varies
 across those boundaries in this slice, and the deep-module rule is not to add a

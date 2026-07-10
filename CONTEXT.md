@@ -110,6 +110,26 @@ weights artifact lives; the learned weights themselves live in a `.pt` file, not
 here.
 _Avoid_: training job, experiment, checkpoint.
 
+**Render frame**:
+The engine's outbound picture of the being for a renderer (the
+`being_state_update` message, ADR 0004): the domain state mapped onto the shared
+wire contract, carrying presentation-only additions (a visual hint block, an
+emotion intensity) but no new psychology. One frame per emitted state.
+_Avoid_: state update, packet, message.
+
+**Visual hint**:
+A presentation-only cue for how an emotion looks — mouth, eyes, effects, a
+thought glyph — looked up from the being's already-derived emotion. It encodes
+no decision; retuning it never changes what the being feels.
+_Avoid_: sprite, animation, expression state.
+
+**Player command**:
+A raw player intent aimed at the world — e.g. presenting an object into the room
+— sent by a renderer and validated by the engine before it can matter. It never
+decides what the being does; the being's own psychology responds to it, exactly
+as if the object had appeared any other way.
+_Avoid_: action (that is the being's own doing), input event, control.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

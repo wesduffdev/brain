@@ -1,11 +1,14 @@
 """main — the transport surface for the engine core.
 
-A thin FastAPI app over `Simulation`: `GET /state` returns the current snapshot
-and a WebSocket endpoint advances the being on a timer and pushes each frame.
-It owns no psychology — it serializes whatever `Simulation.state()` returns, so
-snapshots that later slices grow (a `perceived` block, `currentAction`, …) flow
-through unchanged. Time comes in through `ClockPort` so the stream can be driven
-by a real clock in production and a fake clock in tests (ADR 0003).
+A thin FastAPI app over `Simulation`. `GET /state` returns the current domain
+snapshot; the WebSocket endpoint advances the being on a timer and pushes each
+snapshot mapped onto the ADR-0004 `being_state_update` frame (via
+`RenderStateService`); `POST /command` accepts a `player_command` validated by
+`CommandService`. It owns no psychology — `/state` serializes whatever
+`Simulation.state()` returns and the render/command mapping is pure, so snapshots
+that later slices grow (a `perceived` block, `currentAction`, …) flow through
+unchanged. Time comes in through `ClockPort` so the stream can be driven by a
+real clock in production and a fake clock in tests (ADR 0003).
 
 Run it:
 
@@ -17,12 +20,14 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
 from app import auth
 from app.auth import AuthConfig, require_auth
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
+from app.services.command_service import CommandError, CommandService
+from app.services.render_state_service import RenderStateService
 from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -35,16 +40,24 @@ def create_app(
     tick_interval_seconds: Optional[float] = None,
     config_root: Optional[str] = None,
     auth_config: Optional[AuthConfig] = None,
+    render_state_service: Optional[RenderStateService] = None,
+    command_service: Optional[CommandService] = None,
 ) -> FastAPI:
-    """Build the app around a being and a clock.
+    """Build the app around a being, a clock, and the render/command services.
 
     Everything is injectable so tests can drive a fake being and a fake clock;
-    left to their defaults, the being is loaded from `config/` and the clock is
-    the wall clock, which is what `uvicorn app.main:app` runs. Authentication is
-    read from the environment (`AuthConfig.from_env()`) unless one is injected —
-    it is always in the code path and gated only by `AUTH_REQUIRED` (ADR 0005).
+    left to their defaults, the being and the render/command services are loaded
+    from `config/` and the clock is the wall clock, which is what
+    `uvicorn app.main:app` runs. Authentication is read from the environment
+    (`AuthConfig.from_env()`) unless one is injected — it is always in the code
+    path and gated only by `AUTH_REQUIRED` (ADR 0005).
     """
-    if simulation is None or tick_interval_seconds is None:
+    if (
+        simulation is None
+        or tick_interval_seconds is None
+        or render_state_service is None
+        or command_service is None
+    ):
         config = ConfigService.from_files(
             config_root or os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
         )
@@ -52,6 +65,12 @@ def create_app(
             simulation = Simulation(config)
         if tick_interval_seconds is None:
             tick_interval_seconds = config.tick_duration_ms() / 1000.0
+        if render_state_service is None:
+            render_state_service = RenderStateService(config.render_hints())
+        if command_service is None:
+            command_service = CommandService(
+                config.command_specs(), config.object_catalog().keys()
+            )
 
     clock = clock if clock is not None else WallClock()
     auth_config = auth_config if auth_config is not None else AuthConfig.from_env()
@@ -66,9 +85,24 @@ def create_app(
 
     @app.get("/state", dependencies=[Depends(guard)])
     async def get_state():
-        # Return the snapshot as-is; FastAPI serializes the whole dict, so no
-        # field list is hard-coded here. Protected: the guard runs first.
+        # Return the domain snapshot as-is; FastAPI serializes the whole dict, so
+        # no field list is hard-coded here. Protected: the guard runs first.
         return simulation.state()
+
+    @app.post("/command", dependencies=[Depends(guard)])
+    async def post_command(command: dict = Body(...)):
+        # Receive a `player_command` and let CommandService validate it against
+        # the known command set and targets (ADR 0004); reject unknown/malformed
+        # with 422. Protected by the same guard as /state.
+        try:
+            accepted = command_service.validate(command)
+        except CommandError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "status": "accepted",
+            "command": accepted.command,
+            "targetId": accepted.target_id,
+        }
 
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):
@@ -85,7 +119,9 @@ def create_app(
             return
         try:
             while True:
-                frame = simulation.tick()
+                # Map the domain snapshot onto the ADR-0004 render frame before
+                # it crosses the wire; the renderer sees `being_state_update`.
+                frame = render_state_service.render(simulation.tick())
                 await websocket.send_json(frame)
                 await clock.sleep(tick_interval_seconds)
         except WebSocketDisconnect:

@@ -13,7 +13,13 @@ from typing import Dict, List, Mapping, Optional
 
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
-from app.policies import EmotionRule, EnvironmentPolicy, NeedTickPolicy
+from app.policies import (
+    CommandSpec,
+    EmotionRule,
+    EnvironmentPolicy,
+    NeedTickPolicy,
+    RenderHintsPolicy,
+)
 
 
 class ConfigService:
@@ -24,12 +30,16 @@ class ConfigService:
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
         environment: Optional[Mapping] = None,
+        render_hints: Optional[Mapping] = None,
+        commands: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
         self._rooms = rooms or {}
         self._objects = objects or {}
         self._environment = environment or {}
+        self._render_hints = render_hints or {}
+        self._commands = commands or {}
 
     # --- construction -----------------------------------------------------
 
@@ -41,10 +51,14 @@ class ConfigService:
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
         environment: Optional[Mapping] = None,
+        render_hints: Optional[Mapping] = None,
+        commands: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
-        return cls(tick_rates, emotions, rooms, objects, environment)
+        return cls(
+            tick_rates, emotions, rooms, objects, environment, render_hints, commands
+        )
 
     @classmethod
     def from_files(cls, config_root: str) -> "ConfigService":
@@ -58,7 +72,11 @@ class ConfigService:
         rooms = yaml.safe_load((root / "rooms.yaml").read_text())
         objects = yaml.safe_load((root / "object_properties.yaml").read_text())
         environment = yaml.safe_load((root / "environment.yaml").read_text())
-        return cls(tick_rates, emotions, rooms, objects, environment)
+        render_hints = yaml.safe_load((root / "render_hints.yaml").read_text())
+        commands = yaml.safe_load((root / "commands.yaml").read_text())
+        return cls(
+            tick_rates, emotions, rooms, objects, environment, render_hints, commands
+        )
 
     # --- ticks / needs ----------------------------------------------------
 
@@ -165,3 +183,29 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    # --- render / commands ------------------------------------------------
+
+    def render_hints(self) -> RenderHintsPolicy:
+        """The presentation hints RenderStateService maps emotion onto (ADR
+        0004). An absent config yields a neutral default so the pure model tests
+        need not describe presentation."""
+        return RenderHintsPolicy(
+            intensity_default=float(self._render_hints.get("intensity_default", 0.5)),
+            default=dict(self._render_hints.get("default", {}) or {}),
+            by_emotion={
+                name: dict(hint or {})
+                for name, hint in (self._render_hints.get("emotions", {}) or {}).items()
+            },
+        )
+
+    def command_specs(self) -> Dict[str, CommandSpec]:
+        """The v0 player-command vocabulary CommandService validates against
+        (ADR 0004), keyed by command name."""
+        specs: Dict[str, CommandSpec] = {}
+        for name, spec in (self._commands.get("commands", {}) or {}).items():
+            specs[str(name)] = CommandSpec(
+                name=str(name),
+                requires_target=bool((spec or {}).get("requires_target", False)),
+            )
+        return specs

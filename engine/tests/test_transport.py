@@ -1,13 +1,15 @@
 """Behaviors of the transport surface.
 
 Observable through the public HTTP/WebSocket boundary: `GET /state` returns the
-being's current snapshot, and the WebSocket endpoint streams one `state()` frame
-per tick. Time is injected through a clock seam, so tests drive a fake clock —
-no real time passes and the stream is deterministic.
+being's current domain snapshot, the WebSocket endpoint streams one mapped
+ADR-0004 `being_state_update` frame per tick (via RenderStateService), and
+`POST /command` accepts a `player_command` validated by CommandService. Time is
+injected through a clock seam, so tests drive a fake clock — no real time passes
+and the stream is deterministic.
 
-`/state` and `/ws` are now behind JWT auth (V0-SEC, ADR 0005); the suite runs
-with auth on (see `conftest.py`), so these tests present a token minted by the
-`mint` fixture. The generic-serialization behavior is unchanged.
+`/state`, `/ws`, and `/command` are behind JWT auth (V0-SEC, ADR 0005); the suite
+runs with auth on (see `conftest.py`), so these tests present a token minted by
+the `mint` fixture. The generic-serialization behavior of `/state` is unchanged.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from app.config_service import ConfigService
 from app.main import create_app
+from app.services.command_service import CommandService
 from app.simulation import Simulation
 
 
@@ -103,9 +106,26 @@ def test_state_endpoint_serializes_whatever_the_snapshot_contains(mint):
     assert body["surprised"] is True
 
 
-def test_stream_pushes_one_state_frame_per_tick_with_increasing_tick(mint):
+_COMMANDS = {"commands": {"present_object": {"requires_target": True}}}
+
+
+def _command_service() -> CommandService:
+    specs = ConfigService.from_dict({}, {}, commands=_COMMANDS).command_specs()
+    return CommandService(specs, ("obj_red_ball",))
+
+
+def _app_with_commands() -> TestClient:
+    return TestClient(
+        create_app(
+            simulation=Simulation(_tiny_config()),
+            command_service=_command_service(),
+            tick_interval_seconds=0,
+        )
+    )
+
+
+def test_stream_emits_one_mapped_being_state_update_frame_per_tick(mint):
     sim = Simulation(_tiny_config())
-    reference = Simulation(_tiny_config())  # identical config → identical drift
     app = create_app(simulation=sim, clock=_CountingClock(allowed=3), tick_interval_seconds=0)
     client = TestClient(app)
 
@@ -115,5 +135,45 @@ def test_stream_pushes_one_state_frame_per_tick_with_increasing_tick(mint):
     ticks = [f["tick"] for f in frames]
     assert ticks == [1, 2, 3]
     assert all(b > a for a, b in zip(ticks, ticks[1:]))  # strictly increasing
-    # Each frame is exactly what state() produced for that tick.
-    assert frames == [reference.tick() for _ in range(3)]
+    # Each frame is the ADR-0004 render frame, not the raw domain snapshot.
+    assert all(f["type"] == "being_state_update" for f in frames)
+    assert all(isinstance(f["visual"], dict) for f in frames)
+    # The domain data still rides along inside the mapped frame.
+    assert all("needs" in f and "emotion" in f for f in frames)
+
+
+def test_a_valid_player_command_is_accepted(mint):
+    client = _app_with_commands()
+
+    resp = client.post(
+        "/command",
+        headers=_bearer(mint()),
+        json={"type": "player_command", "command": "present_object", "targetId": "obj_red_ball"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "accepted"
+    assert resp.json()["targetId"] == "obj_red_ball"
+
+
+def test_an_unknown_command_is_rejected(mint):
+    client = _app_with_commands()
+
+    resp = client.post(
+        "/command",
+        headers=_bearer(mint()),
+        json={"type": "player_command", "command": "teleport", "targetId": "obj_red_ball"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_a_command_without_a_token_is_rejected():
+    client = _app_with_commands()
+
+    resp = client.post(
+        "/command",
+        json={"type": "player_command", "command": "present_object", "targetId": "obj_red_ball"},
+    )
+
+    assert resp.status_code == 401

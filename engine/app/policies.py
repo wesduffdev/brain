@@ -90,3 +90,27 @@ class EnvironmentPolicy:
             for need_name, delta in table[category].items():
                 totals[need_name] = totals.get(need_name, 0) + int(delta)
         return totals
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    """One entry in the player-command vocabulary (ADR 0004): the command's name
+    and whether a valid `player_command` for it must carry a target object id.
+    """
+
+    name: str
+    requires_target: bool = False
+
+
+@dataclass(frozen=True)
+class RenderHintsPolicy:
+    """Resolved presentation hints for the render frame (ADR 0004): the neutral
+    `intensity` to report until the emotion model carries one, the fallback
+    `default` visual, and the per-emotion visual draw hints keyed by emotion.
+    Pure presentation vocabulary — it carries no psychology; the emotion is
+    already decided before these hints are looked up.
+    """
+
+    intensity_default: float
+    default: Mapping[str, object]
+    by_emotion: Mapping[str, Mapping[str, object]]

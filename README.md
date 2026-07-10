@@ -148,6 +148,7 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Self-diagnosing / self-healing | Keep the open PR pristine | Defects become bug tickets → `hotfix/<ticket>` → verify → merge back; nothing merges red |
 | Closing a wave | Clean, verified finish | After the PR merges: pull, verify, self-heal if needed, delete branches/worktrees, cards → done, report |
 | Trello board guardrails | Safe, auditable task flow | Official MCP only; pull from `Ready for Agent`; claim before work; gated one-step moves; a human does Done |
+| New-work intake gate | No code before a card | Any new ask — including a direct in-session director request — becomes a board card in our pattern first; the orchestrator mints it and moves it `Ready for Agent` → `in progress` → `in review` → `done`, then normal TDD/PR/gates apply (a procedure, not a hook) |
 | Design boundary | Study simulated psychology honestly | Harm is abstract internal state (pain/fear/stress/trust deltas) and **may be lasting** (no forced recovery); the being can be harmed and learn from it; adults-only; the one hard line is never real-world-harm instruction ([ADR 0013](docs/adr/0013-reframed-design-boundary.md)) |
 | Dev env (`make`) | Reproducible setup and tests | `make setup/test/demo/run/train/up` — one gitignored venv, identical for everyone; `train` adds the training-only deps |
 | This governance index | Keep the docs honest | New rules/hooks/conventions update this table in the same change |

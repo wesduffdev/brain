@@ -1,0 +1,20 @@
+# Hard safety guardrails (ADR 0009). SafetyService enforces these ABSOLUTELY:
+# no utility score — and, later, no confident learned prediction — can buy an
+# action past a matching rule (BRIEF §12). A blocked action is simply removed
+# from the being's choices, and the being takes a safe alternative instead.
+#
+# Per the design boundary (docs/design_boundary.md), every rule states an
+# ABSTRACT reason (what would go wrong, in feeling terms) — never any depiction
+# of harm. Every blocked path leaves the being a safe action to take instead.
+#
+# A rule blocks `action` whenever the target object has `blocked_property`.
+# `blocked_property` must be a real object property (object_properties.yaml);
+# a typo is rejected at load, like the object catalog.
+
+rules:
+  - action: touch
+    blocked_property: hot
+    reason: "a hot surface would cause pain"
+  - action: grab
+    blocked_property: hot
+    reason: "grasping a hot surface would cause pain"

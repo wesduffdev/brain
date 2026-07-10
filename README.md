@@ -101,7 +101,8 @@ strictly top-to-bottom.
 2. **Objects + a room; the being perceives what is near.** ✅
 3. Environmental conditions (light/dark, sound, temperature) that move
    contextual needs like safety — this is what makes `scared`/fear fire.
-4. Actions + a simple rule/utility decision (generic object interactions).
+4. **Actions + a simple rule/utility decision (generic object interactions);
+   safety guardrails hard-block unsafe actions.** ✅
 5. **FastAPI engine: REST `/state` + WebSocket tick stream; `docker-compose.yml`
    (engine + postgres).** ✅
 6. Postgres persistence: interaction events + training examples.

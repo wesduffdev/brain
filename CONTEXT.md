@@ -59,6 +59,32 @@ the whole model.
 _Avoid_: engine, game. (`World`, meaning global laws, is a future concept, not
 this term.)
 
+**Outcome**:
+What happens when the being acts on an object — e.g. it rolls, bounces, falls,
+causes pain, makes noise, is pleasant, or is scary. Several outcomes can occur
+from one action at once (multi-label); an outcome is a fact about the world, not
+the being's feeling about it.
+_Avoid_: result, effect, consequence, reaction.
+
+**Outcome predictor**:
+The being's first learned model: given an object's properties, the action taken,
+and the situational context, it anticipates the likely outcomes. It only
+predicts — it never chooses the action.
+_Avoid_: the model, the AI, the brain, classifier.
+
+**Training example**:
+One learnable row pairing an encoded interaction (properties + action + context)
+with its observed outcomes; what the outcome predictor learns from. Real ones are
+derived from the being's interactions; until those are recorded, a synthetic seed
+set is derived from the config vocabulary.
+_Avoid_: sample, data point, record, row.
+
+**Shadow mode**:
+Running the outcome predictor alongside the being's rule layer so its predictions
+are recorded and compared, but do **not** control what the being does. The model
+observes; it never drives.
+_Avoid_: dry run, test mode, passive mode.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

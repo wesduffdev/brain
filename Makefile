@@ -9,7 +9,7 @@ ENGINE := engine
 VENV   := $(ENGINE)/.venv
 PY     := $(VENV)/bin/python
 
-.PHONY: help setup test demo run token up down clean
+.PHONY: help setup test demo run token train up down clean
 
 help: ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -33,6 +33,10 @@ run: ## serve the engine API on http://localhost:8000 (GET /state, WS /ws)
 
 token: ## mint a service JWT for the API (needs JWT_SECRET set; see .env.example)
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.auth_token
+
+train: ## train the outcome predictor -> models/outcome_predictor.pt (installs torch on first run; minutes)
+	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-train.txt
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.ml.train_outcome_model
 
 up: ## build + start the full stack (engine + postgres) via docker compose
 	docker compose up --build

@@ -10,3 +10,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0003](0003-transport-and-clock-seam.md) | FastAPI/WebSocket transport and an injectable clock seam | Accepted |
 | [0004](0004-render-state-contract.md) | Render-state contract: `being_state_update` frame and `player_command` | Accepted |
 | [0005](0005-api-authentication.md) | Always-on API authentication (HS256 JWT) | Accepted |
+| [0008](0008-outcome-predictor-and-feature-encoding.md) | Outcome predictor + feature/label encoding contract | Accepted |

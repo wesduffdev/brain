@@ -9,11 +9,15 @@ changes shape if the config format ever does.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
 from app.policies import EmotionRule, NeedTickPolicy
+
+# Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
+# (e.g. the from_dict tests). The authored config overrides these.
+_DEFAULT_TRAINING = {"epochs": 300, "hidden_size": 16, "learning_rate": 0.05, "seed": 0}
 
 
 class ConfigService:
@@ -23,11 +27,13 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        outcome: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
         self._rooms = rooms or {}
         self._objects = objects or {}
+        self._outcome = outcome or {}
 
     # --- construction -----------------------------------------------------
 
@@ -38,10 +44,11 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        outcome: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
-        return cls(tick_rates, emotions, rooms, objects)
+        return cls(tick_rates, emotions, rooms, objects, outcome)
 
     @classmethod
     def from_files(cls, config_root: str) -> "ConfigService":
@@ -54,7 +61,8 @@ class ConfigService:
         emotions = yaml.safe_load((root / "emotions.yaml").read_text())
         rooms = yaml.safe_load((root / "rooms.yaml").read_text())
         objects = yaml.safe_load((root / "object_properties.yaml").read_text())
-        return cls(tick_rates, emotions, rooms, objects)
+        outcome = yaml.safe_load((root / "outcome_labels.yaml").read_text())
+        return cls(tick_rates, emotions, rooms, objects, outcome)
 
     # --- ticks / needs ----------------------------------------------------
 
@@ -139,3 +147,35 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    # --- ML: the outcome predictor's feature/label vocabulary ------------
+    #
+    # The object property/affordance vocabularies double as the ML feature
+    # vocabulary (an object's properties and the action taken on it); the
+    # outcome labels and situational context features live in
+    # outcome_labels.yaml. These expose them, in authored order, as the fixed
+    # encode contract the FeatureEncoder is built from (ADR 0008).
+
+    def object_property_vocab(self) -> Tuple[str, ...]:
+        return tuple(self._objects.get("properties", []) or [])
+
+    def object_action_vocab(self) -> Tuple[str, ...]:
+        return tuple(self._objects.get("affordances", []) or [])
+
+    def outcome_labels(self) -> Tuple[str, ...]:
+        return tuple(self._outcome.get("labels", []) or [])
+
+    def outcome_context_features(self) -> Tuple[str, ...]:
+        return tuple(self._outcome.get("context_features", []) or [])
+
+    def outcome_training_params(self) -> Dict[str, float]:
+        """Trainer hyperparameters, config-driven with safe defaults so
+        retuning training never touches Python."""
+        params = dict(_DEFAULT_TRAINING)
+        params.update(self._outcome.get("training", {}) or {})
+        return {
+            "epochs": int(params["epochs"]),
+            "hidden_size": int(params["hidden_size"]),
+            "learning_rate": float(params["learning_rate"]),
+            "seed": int(params["seed"]),
+        }

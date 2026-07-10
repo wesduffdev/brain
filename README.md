@@ -17,8 +17,10 @@ A being whose **needs drift over ticks (config-driven)** and whose **dominant
 emotion is derived from those needs**; it **perceives the objects in its room**
 (each with a confidence); and it is exposed over an **authenticated HTTP +
 WebSocket API** (always-on JWT), runnable as a **Docker Compose stack** (engine +
-postgres). No database code, ML, actions, or renderer yet — those are later
-slices.
+postgres). A first **outcome-predictor** model can be **trained on a synthetic
+seed set** (`ml-trainer` sidecar / `make train`) into `models/outcome_predictor.pt`.
+No database code, actions, renderer, or shadow-mode inference yet — those are
+later slices.
 
 ```
 config/
@@ -26,6 +28,7 @@ config/
   emotions.yaml           # how needs derive one dominant emotion (fear included)
   rooms.yaml              # the room and the objects it contains
   object_properties.yaml  # object property/affordance vocabulary + objects
+  outcome_labels.yaml     # outcome-predictor vocab: labels + context + training
 engine/
   app/
     config_service.py     # YAML/dict -> typed policies (the only config-aware code)
@@ -33,10 +36,12 @@ engine/
     main.py               # FastAPI: GET /state + WebSocket /ws tick stream
     domain/               # BeingState, Room, ObjectEntity, emotion vocabulary
     services/             # Tick, Need, Emotion, Perception services
+    ml/                   # outcome predictor: encode_features, model, trainer
     ports/                # ClockPort (injectable time)
     demo.py               # run it and watch the being drift
   tests/                  # behavior-driven tests
-docker-compose.yml        # engine + postgres
+  requirements-train.txt  # training-only deps (torch/numpy), kept off the lean image
+docker-compose.yml        # engine + postgres + ml-trainer (profile: training)
 engine/Dockerfile
 docs/
   BRIEF.md                # full target architecture
@@ -52,6 +57,8 @@ make setup          # create engine/.venv and install deps (once)
 make test           # run the behavior suite
 make demo           # watch the being drift (make demo TICKS=600)
 make run            # serve the API on http://localhost:8000  (GET /state, WS /ws)
+make train          # train the outcome predictor -> models/outcome_predictor.pt
+                    #   (installs torch on first run — heavy, minutes)
 
 # or the full stack in containers:
 make up             # docker compose up --build  (engine :8000, postgres :5432)
@@ -99,6 +106,11 @@ strictly top-to-bottom.
    (engine + postgres).** ✅
 6. Postgres persistence: interaction events + training examples.
 7. PyTorch outcome predictor + `ml-trainer` sidecar, running in shadow mode.
+   *(Trainer scaffold landed: a multi-label net trains on a synthetic seed set
+   via `ml-trainer` / `make train`; the feature/label encoding contract is pinned
+   in [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
+   Shadow-mode inference + prediction/actual comparison, and training on real
+   stored examples, come next.)*
 8. PixiJS renderer showing the being's current emotion/action. *(the wire
    contract is pinned in [ADR 0004](docs/adr/0004-render-state-contract.md).)*
 
@@ -132,5 +144,5 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Closing a wave | Clean, verified finish | After the PR merges: pull, verify, self-heal if needed, delete branches/worktrees, cards → done, report |
 | Trello board guardrails | Safe, auditable task flow | Official MCP only; pull from `Ready for Agent`; claim before work; gated one-step moves; a human does Done |
 | Design boundary | Serious but safe simulation | Harm stays abstract (state deltas + recovery paths); adults-only; never real-world-harm instruction |
-| Dev env (`make`) | Reproducible setup and tests | `make setup/test/demo/run/up` — one gitignored venv, identical for everyone |
+| Dev env (`make`) | Reproducible setup and tests | `make setup/test/demo/run/train/up` — one gitignored venv, identical for everyone; `train` adds the training-only deps |
 | This governance index | Keep the docs honest | New rules/hooks/conventions update this table in the same change |

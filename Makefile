@@ -9,7 +9,7 @@ ENGINE := engine
 VENV   := $(ENGINE)/.venv
 PY     := $(VENV)/bin/python
 
-.PHONY: help setup test demo run up down clean
+.PHONY: help setup test demo run token up down clean
 
 help: ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -30,6 +30,9 @@ demo: ## watch the being drift (override count: make demo TICKS=600)
 
 run: ## serve the engine API on http://localhost:8000 (GET /state, WS /ws)
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/uvicorn app.main:app --reload --port 8000
+
+token: ## mint a service JWT for the API (needs JWT_SECRET set; see .env.example)
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.auth_token
 
 up: ## build + start the full stack (engine + postgres) via docker compose
 	docker compose up --build

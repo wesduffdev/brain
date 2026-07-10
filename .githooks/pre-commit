@@ -1,7 +1,12 @@
 #!/usr/bin/env sh
-# Guardrail: never commit directly to main. All work goes through a worktree
-# branch and reaches main only via a reviewed PR. See CLAUDE.md.
-# Installed by `make setup` (git config core.hooksPath .githooks).
+# Guardrails for every commit. Installed by `make setup`
+# (git config core.hooksPath .githooks). See CLAUDE.md.
+#
+#   1. Never commit directly to main (all work → worktree branch → PR).
+#   2. Never commit secrets (V0-SEC, ADR 0005) — a conservative scan that blocks
+#      the few things that are unambiguously secret, not generic keywords.
+
+# --- 1. no commits on main -------------------------------------------------
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
   echo "" >&2
@@ -12,4 +17,33 @@ if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
   echo "" >&2
   exit 1
 fi
+
+# --- 2. conservative secret scan -------------------------------------------
+# (a) a staged path that IS `.env` (root or nested) — `.env.example` is allowed;
+# (b) staged `*.pem` / `*.key` key material.
+bad_paths="$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E '(^|/)\.env$|\.pem$|\.key$' || true)"
+
+# (c) added lines that contain a PEM private-key header or an AWS access-key id.
+# Only added ('+') lines are scanned, and only these two high-signal patterns —
+# generic `SECRET=`/entropy is deliberately NOT flagged (too noisy).
+bad_content="$(git diff --cached --no-color --diff-filter=ACMR -U0 \
+  | grep -E '^\+' | grep -Ev '^\+\+\+' \
+  | grep -E '\-\-\-\-\-BEGIN [A-Z0-9 ]*PRIVATE KEY\-\-\-\-\-|AKIA[0-9A-Z]{16}' || true)"
+
+if [ -n "$bad_paths" ] || [ -n "$bad_content" ]; then
+  echo "" >&2
+  echo "  X  Commit blocked: possible secret in the staged change." >&2
+  if [ -n "$bad_paths" ]; then
+    echo "     Secret-bearing files must not be committed (use .env.example):" >&2
+    echo "$bad_paths" | sed 's/^/       - /' >&2
+  fi
+  if [ -n "$bad_content" ]; then
+    echo "     Private-key / AWS-key material found in an added line." >&2
+  fi
+  echo "     Keep secrets in an untracked .env (see .env.example). ADR 0005." >&2
+  echo "" >&2
+  exit 1
+fi
+
 exit 0

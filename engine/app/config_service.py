@@ -13,7 +13,7 @@ from typing import Dict, List, Mapping, Optional
 
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
-from app.policies import EmotionRule, NeedTickPolicy
+from app.policies import EmotionRule, EnvironmentPolicy, NeedTickPolicy
 
 
 class ConfigService:
@@ -23,11 +23,13 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        environment: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
         self._rooms = rooms or {}
         self._objects = objects or {}
+        self._environment = environment or {}
 
     # --- construction -----------------------------------------------------
 
@@ -38,10 +40,11 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        environment: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
-        return cls(tick_rates, emotions, rooms, objects)
+        return cls(tick_rates, emotions, rooms, objects, environment)
 
     @classmethod
     def from_files(cls, config_root: str) -> "ConfigService":
@@ -54,7 +57,8 @@ class ConfigService:
         emotions = yaml.safe_load((root / "emotions.yaml").read_text())
         rooms = yaml.safe_load((root / "rooms.yaml").read_text())
         objects = yaml.safe_load((root / "object_properties.yaml").read_text())
-        return cls(tick_rates, emotions, rooms, objects)
+        environment = yaml.safe_load((root / "environment.yaml").read_text())
+        return cls(tick_rates, emotions, rooms, objects, environment)
 
     # --- ticks / needs ----------------------------------------------------
 
@@ -98,13 +102,35 @@ class ConfigService:
 
     def room(self) -> Room:
         """The one room the being lives in, as world-truth. An absent config
-        yields an empty room so the pure need/emotion tests need not describe a
-        world."""
+        yields an empty room (no objects, no conditions) so the pure
+        need/emotion tests need not describe a world."""
         spec = self._rooms.get("room", {}) or {}
         return Room(
             room_id=str(spec.get("id", "room_001")),
             contains=tuple(spec.get("contains", []) or []),
             base_confidence=float(spec.get("base_confidence", 1.0)),
+            light=spec.get("light"),
+            sound=spec.get("sound"),
+            temperature=spec.get("temperature"),
+        )
+
+    # --- environment ------------------------------------------------------
+
+    def environment_policy(self) -> EnvironmentPolicy:
+        """How the room's conditions push contextual needs. An absent config
+        yields an empty policy that moves nothing, so the pure tests (and the
+        no-environment slices before this one) behave unchanged."""
+        impacts = {
+            dimension: {
+                category: {need: int(delta) for need, delta in (deltas or {}).items()}
+                for category, deltas in (categories or {}).items()
+            }
+            for dimension, categories in self._environment.items()
+            if dimension != "every_ticks"
+        }
+        return EnvironmentPolicy(
+            every_ticks=int(self._environment.get("every_ticks", 0)),
+            impacts=impacts,
         )
 
     def object_catalog(self) -> Dict[str, ObjectEntity]:

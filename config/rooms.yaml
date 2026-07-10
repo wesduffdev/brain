@@ -4,14 +4,21 @@
 # A later slice adds more rooms; for now there is exactly one.
 #
 # base_confidence: how clearly things in this room can be perceived (0..1)
-#   before any environmental condition (a dark or loud room — the environment
-#   slice) erodes recognition. 1.0 = fully certain. Tuning perceptual clarity is
-#   a config edit, never a code change.
+#   before any environmental condition (a dark or loud room) erodes recognition.
+#   1.0 = fully certain. Tuning perceptual clarity is a config edit, never code.
+# light / sound / temperature: the room's current environmental conditions — one
+#   category per dimension, meaningful against config/environment.yaml, which
+#   says how each pushes the being's contextual needs (safety, warmth). The
+#   shipped room is comfortable, so a fresh being stays safe; darken or add loud
+#   sound (via config or Simulation.change_environment) to make fear fire.
 # contains: the ids of the objects present, defined in object_properties.yaml.
 
 room:
   id: room_001
   base_confidence: 1.0
+  light: comfortable
+  sound: normal
+  temperature: comfortable
   contains:
     - obj_red_ball
     - obj_soft_blanket

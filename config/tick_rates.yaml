@@ -18,7 +18,7 @@ needs:
   hunger:    { direction: increase,   amount: 1, every_ticks: 30, min: 0, max: 100, start: 30 }
   sleep:     { direction: increase,   amount: 1, every_ticks: 45, min: 0, max: 100, start: 35 }
   comfort:   { direction: decrease,   amount: 1, every_ticks: 20, min: 0, max: 100, start: 70 }
-  warmth:    { direction: increase,   amount: 1, every_ticks: 30, min: 0, max: 100, start: 20 }
+  warmth:    { direction: contextual, amount: 1, every_ticks: 30, min: 0, max: 100, start: 20 }
   curiosity: { direction: increase,   amount: 1, every_ticks: 15, min: 0, max: 100, start: 55 }
   safety:    { direction: contextual, amount: 1, every_ticks: 10, min: 0, max: 100, start: 80 }
 

@@ -7,9 +7,10 @@
 # Interaction-driven emotions (happy, excited, comforted) arrive with the
 # object/interaction slice — they need an event, not just a need level.
 #
-# `scared` is fear. Its trigger below (low safety) does not fire on its own
-# yet, because nothing lowers safety until the environment slice lands
-# (a dark or loud room). The rule is wired now so fear is ready.
+# `scared` is fear. Its trigger below (low safety) now fires: the environment
+# slice (ADR 0006) lets a dark or loud room push the contextual safety need down
+# over ticks until it crosses this threshold. Retuning the threshold is a config
+# change here — no code moves.
 
 rules:
   - { emotion: scared,     need: safety,    op: "<=", value: 30 }

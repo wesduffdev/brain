@@ -1,0 +1,45 @@
+# Docker Compose skeleton for the situated-being simulation (ticket V0-5).
+# BRIEF §6 is the reference shape. This slice lands two services: the Python
+# `engine` and `postgres`. The `renderer` (V0-11) and `ml-trainer` (V0-8,
+# under profiles: [training]) services are added by their own slices.
+
+services:
+  engine:
+    build: ./engine
+    # V0-5 runs the demo tick-loop so the container does real work today.
+    # V0-6 switches this to: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: python -m app.demo 300
+    # V0-6 exposes the HTTP/WebSocket server here; nothing listens in V0-5, so
+    # the port mapping stays commented to keep `docker compose up` clean today:
+    # ports:
+    #   - "8000:8000"
+    volumes:
+      - ./engine:/app
+      - ./config:/config
+      - ./models:/models
+    environment:
+      CONFIG_ROOT: /config
+      DATABASE_URL: postgresql+psycopg://sim:sim@postgres:5432/being_sim
+      MODEL_PATH: /models/outcome_predictor.pt
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sim
+      POSTGRES_PASSWORD: sim
+      POSTGRES_DB: being_sim
+    ports:
+      - "5432:5432"
+    volumes:
+      - being_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sim -d being_sim"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  being_postgres_data:

@@ -9,11 +9,21 @@ changes shape if the config format ever does.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
-from app.policies import EmotionRule, NeedTickPolicy
+from app.policies import (
+    CommandSpec,
+    EmotionRule,
+    EnvironmentPolicy,
+    NeedTickPolicy,
+    RenderHintsPolicy,
+)
+
+# Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
+# (e.g. the from_dict tests). The authored config overrides these.
+_DEFAULT_TRAINING = {"epochs": 300, "hidden_size": 16, "learning_rate": 0.05, "seed": 0}
 
 
 class ConfigService:
@@ -23,11 +33,19 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        environment: Optional[Mapping] = None,
+        render_hints: Optional[Mapping] = None,
+        commands: Optional[Mapping] = None,
+        outcome: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
         self._rooms = rooms or {}
         self._objects = objects or {}
+        self._environment = environment or {}
+        self._render_hints = render_hints or {}
+        self._commands = commands or {}
+        self._outcome = outcome or {}
 
     # --- construction -----------------------------------------------------
 
@@ -38,10 +56,23 @@ class ConfigService:
         emotions: Mapping,
         rooms: Optional[Mapping] = None,
         objects: Optional[Mapping] = None,
+        environment: Optional[Mapping] = None,
+        render_hints: Optional[Mapping] = None,
+        commands: Optional[Mapping] = None,
+        outcome: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
-        return cls(tick_rates, emotions, rooms, objects)
+        return cls(
+            tick_rates,
+            emotions,
+            rooms,
+            objects,
+            environment,
+            render_hints,
+            commands,
+            outcome,
+        )
 
     @classmethod
     def from_files(cls, config_root: str) -> "ConfigService":
@@ -54,7 +85,20 @@ class ConfigService:
         emotions = yaml.safe_load((root / "emotions.yaml").read_text())
         rooms = yaml.safe_load((root / "rooms.yaml").read_text())
         objects = yaml.safe_load((root / "object_properties.yaml").read_text())
-        return cls(tick_rates, emotions, rooms, objects)
+        environment = yaml.safe_load((root / "environment.yaml").read_text())
+        render_hints = yaml.safe_load((root / "render_hints.yaml").read_text())
+        commands = yaml.safe_load((root / "commands.yaml").read_text())
+        outcome = yaml.safe_load((root / "outcome_labels.yaml").read_text())
+        return cls(
+            tick_rates,
+            emotions,
+            rooms,
+            objects,
+            environment,
+            render_hints,
+            commands,
+            outcome,
+        )
 
     # --- ticks / needs ----------------------------------------------------
 
@@ -98,13 +142,35 @@ class ConfigService:
 
     def room(self) -> Room:
         """The one room the being lives in, as world-truth. An absent config
-        yields an empty room so the pure need/emotion tests need not describe a
-        world."""
+        yields an empty room (no objects, no conditions) so the pure
+        need/emotion tests need not describe a world."""
         spec = self._rooms.get("room", {}) or {}
         return Room(
             room_id=str(spec.get("id", "room_001")),
             contains=tuple(spec.get("contains", []) or []),
             base_confidence=float(spec.get("base_confidence", 1.0)),
+            light=spec.get("light"),
+            sound=spec.get("sound"),
+            temperature=spec.get("temperature"),
+        )
+
+    # --- environment ------------------------------------------------------
+
+    def environment_policy(self) -> EnvironmentPolicy:
+        """How the room's conditions push contextual needs. An absent config
+        yields an empty policy that moves nothing, so the pure tests (and the
+        no-environment slices before this one) behave unchanged."""
+        impacts = {
+            dimension: {
+                category: {need: int(delta) for need, delta in (deltas or {}).items()}
+                for category, deltas in (categories or {}).items()
+            }
+            for dimension, categories in self._environment.items()
+            if dimension != "every_ticks"
+        }
+        return EnvironmentPolicy(
+            every_ticks=int(self._environment.get("every_ticks", 0)),
+            impacts=impacts,
         )
 
     def object_catalog(self) -> Dict[str, ObjectEntity]:
@@ -139,3 +205,61 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    # --- render / commands ------------------------------------------------
+
+    def render_hints(self) -> RenderHintsPolicy:
+        """The presentation hints RenderStateService maps emotion onto (ADR
+        0004). An absent config yields a neutral default so the pure model tests
+        need not describe presentation."""
+        return RenderHintsPolicy(
+            intensity_default=float(self._render_hints.get("intensity_default", 0.5)),
+            default=dict(self._render_hints.get("default", {}) or {}),
+            by_emotion={
+                name: dict(hint or {})
+                for name, hint in (self._render_hints.get("emotions", {}) or {}).items()
+            },
+        )
+
+    def command_specs(self) -> Dict[str, CommandSpec]:
+        """The v0 player-command vocabulary CommandService validates against
+        (ADR 0004), keyed by command name."""
+        specs: Dict[str, CommandSpec] = {}
+        for name, spec in (self._commands.get("commands", {}) or {}).items():
+            specs[str(name)] = CommandSpec(
+                name=str(name),
+                requires_target=bool((spec or {}).get("requires_target", False)),
+            )
+        return specs
+
+    # --- ML: the outcome predictor's feature/label vocabulary ------------
+    #
+    # The object property/affordance vocabularies double as the ML feature
+    # vocabulary (an object's properties and the action taken on it); the
+    # outcome labels and situational context features live in
+    # outcome_labels.yaml. These expose them, in authored order, as the fixed
+    # encode contract the FeatureEncoder is built from (ADR 0008).
+
+    def object_property_vocab(self) -> Tuple[str, ...]:
+        return tuple(self._objects.get("properties", []) or [])
+
+    def object_action_vocab(self) -> Tuple[str, ...]:
+        return tuple(self._objects.get("affordances", []) or [])
+
+    def outcome_labels(self) -> Tuple[str, ...]:
+        return tuple(self._outcome.get("labels", []) or [])
+
+    def outcome_context_features(self) -> Tuple[str, ...]:
+        return tuple(self._outcome.get("context_features", []) or [])
+
+    def outcome_training_params(self) -> Dict[str, float]:
+        """Trainer hyperparameters, config-driven with safe defaults so
+        retuning training never touches Python."""
+        params = dict(_DEFAULT_TRAINING)
+        params.update(self._outcome.get("training", {}) or {})
+        return {
+            "epochs": int(params["epochs"]),
+            "hidden_size": int(params["hidden_size"]),
+            "learning_rate": float(params["learning_rate"]),
+            "seed": int(params["seed"]),
+        }

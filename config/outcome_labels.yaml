@@ -1,0 +1,38 @@
+# The outcome predictor's vocabulary and training tuning (ADR 0008).
+#
+# The first neural network (BRIEF §11) is a MULTI-LABEL model: one action on one
+# object can produce several outcomes at once (drop a rubber ball -> falls +
+# bounces + rolls). This file is the single source of truth for:
+#
+#   - `labels`            : the outcomes the model predicts (its output slots)
+#   - `context_features`  : the situational feature block appended to an object's
+#                           properties + action when encoding an interaction
+#   - `training`          : trainer hyperparameters (config-driven tuning — the
+#                           trainer reads these, never hard-codes them)
+#
+# The full feature vector is: object `properties` ++ `affordances` (both from
+# object_properties.yaml) ++ the `context_features` below. Its exact order is the
+# encode contract V0-9 must reproduce to run the model in shadow mode (ADR 0008).
+
+labels:
+  - rolls
+  - bounces
+  - falls
+  - causes_pain
+  - makes_noise
+  - pleasant
+  - scary
+
+# Situational context an outcome can depend on. Kept minimal for the v0 scaffold:
+# the surface an object meets when acted on (a hard floor makes a drop bounce and
+# a shove loud; a soft one muffles both). One is set per interaction.
+context_features:
+  - surface_hard
+  - surface_soft
+
+# Trainer tuning. Retuning training is a config change, not a code change.
+training:
+  epochs: 300
+  hidden_size: 16
+  learning_rate: 0.05
+  seed: 0

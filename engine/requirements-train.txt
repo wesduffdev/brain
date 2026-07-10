@@ -1,0 +1,10 @@
+# Training-only dependencies for the ml-trainer (V0-8).
+#
+# Kept OUT of engine/requirements.txt on purpose: torch is large and the lean
+# runtime image (engine service) never trains — it only, later, runs inference.
+# The `ml-trainer` docker service and `make train` install this set on top of the
+# runtime deps. Installing torch is heavy and slow (expect minutes on first run).
+-r requirements.txt
+
+torch==2.2.*        # the outcome predictor's feed-forward net (BRIEF §11 ML stack)
+numpy>=1.24,<2      # torch 2.2 is built against NumPy 1.x — pin below 2.0

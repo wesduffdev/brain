@@ -1,5 +1,7 @@
-"""Watch the minimal being drift. This is the observable end of the slice —
-run it and see needs climb and the dominant emotion turn over.
+"""Watch the minimal being drift — and take fright. This is the observable end
+of the slice: the being starts calm in a comfortable room, then the room goes
+dark, its safety need falls tick by tick, and its dominant emotion turns to
+`scared` (fear).
 
     cd engine
     PYTHONPATH=. python -m app.demo          # 300 ticks from ../config
@@ -39,8 +41,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         )
         print(f"perceives {len(perceived)} object(s) in the room:  {seen}")
 
+    # Partway through, the room goes dark — a world event, not an action of the
+    # being. From then on its contextual safety need falls until fear fires.
+    darken_at = max(30, ticks // 5)
+
     previous_emotion = sim.state()["emotion"]
     for _ in range(ticks):
+        if sim.current_tick == darken_at:
+            sim.change_environment(light="dark")
+            print(f"tick={sim.current_tick:>4}  *** the room goes dark ***")
+
         state = sim.tick()
         emotion_changed = state["emotion"] != previous_emotion
         # Sample the drift periodically, and always mark an emotion change.

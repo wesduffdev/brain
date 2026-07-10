@@ -1,0 +1,128 @@
+"""Behavior of the persistence seam (V0-7).
+
+The engine gains a repository port with two implementations: an in-memory fake
+(the seam tests drive) and a real Postgres-backed adapter. These tests pin the
+port's *behavior* — save + fetch round-trips, unknown ids read as absent,
+re-saving replaces — through the public port surface, run once against the
+in-memory fake and once against a live Postgres when one is reachable.
+
+Scope note: no InteractionEvents are produced yet (that is V0-4), so nothing
+here writes events. This exercises the seam that will store them, using the one
+aggregate that exists today — the being.
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from app.db.migrate import create_all, drop_all
+from app.db.models import Base
+from app.db.session import create_db_engine, session_factory
+from app.domain.being_state import BeingState
+from app.repositories import InMemoryBeingRepository, PostgresBeingRepository
+
+
+def _reachable_postgres_or_skip():
+    """Connect to the DATABASE_URL Postgres, or skip with a clear reason.
+
+    Never fakes a DB: if DATABASE_URL is unset or the server is unreachable
+    (the case in this sandbox, where host->container forwarding is broken), the
+    live variant is skipped rather than substituted."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        pytest.skip("DATABASE_URL not set — skipping live Postgres round-trip")
+    try:
+        engine = create_db_engine(url, connect_args={"connect_timeout": 2})
+        with engine.connect():
+            pass
+    except Exception as exc:  # noqa: BLE001 — any connect failure means "skip, don't fake"
+        pytest.skip(f"Postgres not reachable at DATABASE_URL ({type(exc).__name__}) — skipping")
+    return engine
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("memory"),
+        pytest.param("postgres", marks=pytest.mark.integration),
+    ]
+)
+def being_repo(request):
+    """A BeingRepository under test. Runs the same contract against the
+    in-memory fake and, when a DB is reachable, a live Postgres adapter."""
+    if request.param == "memory":
+        yield InMemoryBeingRepository()
+        return
+
+    engine = _reachable_postgres_or_skip()
+    drop_all(engine)  # fresh schema so each test starts empty
+    create_all(engine)
+    session = session_factory(engine)()
+    try:
+        yield PostgresBeingRepository(session)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_a_saved_being_round_trips_through_the_repository(being_repo):
+    being = BeingState(being_id="being_001", needs={"hunger": 35, "safety": 70}, emotion="curious")
+
+    being_repo.save(being)
+
+    assert being_repo.get("being_001") == being
+
+
+def test_an_unknown_being_reads_as_absent(being_repo):
+    assert being_repo.get("being_nobody") is None
+
+
+def test_saving_a_being_again_replaces_the_stored_one(being_repo):
+    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 10}, emotion="calm"))
+    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 90}, emotion="hungry"))
+
+    stored = being_repo.get("being_001")
+    assert stored.emotion == "hungry"
+    assert stored.needs == {"hunger": 90}
+
+
+def test_a_fetched_being_does_not_alias_the_store(being_repo):
+    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 20}, emotion="calm"))
+
+    fetched = being_repo.get("being_001")
+    fetched.needs["hunger"] = 999  # mutating the copy must not leak back into the store
+
+    assert being_repo.get("being_001").needs["hunger"] == 20
+
+
+def test_the_migration_defines_the_six_v0_tables():
+    # The schema seam declares exactly the v0 tables from BRIEF §15.
+    assert set(Base.metadata.tables) == {
+        "beings",
+        "objects",
+        "interaction_events",
+        "training_examples",
+        "prediction_records",
+        "model_runs",
+    }
+
+
+def test_the_migration_creates_the_v0_tables_in_a_database():
+    # Exercise the migration path end-to-end against a real (in-memory SQLite)
+    # engine — this proves create_all emits the tables. The Postgres-specific
+    # round-trip is the skipped-when-unreachable integration test above; this is
+    # a portable check of the DDL, not a stand-in for it.
+    from sqlalchemy import create_engine, inspect
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    create_all(engine)
+
+    tables = set(inspect(engine).get_table_names())
+    assert {
+        "beings",
+        "objects",
+        "interaction_events",
+        "training_examples",
+        "prediction_records",
+        "model_runs",
+    } <= tables

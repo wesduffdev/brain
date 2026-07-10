@@ -1,7 +1,7 @@
 # Docker Compose skeleton for the situated-being simulation (ticket V0-5).
-# BRIEF §6 is the reference shape. This slice lands two services: the Python
-# `engine` and `postgres`. The `renderer` (V0-11) and `ml-trainer` (V0-8,
-# under profiles: [training]) services are added by their own slices.
+# BRIEF §6 is the reference shape. Services: the Python `engine`, `postgres`, and
+# the `ml-trainer` job (V0-8) under `profiles: [training]`. The `renderer`
+# (V0-11) is added by its own slice.
 
 services:
   engine:
@@ -31,6 +31,30 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  ml-trainer:
+    # The PyTorch training sidecar/job (BRIEF §5, §11). Reuses the lean engine
+    # image, then installs the training-only deps (torch/numpy) on top — kept out
+    # of the runtime image so `engine` stays small. Run on demand:
+    #   docker compose --profile training run ml-trainer   (or: make train)
+    # V0-8 trains on a synthetic seed set derived from the config vocab, so it
+    # needs no database: there is deliberately no depends_on postgres here. Once
+    # persistence + event wiring land (V0-6/V0-7) it will prefer stored
+    # training_examples.
+    build: ./engine
+    command:
+      - sh
+      - -c
+      - "pip install --no-cache-dir -r requirements-train.txt && python -m app.ml.train_outcome_model"
+    volumes:
+      - ./engine:/app
+      - ./config:/config
+      - ./models:/models
+    environment:
+      CONFIG_ROOT: /config
+      MODEL_OUTPUT_PATH: /models/outcome_predictor.pt
+    profiles:
+      - training
 
   postgres:
     image: postgres:16

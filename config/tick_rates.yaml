@@ -22,5 +22,17 @@ needs:
   curiosity: { direction: increase,   amount: 1, every_ticks: 15, min: 0, max: 100, start: 55 }
   safety:    { direction: contextual, amount: 1, every_ticks: 10, min: 0, max: 100, start: 80 }
 
-# Note: actions and their tick durations/cooldowns are intentionally NOT here
-# yet. Actions arrive in a later slice, once the being's state exists.
+# Action TIMING lives here — tick_rates.yaml is the single tuning surface for
+# time (BRIEF §10), and the decision system (ADR 0009) reads these. What each
+# action IS and how much the being wants it (utility) lives in actions.yaml.
+#   duration_ticks : how long the action occupies the being once taken
+#   cooldown_ticks : the rest after it before that action may be taken again
+# An action is available again at (tick_taken + duration_ticks + cooldown_ticks).
+# Keep exploratory actions cheap to repeat; make touching/holding rest longer.
+actions:
+  observe:  { duration_ticks: 0, cooldown_ticks: 2 }
+  approach: { duration_ticks: 0, cooldown_ticks: 3 }
+  withdraw: { duration_ticks: 0, cooldown_ticks: 1 }
+  touch:    { duration_ticks: 0, cooldown_ticks: 5 }
+  grab:     { duration_ticks: 0, cooldown_ticks: 5 }
+  push:     { duration_ticks: 0, cooldown_ticks: 4 }

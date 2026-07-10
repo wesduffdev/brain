@@ -7,7 +7,7 @@ one without any risk of mutating shared config.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Optional, Tuple
 
 # Valid values for NeedTickPolicy.direction.
 INCREASE = "increase"
@@ -100,6 +100,76 @@ class CommandSpec:
 
     name: str
     requires_target: bool = False
+
+
+@dataclass(frozen=True)
+class ActionPolicy:
+    """One action the being can take, fully resolved from config (ADR 0009).
+
+    `affordance` is the object affordance the action needs (e.g. `touch`); an
+    action with `affordance=None` is **free** — self-/world-directed movement
+    (approach/withdraw) that any perceived object can be the target of. Utility
+    is `base` + `sum(need_weights[n] * needs[n])` + `emotion_bonuses[emotion]`;
+    weights may be negative. `expected_outcomes` are always anticipated, and each
+    perceived property in `property_outcomes` adds its outcomes on top — the rule
+    layer that fills an InteractionEvent's expected/observed outcomes. `reason` is
+    the human-readable justification surfaced to the renderer. Timing:
+    `duration_ticks` + `cooldown_ticks` set how long before the action may be
+    taken again (`tick_rates.yaml`, BRIEF §10).
+    """
+
+    name: str
+    affordance: Optional[str]
+    base: float
+    need_weights: Mapping[str, float]
+    emotion_bonuses: Mapping[str, float]
+    expected_outcomes: Tuple[str, ...]
+    property_outcomes: Mapping[str, Tuple[str, ...]]
+    reason: str
+    duration_ticks: int = 0
+    cooldown_ticks: int = 0
+
+    @property
+    def is_free(self) -> bool:
+        return self.affordance is None
+
+    def score(self, needs: Mapping[str, int], emotion: str) -> float:
+        """The action's utility given the being's current needs and emotion."""
+        total = float(self.base)
+        for need_name, weight in self.need_weights.items():
+            total += float(weight) * float(needs.get(need_name, 0))
+        total += float(self.emotion_bonuses.get(emotion, 0.0))
+        return total
+
+    def outcomes_for(self, properties) -> Tuple[str, ...]:
+        """The outcomes this action produces on an object with `properties`:
+        the always-expected ones, plus any keyed to a property that is present.
+        Order-stable and de-duplicated, so the same object always reads the
+        same."""
+        present = set(properties)
+        ordered: list = list(self.expected_outcomes)
+        for prop, outcomes in self.property_outcomes.items():
+            if prop in present:
+                ordered.extend(outcomes)
+        seen: set = set()
+        unique: list = []
+        for outcome in ordered:
+            if outcome not in seen:
+                seen.add(outcome)
+                unique.append(outcome)
+        return tuple(unique)
+
+
+@dataclass(frozen=True)
+class SafetyRule:
+    """One hard guardrail (ADR 0009): taking `action` on an object that has
+    `blocked_property` is forbidden, with `reason` explaining why. Safety is
+    absolute — no utility or learned score can override a matching rule.
+    """
+
+    action: str
+    blocked_property: str
+    reason: str
 
 
 @dataclass(frozen=True)

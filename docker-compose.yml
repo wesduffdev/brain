@@ -6,13 +6,12 @@
 services:
   engine:
     build: ./engine
-    # V0-5 runs the demo tick-loop so the container does real work today.
-    # V0-6 switches this to: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    command: python -m app.demo 300
-    # V0-6 exposes the HTTP/WebSocket server here; nothing listens in V0-5, so
-    # the port mapping stays commented to keep `docker compose up` clean today:
-    # ports:
-    #   - "8000:8000"
+    # Serves the FastAPI REST /state + WebSocket tick stream (V0-6). Wired at the
+    # wave/1 roll-up now that app.main exists (V0-5 shipped the skeleton running
+    # the demo; this is the promised switch).
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
     volumes:
       - ./engine:/app
       - ./config:/config

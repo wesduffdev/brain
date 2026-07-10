@@ -5,11 +5,12 @@ in and out so callers can never alias the stored record); it is the seam the
 behavior suite drives and needs no database. `PostgresBeingRepository` maps the
 same port onto the SQLAlchemy ORM over a live session.
 
-Both satisfy `app.ports.repositories.BeingRepository`. The event and training-
-example adapters (V0-7b, ADR 0012) follow the same shape behind their own ports;
-events and examples are append-only, so those adapters `add` and read back rather
-than upserting by id. The Simulation writes through these ports as it runs; it
-never touches the ORM.
+Both satisfy `app.ports.repositories.BeingRepository`. The event, training-
+example, and model-run adapters (V0-7b/V0-8b, ADR 0012/0008) follow the same
+shape behind their own ports; events, examples, and runs are append-only, so
+those adapters `add` and read back rather than upserting by id. The Simulation
+writes through the event/example ports as it runs; the trainer writes through the
+model-run port. Neither caller touches the ORM.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from app.db import models
 from app.db.models import Being
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
 
@@ -176,6 +178,47 @@ class PostgresTrainingExampleRepository:
                 event_id=row.event_id,
                 input_features=tuple(row.input_features or ()),
                 output_labels=tuple(row.output_labels or ()),
+            )
+            for row in rows
+        ]
+
+
+class InMemoryModelRunRepository:
+    """An append-only model-run store in a list — the test seam, no database."""
+
+    def __init__(self) -> None:
+        self._runs: List[ModelRun] = []
+
+    def add(self, run: ModelRun) -> None:
+        self._runs.append(run)
+
+    def all(self) -> List[ModelRun]:
+        return list(self._runs)
+
+
+class PostgresModelRunRepository:
+    """A model-run store backed by Postgres via a SQLAlchemy ``Session``."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, run: ModelRun) -> None:
+        self._session.add(
+            models.ModelRun(
+                artifact_path=run.artifact_path,
+                metrics=dict(run.metrics),
+                finished_at=run.finished_at,
+            )
+        )
+        self._session.commit()
+
+    def all(self) -> List[ModelRun]:
+        rows = self._session.query(models.ModelRun).order_by(models.ModelRun.id).all()
+        return [
+            ModelRun(
+                artifact_path=row.artifact_path,
+                finished_at=row.finished_at,
+                metrics=dict(row.metrics or {}),
             )
             for row in rows
         ]

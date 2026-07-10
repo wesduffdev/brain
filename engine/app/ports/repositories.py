@@ -10,9 +10,11 @@ The being aggregate has a port, `BeingRepository` (V0-7). As the learning loop
 produces real records, each gets its own port here, added when it is actually
 needed rather than speculatively: `InteractionEventRepository` and
 `TrainingExampleRepository` land with the event→example wiring (V0-7b, ADR 0012),
-and `PredictionRecordRepository` with shadow mode (V0-9, ADR 0011). Events,
-examples, and predictions are append-only facts, so their ports `add` and read
-back, rather than upserting by id like the being's mutable snapshot.
+`PredictionRecordRepository` with shadow mode (V0-9, ADR 0011), and
+`ModelRunRepository` when the trainer records a run (V0-8b, ADR 0008). Events,
+examples, predictions, and model runs are append-only facts, so their ports
+`add` and read back, rather than upserting by id like the being's mutable
+snapshot.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from typing import List, Optional, Protocol
 
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
 
@@ -74,4 +77,16 @@ class PredictionRecordRepository(Protocol):
 
     def all(self) -> List[PredictionRecord]:
         """Every stored record, oldest first."""
+        ...
+
+
+class ModelRunRepository(Protocol):
+    """Stores training-run metadata (append-only) and reads it back."""
+
+    def add(self, run: ModelRun) -> None:
+        """Persist the metadata of one training run."""
+        ...
+
+    def all(self) -> List[ModelRun]:
+        """Every recorded model run, oldest first."""
         ...

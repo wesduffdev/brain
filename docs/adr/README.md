@@ -15,3 +15,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0008](0008-outcome-predictor-and-feature-encoding.md) | Outcome predictor + feature/label encoding contract | Accepted |
 | [0009](0009-decision-utility-and-safety-guardrail-seam.md) | Decision (utility) + safety-guardrail seam | Accepted |
 | [0010](0010-renderer-authentication.md) | Renderer authentication: server-minted service token via env (no login in v0) | Accepted |
+| [0012](0012-interaction-event-and-training-example-ports.md) | Interaction-event and training-example repository ports (event→example wiring) | Accepted |

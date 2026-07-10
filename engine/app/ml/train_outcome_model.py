@@ -2,15 +2,21 @@
 
 The v0 learning loop (BRIEF §11, "Shadow Mode First"): the being's rule layer is
 the source of truth, and this small net learns to imitate it. Real stored
-`training_examples` are used when they exist; until the persistence + event
-wiring lands (V0-6/V0-7), the trainer seeds itself from a **synthetic seed set**
-derived from the config vocabulary — so the whole loop (encode -> train ->
-evaluate -> persist) runs standalone, with no database.
+`training_examples` (persisted by V0-7b as the being interacts) are used when they
+exist; when none are stored — no database, or an empty one — the trainer seeds
+itself from a **synthetic seed set** derived from the config vocabulary, so the
+whole loop (encode -> train -> evaluate -> persist) runs standalone, with no
+database.
 
 Public surface:
   - `synthetic_examples(config)` — the config-derived seed set (pure, no torch).
   - `train(...)` / `train_and_save(...)` — train a model and (optionally) persist
-    it with metrics.
+    it with metrics, given pre-`Example` interactions and an encoder.
+  - `run_training(...)` — the orchestration used by `make train`: read stored
+    examples through the injected `TrainingExampleRepository` (else synthetic),
+    train, save the artifact, and record a `ModelRun` through the injected
+    `ModelRunRepository`. Repositories and the timestamp are seams the caller
+    supplies, so the whole thing is testable without a wall clock or a database.
   - `main()` — the `python -m app.ml.train_outcome_model` / `ml-trainer` entry.
 
 PyTorch is imported lazily inside the training functions, so importing this
@@ -21,10 +27,17 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from app.domain.model_run import ModelRun
 from app.ml.encode_features import Example, FeatureEncoder
+
+# One already-encoded training row: (feature vector, label vector). Both the
+# synthetic seed set (encoded here) and stored TrainingExamples (encoded at write
+# time, V0-7b) reduce to this shape, so the torch core trains on rows alone.
+_EncodedRow = Tuple[Sequence[float], Sequence[float]]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_CONFIG_ROOT = _REPO_ROOT / "config"
@@ -82,15 +95,51 @@ def synthetic_examples(config) -> List[Example]:
     return examples
 
 
-def load_training_examples(config) -> Optional[List[Example]]:
-    """Stored training examples take priority once the DB port exists (V0-6
-    persistence + V0-7 event->example wiring). There is no DB port yet, so this
-    returns None and the trainer falls back to the synthetic seed set. Kept
-    deliberately un-wired: the synthetic path must run without Postgres."""
-    return None
-
-
 # --- training --------------------------------------------------------------
+
+
+def _train_rows(
+    *,
+    rows: List[_EncodedRow],
+    feature_size: int,
+    label_size: int,
+    label_names: Sequence[str],
+    epochs: int,
+    hidden_size: int,
+    learning_rate: float,
+    seed: int,
+):
+    """Train an OutcomeModel to green on already-encoded rows; returns
+    (model, metrics). This is the torch core both `train` (synthetic Examples)
+    and `run_training` (stored examples) reduce to. Torch is imported here so the
+    module imports without the training deps."""
+    import torch
+    from torch import nn
+
+    from app.ml.outcome_model import OutcomeModel
+
+    torch.manual_seed(seed)
+
+    features = torch.tensor([list(f) for f, _ in rows], dtype=torch.float32)
+    labels = torch.tensor([list(l) for _, l in rows], dtype=torch.float32)
+
+    model = OutcomeModel(feature_size, label_size, hidden_size)
+    loss_fn = nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    final_loss = 0.0
+    for _ in range(max(1, int(epochs))):
+        optimizer.zero_grad()
+        loss = loss_fn(model(features), labels)
+        loss.backward()
+        optimizer.step()
+        final_loss = float(loss.item())
+
+    metrics = _evaluate(model, features, labels, label_names)
+    metrics.update(
+        {"num_examples": len(rows), "epochs": int(epochs), "final_loss": final_loss}
+    )
+    return model, metrics
 
 
 def train(
@@ -103,38 +152,20 @@ def train(
     seed: int = 0,
 ):
     """Train an OutcomeModel to green on `examples`; returns (model, metrics).
-    Torch is imported here so the module imports without the training deps."""
-    import torch
-    from torch import nn
-
-    from app.ml.outcome_model import OutcomeModel
-
-    torch.manual_seed(seed)
-
-    features = torch.tensor(
-        [list(encoder.encode_features(ex)) for ex in examples], dtype=torch.float32
+    The examples are encoded through the ADR 0008 contract before training."""
+    rows = [
+        (encoder.encode_features(ex), encoder.encode_labels(ex)) for ex in examples
+    ]
+    return _train_rows(
+        rows=rows,
+        feature_size=encoder.feature_size,
+        label_size=encoder.label_size,
+        label_names=encoder.label_names(),
+        epochs=epochs,
+        hidden_size=hidden_size,
+        learning_rate=learning_rate,
+        seed=seed,
     )
-    labels = torch.tensor(
-        [list(encoder.encode_labels(ex)) for ex in examples], dtype=torch.float32
-    )
-
-    model = OutcomeModel(encoder.feature_size, encoder.label_size, hidden_size)
-    loss_fn = nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    final_loss = 0.0
-    for _ in range(max(1, int(epochs))):
-        optimizer.zero_grad()
-        loss = loss_fn(model(features), labels)
-        loss.backward()
-        optimizer.step()
-        final_loss = float(loss.item())
-
-    metrics = _evaluate(model, features, labels, encoder.label_names())
-    metrics.update(
-        {"num_examples": len(examples), "epochs": int(epochs), "final_loss": final_loss}
-    )
-    return model, metrics
 
 
 def _evaluate(model, features, labels, label_names) -> Dict:
@@ -153,30 +184,10 @@ def _evaluate(model, features, labels, label_names) -> Dict:
     }
 
 
-def train_and_save(
-    *,
-    encoder: FeatureEncoder,
-    examples: List[Example],
-    output_path: str,
-    metrics_path: Optional[str] = None,
-    epochs: int = 300,
-    hidden_size: int = 16,
-    learning_rate: float = 0.05,
-    seed: int = 0,
-) -> Dict:
-    """Train, persist the model (with its feature/label contract) to
-    `output_path`, and return the metrics — writing them to `metrics_path` too
-    when given."""
+def _save_artifact(model, encoder, metrics, output_path, metrics_path=None) -> None:
+    """Persist the model (with its feature/label contract) to `output_path`, and
+    write the metrics to `metrics_path` when given."""
     from app.ml.outcome_model import save_outcome_model
-
-    model, metrics = train(
-        encoder=encoder,
-        examples=examples,
-        epochs=epochs,
-        hidden_size=hidden_size,
-        learning_rate=learning_rate,
-        seed=seed,
-    )
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     save_outcome_model(
@@ -191,12 +202,116 @@ def train_and_save(
         Path(metrics_path).parent.mkdir(parents=True, exist_ok=True)
         Path(metrics_path).write_text(json.dumps(metrics, indent=2, sort_keys=True))
 
+
+def train_and_save(
+    *,
+    encoder: FeatureEncoder,
+    examples: List[Example],
+    output_path: str,
+    metrics_path: Optional[str] = None,
+    epochs: int = 300,
+    hidden_size: int = 16,
+    learning_rate: float = 0.05,
+    seed: int = 0,
+) -> Dict:
+    """Train, persist the model (with its feature/label contract) to
+    `output_path`, and return the metrics — writing them to `metrics_path` too
+    when given."""
+    model, metrics = train(
+        encoder=encoder,
+        examples=examples,
+        epochs=epochs,
+        hidden_size=hidden_size,
+        learning_rate=learning_rate,
+        seed=seed,
+    )
+    _save_artifact(model, encoder, metrics, output_path, metrics_path)
     return metrics
 
 
+def run_training(
+    *,
+    config,
+    output_path: str,
+    training_repo=None,
+    model_run_repo=None,
+    timestamp: datetime,
+    metrics_path: Optional[str] = None,
+    epochs: int = 300,
+    hidden_size: int = 16,
+    learning_rate: float = 0.05,
+    seed: int = 0,
+) -> Dict:
+    """Train the outcome predictor and record the run (the `make train` path).
+
+    Source of truth for the data: the stored `training_examples` read through
+    `training_repo` (the V0-7b `TrainingExampleRepository`) when it holds any;
+    otherwise the config-derived synthetic seed set, so a run needs no database.
+    Trains, saves the artifact (+ optional metrics sidecar), and — when a
+    `model_run_repo` is present — records one `ModelRun` (artifact path, metrics,
+    and the injected `timestamp`; no wall clock here). Returns the metrics with an
+    added `source` key ("training_examples" or "synthetic")."""
+    encoder = FeatureEncoder.from_config(config)
+
+    stored = list(training_repo.all()) if training_repo is not None else []
+    if stored:
+        rows: List[_EncodedRow] = [(ex.input_features, ex.output_labels) for ex in stored]
+        source = "training_examples"
+    else:
+        rows = [
+            (encoder.encode_features(ex), encoder.encode_labels(ex))
+            for ex in synthetic_examples(config)
+        ]
+        source = "synthetic"
+
+    model, metrics = _train_rows(
+        rows=rows,
+        feature_size=encoder.feature_size,
+        label_size=encoder.label_size,
+        label_names=encoder.label_names(),
+        epochs=epochs,
+        hidden_size=hidden_size,
+        learning_rate=learning_rate,
+        seed=seed,
+    )
+    metrics["source"] = source
+
+    _save_artifact(model, encoder, metrics, output_path, metrics_path)
+
+    if model_run_repo is not None:
+        model_run_repo.add(
+            ModelRun(artifact_path=output_path, finished_at=timestamp, metrics=dict(metrics))
+        )
+
+    return metrics
+
+
+def _open_repositories():
+    """The Postgres-backed training-example + model-run repositories when
+    `DATABASE_URL` is configured, else `(None, None, None)` so the synthetic path
+    runs standalone with no database. Returns the open session too so `main` can
+    close it. The connection string is env-only (ADR 0005), never guessed."""
+    if not os.environ.get("DATABASE_URL"):
+        return None, None, None
+
+    from app.db.session import create_db_engine, session_factory
+    from app.repositories import (
+        PostgresModelRunRepository,
+        PostgresTrainingExampleRepository,
+    )
+
+    session = session_factory(create_db_engine())()
+    return (
+        PostgresTrainingExampleRepository(session),
+        PostgresModelRunRepository(session),
+        session,
+    )
+
+
 def main() -> None:
-    """Train on stored examples if present, else the synthetic seed set, and
-    write `models/outcome_predictor.pt` + a metrics sidecar. Paths and tuning are
+    """Train on stored examples when a database holds them, else the synthetic
+    seed set, write `models/outcome_predictor.pt` + a metrics sidecar, and record
+    a `model_runs` row when a database is configured. Paths and tuning are
     config/env-driven so the container and local `make train` share this path."""
     from app.config_service import ConfigService
 
@@ -204,29 +319,29 @@ def main() -> None:
     output_path = os.environ.get("MODEL_OUTPUT_PATH", str(_DEFAULT_MODEL_PATH))
 
     config = ConfigService.from_files(config_root)
-    encoder = FeatureEncoder.from_config(config)
-
-    examples = load_training_examples(config)
-    source = "training_examples"
-    if not examples:
-        examples = synthetic_examples(config)
-        source = "synthetic"
-
     params = config.outcome_training_params()
-    metrics = train_and_save(
-        encoder=encoder,
-        examples=examples,
-        output_path=output_path,
-        metrics_path=output_path + ".metrics.json",
-        epochs=params["epochs"],
-        hidden_size=params["hidden_size"],
-        learning_rate=params["learning_rate"],
-        seed=params["seed"],
-    )
+
+    training_repo, model_run_repo, session = _open_repositories()
+    try:
+        metrics = run_training(
+            config=config,
+            output_path=output_path,
+            training_repo=training_repo,
+            model_run_repo=model_run_repo,
+            timestamp=datetime.now(timezone.utc),
+            metrics_path=output_path + ".metrics.json",
+            epochs=params["epochs"],
+            hidden_size=params["hidden_size"],
+            learning_rate=params["learning_rate"],
+            seed=params["seed"],
+        )
+    finally:
+        if session is not None:
+            session.close()
 
     print(
         "trained outcome predictor "
-        f"(source={source}, examples={metrics['num_examples']}, "
+        f"(source={metrics['source']}, examples={metrics['num_examples']}, "
         f"epochs={metrics['epochs']})\n"
         f"  -> {output_path}\n"
         f"  final_loss={metrics['final_loss']:.4f} "

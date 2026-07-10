@@ -16,17 +16,47 @@ from typing import Dict, List, Optional
 from app.config_service import ConfigService
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.training_example import TrainingExample
+from app.ml.encode_features import Example, FeatureEncoder
+from app.ports.predictor import PredictorPort
+from app.ports.repositories import (
+    InteractionEventRepository,
+    PredictionRecordRepository,
+    TrainingExampleRepository,
+)
+from app.repositories import InMemoryPredictionRecordRepository
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
+from app.services.prediction_service import PredictionService
 from app.services.safety_service import SafetyService
 from app.services.tick_service import TickService
 
 
 class Simulation:
-    def __init__(self, config: ConfigService, being_id: str = "being_001"):
+    def __init__(
+        self,
+        config: ConfigService,
+        being_id: str = "being_001",
+        *,
+        event_repo: Optional[InteractionEventRepository] = None,
+        training_repo: Optional[TrainingExampleRepository] = None,
+        predictor: Optional[PredictorPort] = None,
+        prediction_repository: Optional[PredictionRecordRepository] = None,
+    ):
+        # Persistence seam (ADR 0007/0012): each interaction is written through
+        # these ports as it happens, and a training example is derived per event.
+        # Both default to None — the pure model tests need no store, and nothing
+        # below the seam ever touches SQLAlchemy. The encoder is only built when
+        # training examples are actually derived.
+        self._event_repo = event_repo
+        self._training_repo = training_repo
+        self._encoder = (
+            FeatureEncoder.from_config(config) if training_repo is not None else None
+        )
+
         self._clock = TickService()
         self._needs = NeedService(config.need_policies())
         self._environment = EnvironmentService(
@@ -43,6 +73,17 @@ class Simulation:
         self._cooldown_until: Dict[str, int] = {}
         self._events: List[InteractionEvent] = []
         self._current_action: Optional[Dict] = None
+
+        # Shadow mode (ADR 0011): if a predictor was loaded, run it alongside the
+        # rule layer and record each prediction. With no predictor, there is no
+        # PredictionService and nothing is recorded — behavior is unchanged.
+        self._prediction_repo: Optional[PredictionRecordRepository] = None
+        self._prediction: Optional[PredictionService] = None
+        if predictor is not None:
+            self._prediction_repo = prediction_repository or InMemoryPredictionRecordRepository()
+            self._prediction = PredictionService(
+                predictor, self._prediction_repo, threshold=config.prediction_threshold()
+            )
 
         needs = config.initial_needs()
         self.being = BeingState(
@@ -99,22 +140,58 @@ class Simulation:
         # diverge once actions move needs.
         emotion_after = self._emotion.derive(self.being.needs)
 
-        self._events.append(
-            InteractionEvent(
-                being_id=self.being.being_id,
-                tick=tick,
-                object_id=decision.target_id,
-                action=decision.action,
-                expected_outcome=policy.outcomes_for(perceived_props),
-                observed_outcome=policy.outcomes_for(true_props),
-                emotion_before=emotion_before,
-                emotion_after=emotion_after,
-            )
+        event = InteractionEvent(
+            being_id=self.being.being_id,
+            tick=tick,
+            object_id=decision.target_id,
+            action=decision.action,
+            expected_outcome=policy.outcomes_for(perceived_props),
+            observed_outcome=policy.outcomes_for(true_props),
+            emotion_before=emotion_before,
+            emotion_after=emotion_after,
         )
+        self._events.append(event)
+        self._record(event, true_props, policy)
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
         )
         self._current_action = decision.as_current_action()
+
+        # Shadow mode: record what the learned model would have predicted for
+        # this same interaction, from what the being perceived. The model's
+        # action vocabulary is object affordances, so an action is encoded by its
+        # affordance (`observe` -> `look`); a free action has none. Purely
+        # observational — nothing above this line reads the prediction.
+        if self._prediction is not None:
+            self._prediction.record(
+                event, properties=perceived_props, action=policy.affordance or ""
+            )
+
+    def _record(self, event: InteractionEvent, true_props, policy) -> None:
+        """Persist the event through its port (when one is injected) and derive a
+        training example from it (when a training port is injected). The example
+        encodes the object's true properties + the affordance taken + context via
+        the ADR 0008 contract, paired with the observed outcomes. Free actions
+        (approach/withdraw) carry no affordance, so they are recorded as events
+        but are not object→outcome interactions the predictor models — no example
+        is derived for them."""
+        if self._event_repo is not None:
+            self._event_repo.add(event)
+        if self._training_repo is None or policy.affordance is None:
+            return
+        example = Example(
+            properties=tuple(true_props),
+            action=policy.affordance,
+            context=(),  # the room has no surface dimension yet; the slot stays 0
+            outcomes=tuple(event.observed_outcome),
+        )
+        self._training_repo.add(
+            TrainingExample(
+                event_id=event.event_id,
+                input_features=self._encoder.encode_features(example),
+                output_labels=self._encoder.encode_labels(example),
+            )
+        )
 
     def change_environment(
         self,
@@ -135,9 +212,19 @@ class Simulation:
 
     def interactions(self) -> List[Dict]:
         """The in-memory log of InteractionEvents the being has produced, oldest
-        first, as plain snapshots. Persisting these to Postgres is a later slice
-        (V0-7); for now the record lives only here."""
+        first, as plain snapshots. When a repository is injected each event is
+        also persisted through the event port as it happens (V0-7b, ADR 0012);
+        this log is always kept regardless."""
         return [event.snapshot() for event in self._events]
+
+    def predictions(self) -> List[Dict]:
+        """The shadow-mode prediction records the being has produced, oldest
+        first, as plain snapshots — each pairing the model's predicted outcome
+        with the rule's expected outcome and the actual observed outcome (ADR
+        0011). Empty when no predictor is loaded (shadow mode off)."""
+        if self._prediction_repo is None:
+            return []
+        return [record.snapshot() for record in self._prediction_repo.all()]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

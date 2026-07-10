@@ -136,3 +136,55 @@ ml-trainer` works without a database. `make train` is the local equivalent.
   V0-7 event→example wiring (and the DB port) land; record a `model_runs` row per
   training run when that port exists; V0-9 wires shadow-mode inference +
   prediction/actual comparison.
+
+## Extension — V0-8b (train on persisted examples; record model runs)
+
+### Date
+
+2026-07-10
+
+### What changed
+
+The two follow-ups above (train on real `training_examples`; record a
+`model_runs` row per run) are now realized, without altering the encoding
+contract this ADR pins. This section is additive — the Decision above stands.
+
+- **Source selection moved into `run_training(...)`.** The old
+  `load_training_examples` stub (which always returned `None`) is replaced by a
+  single deep orchestration on the trainer: read stored examples through the
+  V0-7b `TrainingExampleRepository` when it holds any, else fall back to the
+  config-derived synthetic seed set. The standalone synthetic path is unchanged —
+  no repository injected means synthetic, so `make train` still runs with no
+  database. Stored `TrainingExample`s are already encoded (V0-7b encoded them
+  through this ADR's `FeatureEncoder` at write time), so both sources reduce to
+  the same `(features, labels)` rows the torch core trains on; the contract is
+  identical across them by construction.
+- **A `ModelRunRepository` records each run.** It follows the append-only
+  port + in-memory/Postgres-adapter pattern established for events and examples
+  (ADR 0012), so it does not warrant its own ADR by the 3-part test (it is not
+  surprising, is easy to reverse, and carries no real trade-off). Its aggregate
+  is `app.domain.model_run.ModelRun` (`artifact_path`, `metrics`, `finished_at`).
+  The **timestamp is carried on the aggregate and injected by the caller**, never
+  stamped inside the store — so a run's moment is explicit and the persistence
+  path is testable with no wall clock. `run_training` records one row (the
+  artifact path, the metrics dict incl. a `source` key, and the timestamp) when a
+  `model_run_repo` is present; with no database, no row is written and the run
+  still succeeds.
+- **`make train` wiring.** `main()` opens the Postgres training-example and
+  model-run adapters when `DATABASE_URL` is configured (env-only, ADR 0005) and
+  passes them plus `datetime.now(...)` into `run_training`; unset → both `None` →
+  synthetic, no run recorded. An empty-but-configured database falls back to
+  synthetic and still records the run.
+
+### Consequences
+
+- **The learning loop trains on real data end-to-end.** Demonstrated: 80 sim
+  ticks persisted 52 interaction-derived `training_examples`; `make train` then
+  read them (`source=training_examples`, 52 examples), wrote the artifact, and
+  recorded one `model_runs` row (artifact path, metrics, finished-at). The
+  synthetic fallback (`source=synthetic`, no DB) still produces an artifact.
+- **Testable without torch, a wall clock, or a database.** The real-training
+  behaviour stays `torch`-gated (`pytest.importorskip`); the repository and
+  timestamp are seams driven by in-memory fakes and an injected time; a live
+  Postgres round-trip covers the adapters (`integration`, skipped when
+  unreachable, never faked) — the ADR 0007/0012 discipline, now covering runs.

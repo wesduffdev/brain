@@ -1,0 +1,150 @@
+# Project instructions
+
+## What this is
+
+A situated-being simulation built to learn ML. The being is **human-like in
+psychology** — needs, emotions, curiosity, memory, learned expectations — but
+it is **not a baby, not tied to an age or life-stage, and not a literal
+person**. There is **no "caregiver"** concept and no caregiver-directed actions
+(no "seek caregiver", no crying to summon one); the being acts on its own state
+and its world. The full target architecture is `docs/BRIEF.md`.
+
+## Design boundary (applies to every change)
+
+This is a serious simulation. Within it, the being's state and the world's
+events carry real, felt consequences — distress, fear, neglect-like conditions
+and negative outcomes are modeled honestly. Those consequences are always
+**abstract**: state changes (trust / stress / comfort / pain / fear deltas),
+warnings, and recovery paths — never step-by-step depictions of real-world
+harm. Every harmful path has a visible consequence and a recovery path. The
+project must never become instructional content for harming a real or
+vulnerable being. See `docs/design_boundary.md`.
+
+## Development process (applies to every request)
+
+### Vertical slices with a clear outcome
+
+Every request is a vertical slice that ends in observable behavior. Before
+writing code, state the slice's outcome in one sentence — what a user can see
+or do when it lands that they couldn't before. No model-only or transport-only
+work unless the request is explicitly scoped that way. Keep the first pass of
+anything minimal; add the next capability in the next slice.
+
+### TDD — red first, then green, behavior-driven
+
+Write the tests before the implementation, and run them and observe them
+**fail** before implementing. Then implement until green and re-run the suite.
+Never write the implementation first and backfill tests; never claim green
+without showing the run.
+
+Tests are **behavior-driven, not method-driven**: each test states one
+behavior observable through a module's public interface (`Simulation.tick()`,
+`Simulation.state()`, and the interfaces later slices add), and is named for
+that behavior (`test_low_safety_reads_as_fear`), not for the method it calls.
+Cover behavior end-to-end through the public surface; don't unit-test private
+helpers or assert on internal state — wanting to is a sign the module is the
+wrong shape.
+
+Mock **only at the seams** — the injected ports and module boundaries
+(config, and later the clock, repositories, predictor). Prefer real
+collaborators below the seam and fakes with behavior over call-sequence mocks.
+If a behavior can't be tested without a new fake, a seam is probably missing —
+add the port (an ADR-worthy change), don't patch.
+
+Practicalities:
+- Tests live in `engine/tests/` and use **pytest**.
+- Run: `cd engine && python -m pytest`
+
+### Deep modules
+
+A lot of behavior behind a small interface. Each module exposes one public
+class or small function set (`Simulation`, `ConfigService`, the services) and
+hides its logic behind it; the interface is the test surface. Prefer deepening
+an existing module over adding a new one. Apply the deletion test before adding
+a module (if deleting it would make complexity vanish rather than reappear in
+callers, it's a pass-through — don't add it). **Do not introduce a seam until
+something actually varies across it** — one implementation means no port yet.
+
+### Deep-module review after every slice
+
+After each slice reaches green — and **before** the slice is called done or
+moved to review — run the `/legacy-deep-module-review` skill over the change.
+This is a required per-slice gate, not an optional cleanup: it maps the touched
+modules and dependencies, flags shallow modules and coupling hotspots, and
+proposes deeper aggregations before drift accumulates. Record what it finds and
+act on it in the same slice (fold small fixes in; an interface-level change
+becomes an ADR and, if larger, its own next slice — never silently deferred).
+Sub-agents include the review outcome in their vertical-slice completion report;
+the orchestrator does not treat a card as review-ready until it has run.
+
+### Config-driven tuning
+
+Drift rates, thresholds, timings, and vocabularies live in `config/*.yaml`, not
+in service code. `ConfigService` is the only code that knows config exists; it
+hands services typed policies. Retuning must be a config change only.
+
+### Documentation
+
+- `docs/adr/NNNN-slug.md` for every architecturally significant decision
+  (**Status / Date / Context / Decision / Consequences**), indexed in
+  `docs/adr/README.md`. Never rewrite an accepted ADR — supersede it.
+- Any slice that adds or changes an interface adds/updates the relevant ADR in
+  the same slice, not as a follow-up.
+- One source of truth per fact: the roadmap lives in `README.md`; the brief in
+  `docs/BRIEF.md`. Link, don't restate.
+
+## Parallel execution — git worktrees and wave PRs
+
+When several slices are worked at once (a "wave"), each slice runs in its **own
+git worktree** so agents never share a working tree:
+
+- **One integration branch per wave:** `wave/<n>`, branched from `main`.
+- **One worktree + branch per slice:** `slice/<ticket>` (e.g. `slice/v0-2`),
+  branched from the wave branch and checked out under
+  `.claude/worktrees/<ticket>/` (gitignored). A sub-agent works **only** inside
+  its own worktree — never the main tree or another slice's.
+- **Commit per slice, inside its worktree.** The suite runs and stays green in
+  the worktree (`cd <worktree>/engine && python -m pytest`).
+- **Roll a whole wave up into one PR.** When every slice in the wave is merged
+  into `wave/<n>`, open a single PR `wave/<n>` → `main`. Wave 1 is one PR, wave 2
+  another, and so on — a human reviews and merges it, and that merge is the
+  cards' `Done`.
+- **Orchestrator owns git and the board; sub-agents own code.** Sub-agents
+  commit inside their worktree and report back; they never push, merge, open
+  PRs, or write to Trello. The orchestrator merges slice branches into the wave
+  branch, opens the wave PR, and mirrors state to the board.
+
+## Task source — the NPC Trello board (guardrails)
+
+Development work may be sourced from the Trello board **NPC** (short link
+`qBaiErHa`, `https://trello.com/b/qBaiErHa/npc`). When using the board:
+
+- **Official Trello MCP only.** Read or write the board solely through the
+  `trello` MCP server's tools. Never substitute another server (the Atlassian
+  MCP is Jira/Confluence, not Trello) or raw HTTP/curl. If `trello` is not
+  connected, stop and say exactly what's missing — never fabricate board state.
+- **Read-first, least privilege.** Verification and triage are read-only. Never
+  create, move, archive, or delete cards while verifying. Writes happen only in
+  an explicitly-invoked update flow, never as a side effect of reading.
+- **Pull only from the intake list.** Agents take work only from the single
+  designated `Ready for Agent` list — never scan the whole board for things to
+  do. A human moving a card into that list is the authorization to work it.
+- **Card → slice contract.** Only work a card that carries a one-sentence
+  outcome, acceptance criteria, and links to the relevant files/ADRs (the slice
+  discipline above). A card missing a useful description is flagged back to a
+  human, not started.
+- **Claim before working.** Add a `claimed-by:<session>` marker and check no
+  other claim exists before starting, so parallel agents don't grab the same
+  card. Release the claim on failure.
+- **Writes are gated and mirrored.** An agent may comment progress and move a
+  card at most one adjacent state (`In Progress` → `Review`). It never archives
+  or deletes; a human performs `Done`/archive. Every board write references the
+  git commit/PR so board and code stay reconcilable.
+- **Blocked/overdue are hard stops.** Refuse to start a card labeled blocked or
+  past its due date; surface it in a triage report instead of working around it.
+- **Done means verified.** A card is review-ready only when the suite is green
+  (`cd engine && python -m pytest`) and the slice's observable outcome has been
+  demonstrated — never on assertion alone.
+- **Board = intent, repo = truth.** The board says what to do and in what order;
+  the code, tests, ADRs, and `README.md` roadmap remain the authoritative
+  record. Design detail belongs in an ADR, not on a card.

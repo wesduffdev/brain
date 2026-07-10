@@ -1,0 +1,15 @@
+# Engine dependencies for the current slice (minimal being state).
+# Kept deliberately small; each later slice adds only what it needs.
+#
+# Now:
+PyYAML==6.0.2        # load config/*.yaml
+pytest==8.3.3        # behavior-driven tests
+
+# Arriving in later slices (left here as a roadmap, commented out so the image
+# stays lean until each slice actually lands):
+# fastapi==0.115.*   # REST + WebSocket transport
+# uvicorn[standard]==0.32.*
+# SQLAlchemy==2.0.*  # Postgres persistence
+# psycopg[binary]==3.2.*
+# torch==2.*         # outcome-prediction neural net (ml-trainer)
+# numpy, pandas, scikit-learn

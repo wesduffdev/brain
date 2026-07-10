@@ -1,0 +1,28 @@
+# The tuning surface for time. Change values here — never in service code.
+# This is the whole point of the config-driven design: fine-tuning drift never
+# touches Python.
+#
+# direction:
+#   increase   -> the need drifts up on its own (a deficit growing)
+#   decrease   -> the need drifts down on its own (a good state fading)
+#   contextual -> no autonomous drift; a later slice's environment/perception
+#                 moves it (e.g. safety falls when the room goes dark or loud)
+# amount / every_ticks : apply `amount` when tick % every_ticks == 0
+# min / max            : the value is clamped to this band
+# start                : the value a fresh being is born with
+
+tick:
+  duration_ms: 1000
+
+needs:
+  hunger:    { direction: increase,   amount: 1, every_ticks: 30, min: 0, max: 100, start: 30 }
+  sleep:     { direction: increase,   amount: 1, every_ticks: 45, min: 0, max: 100, start: 35 }
+  comfort:   { direction: decrease,   amount: 1, every_ticks: 20, min: 0, max: 100, start: 70 }
+  warmth:    { direction: increase,   amount: 1, every_ticks: 30, min: 0, max: 100, start: 20 }
+  curiosity: { direction: increase,   amount: 1, every_ticks: 15, min: 0, max: 100, start: 55 }
+  safety:    { direction: contextual, amount: 1, every_ticks: 10, min: 0, max: 100, start: 80 }
+  hygiene:   { direction: decrease,   amount: 1, every_ticks: 60, min: 0, max: 100, start: 90 }
+
+# Note: actions and their tick durations/cooldowns are intentionally NOT here
+# yet. Actions arrive in a later slice, once the being's state exists. No
+# caregiver-directed actions.

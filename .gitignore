@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ML artifacts (weights are reproducible; keep them out of git)
+models/*.pt
+models/*.metrics.json
+
+# Node / renderer
+node_modules/
+renderer/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+
+# Claude Code — local settings and parallel-work worktrees
+.claude/settings.local.json
+.claude/worktrees/

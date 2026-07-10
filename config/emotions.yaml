@@ -1,0 +1,21 @@
+# How the being's dominant emotion is DERIVED from its needs.
+# Rules are evaluated top to bottom; the first whose condition holds wins.
+# Only one emotion is dominant at a time. Tuning the thresholds here changes
+# temperament without touching Python.
+#
+# These are the emotions a being can reach from internal state alone.
+# Interaction-driven emotions (happy, excited, comforted) arrive with the
+# object/interaction slice — they need an event, not just a need level.
+#
+# `scared` is fear. Its trigger below (low safety) does not fire on its own
+# yet, because nothing lowers safety until the environment slice lands
+# (a dark or loud room). The rule is wired now so fear is ready.
+
+rules:
+  - { emotion: scared,     need: safety,    op: "<=", value: 30 }
+  - { emotion: hungry,     need: hunger,    op: ">=", value: 80 }
+  - { emotion: sleepy,     need: sleep,     op: ">=", value: 80 }
+  - { emotion: frustrated, need: comfort,   op: "<=", value: 25 }
+  - { emotion: curious,    need: curiosity, op: ">=", value: 70 }
+
+default: calm

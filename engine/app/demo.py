@@ -32,6 +32,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     sim = Simulation(ConfigService.from_files(config_root))
     print(f"tick={sim.current_tick:>4}  {_fmt(sim.state())}   (birth)")
 
+    perceived = sim.state()["perceived"]["objects"]
+    if perceived:
+        seen = "  ".join(
+            f"{obj['objectId']}(conf={obj['confidence']:.2f})" for obj in perceived
+        )
+        print(f"perceives {len(perceived)} object(s) in the room:  {seen}")
+
     previous_emotion = sim.state()["emotion"]
     for _ in range(ticks):
         state = sim.tick()

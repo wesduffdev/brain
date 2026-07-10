@@ -25,8 +25,8 @@ setup: ## create engine/.venv, install deps, install the git guardrail hooks
 test: ## run the behavior suite
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m pytest
 
-demo: ## watch the being drift (override count: make demo TICKS=600)
-	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.demo $(or $(TICKS),300)
+demo: ## watch the being alone with one object (make demo OBJ=ball TICKS=600; default hot lamp)
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.demo $(or $(TICKS),300) $(OBJ)
 
 run: ## serve the engine API on http://localhost:8000 (GET /state, WS /ws)
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/uvicorn app.main:app --reload --port 8000

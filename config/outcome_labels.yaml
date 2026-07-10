@@ -36,3 +36,9 @@ training:
   hidden_size: 16
   learning_rate: 0.05
   seed: 0
+
+# Shadow-mode inference tuning (V0-9, ADR 0011). `threshold` is the probability
+# at or above which the model counts an outcome as predicted when comparing
+# against the actual outcome. Retuning shadow-mode sensitivity is a config change.
+prediction:
+  threshold: 0.5

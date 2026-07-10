@@ -16,17 +16,28 @@ from typing import Dict, List, Optional
 from app.config_service import ConfigService
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.ports.predictor import PredictorPort
+from app.ports.repositories import PredictionRecordRepository
+from app.repositories import InMemoryPredictionRecordRepository
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
+from app.services.prediction_service import PredictionService
 from app.services.safety_service import SafetyService
 from app.services.tick_service import TickService
 
 
 class Simulation:
-    def __init__(self, config: ConfigService, being_id: str = "being_001"):
+    def __init__(
+        self,
+        config: ConfigService,
+        being_id: str = "being_001",
+        *,
+        predictor: Optional[PredictorPort] = None,
+        prediction_repository: Optional[PredictionRecordRepository] = None,
+    ):
         self._clock = TickService()
         self._needs = NeedService(config.need_policies())
         self._environment = EnvironmentService(
@@ -43,6 +54,17 @@ class Simulation:
         self._cooldown_until: Dict[str, int] = {}
         self._events: List[InteractionEvent] = []
         self._current_action: Optional[Dict] = None
+
+        # Shadow mode (ADR 0011): if a predictor was loaded, run it alongside the
+        # rule layer and record each prediction. With no predictor, there is no
+        # PredictionService and nothing is recorded — behavior is unchanged.
+        self._prediction_repo: Optional[PredictionRecordRepository] = None
+        self._prediction: Optional[PredictionService] = None
+        if predictor is not None:
+            self._prediction_repo = prediction_repository or InMemoryPredictionRecordRepository()
+            self._prediction = PredictionService(
+                predictor, self._prediction_repo, threshold=config.prediction_threshold()
+            )
 
         needs = config.initial_needs()
         self.being = BeingState(
@@ -99,22 +121,31 @@ class Simulation:
         # diverge once actions move needs.
         emotion_after = self._emotion.derive(self.being.needs)
 
-        self._events.append(
-            InteractionEvent(
-                being_id=self.being.being_id,
-                tick=tick,
-                object_id=decision.target_id,
-                action=decision.action,
-                expected_outcome=policy.outcomes_for(perceived_props),
-                observed_outcome=policy.outcomes_for(true_props),
-                emotion_before=emotion_before,
-                emotion_after=emotion_after,
-            )
+        event = InteractionEvent(
+            being_id=self.being.being_id,
+            tick=tick,
+            object_id=decision.target_id,
+            action=decision.action,
+            expected_outcome=policy.outcomes_for(perceived_props),
+            observed_outcome=policy.outcomes_for(true_props),
+            emotion_before=emotion_before,
+            emotion_after=emotion_after,
         )
+        self._events.append(event)
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
         )
         self._current_action = decision.as_current_action()
+
+        # Shadow mode: record what the learned model would have predicted for
+        # this same interaction, from what the being perceived. The model's
+        # action vocabulary is object affordances, so an action is encoded by its
+        # affordance (`observe` -> `look`); a free action has none. Purely
+        # observational — nothing above this line reads the prediction.
+        if self._prediction is not None:
+            self._prediction.record(
+                event, properties=perceived_props, action=policy.affordance or ""
+            )
 
     def change_environment(
         self,
@@ -138,6 +169,15 @@ class Simulation:
         first, as plain snapshots. Persisting these to Postgres is a later slice
         (V0-7); for now the record lives only here."""
         return [event.snapshot() for event in self._events]
+
+    def predictions(self) -> List[Dict]:
+        """The shadow-mode prediction records the being has produced, oldest
+        first, as plain snapshots — each pairing the model's predicted outcome
+        with the rule's expected outcome and the actual observed outcome (ADR
+        0011). Empty when no predictor is loaded (shadow mode off)."""
+        if self._prediction_repo is None:
+            return []
+        return [record.snapshot() for record in self._prediction_repo.all()]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

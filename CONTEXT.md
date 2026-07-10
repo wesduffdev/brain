@@ -123,8 +123,17 @@ _Avoid_: log entry, action record, transaction.
 
 **Prediction record**:
 A prediction the model made, kept so it can later be compared against the actual
-observed outcome (shadow mode) and marked right or wrong.
+observed outcome (shadow mode) and marked right or wrong. Holds the model's
+predicted outcome beside the rule layer's expected outcome and the actual
+observed outcome for one interaction.
 _Avoid_: guess, inference log, prediction log.
+
+**Prediction error**:
+How wrong a prediction was — the gap between what the model predicted and what
+actually happened, measured continuously (not just right/wrong). It is recorded
+in shadow mode and, in later versions, is the signal that feeds curiosity: a
+surprising outcome is one the model predicted poorly.
+_Avoid_: loss, inaccuracy, mistake, residual.
 
 **Model run**:
 The metadata of one training run — when it ran, how it scored, and where its

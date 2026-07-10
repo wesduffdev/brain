@@ -350,6 +350,14 @@ class ConfigService:
     def outcome_context_features(self) -> Tuple[str, ...]:
         return tuple(self._outcome.get("context_features", []) or [])
 
+    def prediction_threshold(self) -> float:
+        """The probability at or above which a shadow-mode prediction counts an
+        outcome as predicted (ADR 0011). Config-driven so retuning shadow-mode
+        sensitivity never touches Python; defaults to 0.5 (ADR 0008's eval
+        threshold) when unset."""
+        prediction = self._outcome.get("prediction", {}) or {}
+        return float(prediction.get("threshold", 0.5))
+
     def outcome_training_params(self) -> Dict[str, float]:
         """Trainer hyperparameters, config-driven with safe defaults so
         retuning training never touches Python."""

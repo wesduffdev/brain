@@ -3,11 +3,9 @@
 ## What this is
 
 A situated-being simulation built to learn ML. The being is **human-like in
-psychology** — needs, emotions, curiosity, memory, learned expectations — but
-it is **not a baby, not tied to an age or life-stage, and not a literal
-person**. There is **no "caregiver"** concept and no caregiver-directed actions
-(no "seek caregiver", no crying to summon one); the being acts on its own state
-and its world. The full target architecture is `docs/BRIEF.md`.
+psychology** — needs, emotions, curiosity, memory, learned expectations. It
+acts on its own internal state and the world around it. The full target
+architecture is `docs/BRIEF.md`.
 
 ## Design boundary (applies to every change)
 
@@ -113,6 +111,49 @@ git worktree** so agents never share a working tree:
   commit inside their worktree and report back; they never push, merge, open
   PRs, or write to Trello. The orchestrator merges slice branches into the wave
   branch, opens the wave PR, and mirrors state to the board.
+- **A sub-agent may escalate to a workflow.** When a slice is large enough to
+  warrant decomposition (many independent files, a fan-out-then-verify shape), a
+  sub-agent may spawn a workflow or its own helper agents to complete it. The
+  slice's contract still holds: all work stays inside that slice's worktree;
+  nested agents must not write the same files concurrently (partition the files
+  or serialize); the slice still lands as commits on its `slice/<ticket>` branch;
+  and the sub-agent still returns one completion report. Keep the fan-out
+  proportional — a small slice needs no workflow.
+
+### Bugs found during a wave — ticket, hotfix, merge back into the PR
+
+**Intent: the codebase is self-diagnosing and self-healing.** Continuous
+verification (the suite, the deep-module gate, integration/Docker checks) is what
+*finds* defects; each becomes a bug ticket; each ticket is assigned to a
+sub-agent that *heals* it; the fix is verified and merged back — a closed loop
+that needs no human hop within an already-authorized wave. The invariant it
+serves: **the open wave PR is always pristine — green, verified, and safe for a
+human to merge to `main` at any moment.**
+
+So when verification or review turns up a defect in work that is already in
+review or in an open wave PR, it does **not** get quietly patched — it goes
+through the ticket system:
+
+1. **Document a bug ticket** on the board (the repo's ticket system — see *Task
+   source* below), carrying: symptom, how to reproduce, root cause if known,
+   affected files, severity, and a link to the PR/commit. The orchestrator
+   creates the card (sub-agents never write to the board). A bug in an in-flight
+   wave inherits that wave's authorization, so the orchestrator may claim and
+   assign it immediately rather than waiting for a human to stage it.
+2. **Assign it to a sub-agent** to fix, on a `hotfix/<ticket>` branch in its own
+   worktree, branched from the wave branch. Capture the defect with a red test
+   first where one can; fix to green; run the deep-module-review gate; return a
+   completion report — same contract as any slice.
+3. **Verify, then merge back into the PR.** The orchestrator re-runs the failing
+   check, confirms it now passes, merges `hotfix/<ticket>` into the wave branch
+   (which updates the open PR in place), and moves the bug card to review. If the
+   wave PR has already merged to `main`, the fix instead becomes its own ticket →
+   `hotfix/<ticket>` PR to `main` (or rolls into the next wave). **Pristine-PR
+   invariant:** nothing merges into the wave branch unless its suite is green and
+   its outcome verified — the PR never sits red; a change that would break it is
+   blocked and re-ticketed, not merged.
+4. **Message the director** when a bug is found and again when its hotfix merges
+   — the same milestone cadence used for slice completion and wave-PR roll-up.
 
 ## Task source — the NPC Trello board (guardrails)
 

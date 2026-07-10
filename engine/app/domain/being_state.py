@@ -1,7 +1,7 @@
 """BeingState — the being's minimal runtime state for this slice.
 
 Just what it needs to have: an identity, a set of needs, and a dominant
-emotion. No age, no life-stage, no caregiver. The services own the rules that
+emotion. The services own the rules that
 move this state; the being is the state, not the behavior.
 """
 from __future__ import annotations

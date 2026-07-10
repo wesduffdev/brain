@@ -1,0 +1,2 @@
+# Keeps the models/ directory in git so `./models:/models` (docker-compose.yml)
+# has a bind-mount source before any .pt artifact is trained (V0-8 writes here).

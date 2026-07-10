@@ -1,0 +1,9 @@
+# Build context is ./engine (see docker-compose.yml / BRIEF §6). Keep the image
+# lean and reproducible: no caches, virtualenvs, or editor/OS cruft.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.DS_Store

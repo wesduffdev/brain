@@ -263,3 +263,24 @@ Development work may be sourced from the Trello board **NPC** (short link
 - **Board = intent, repo = truth.** The board says what to do and in what order;
   the code, tests, ADRs, and `README.md` roadmap remain the authoritative
   record. Design detail belongs in an ADR, not on a card.
+
+### New work is ticketed first (intake gate)
+
+**No code before a card.** Any new unit of work — a feature, a tweak, a chore,
+or a bug — must exist as a board card in the card → slice pattern (one-sentence
+outcome, acceptance criteria, affected files/ADRs) **before** implementation
+starts. This holds for work the director asks for **directly in-session**, not
+only for human-staged cards: the director's request *is* the authorization, so
+the **orchestrator mints the card** (sub-agents never write the board), places
+it, and moves it through the board states as the work proceeds —
+`Ready for Agent` → `in progress` → `in review` → (human) `done`. Only once a
+card exists does the normal discipline apply: TDD red-first, a worktree branch →
+reviewed PR, and the per-slice deep-module + domain-model gates. An ask too
+small or exploratory to be a full slice is still captured as a card and named as
+such — never worked off-book. Each board write references the commit/PR so board
+and repo stay reconcilable.
+
+This is an **orchestrator procedure, not a hook** — the harness cannot see board
+state at commit time, so "a card exists for this work" cannot be enforced
+mechanically (the same reason *Closing a wave* is a procedure). It is upheld by
+discipline and review.

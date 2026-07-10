@@ -1,0 +1,44 @@
+# The object catalog and the vocabulary its definitions draw from.
+#
+# The being learns from PROPERTIES and outcomes, never from English names:
+# `developerLabel` is human-facing metadata and is deliberately NOT part of what
+# the being perceives (ADR 0002). Every property/affordance an object claims
+# must come from the vocabularies below — the vocabulary is the single source of
+# truth for what a property even is, so a typo or a made-up trait is rejected at
+# load time rather than silently perceived.
+
+properties:
+  - round
+  - square
+  - smooth
+  - rough
+  - soft
+  - hard
+  - light
+  - heavy
+  - rubbery
+  - warm
+  - red
+  - blue
+  - wooden
+
+affordances:
+  - look
+  - touch
+  - push
+  - grab
+  - drop
+
+objects:
+  obj_red_ball:
+    developerLabel: Red Ball
+    properties: [round, rubbery, smooth, light, red]
+    affordances: [look, touch, push, grab, drop]
+  obj_soft_blanket:
+    developerLabel: Soft Blanket
+    properties: [soft, warm, light]
+    affordances: [look, touch, grab, drop]
+  obj_wooden_block:
+    developerLabel: Wooden Block
+    properties: [square, hard, heavy, wooden, smooth]
+    affordances: [look, touch, push, grab]

@@ -59,6 +59,28 @@ the whole model.
 _Avoid_: engine, game. (`World`, meaning global laws, is a future concept, not
 this term.)
 
+**Interaction event**:
+A meaningful thing that happened — the being took an action on an object, with an
+expected outcome, an observed outcome, and the emotion before and after. The
+lasting record everything learned is derived from.
+_Avoid_: log entry, action record, transaction.
+
+**Training example**:
+A model-ready row derived from interaction events: input features in, outcome
+labels out. What the predictor learns from, not raw history.
+_Avoid_: sample, datapoint, dataset row.
+
+**Prediction record**:
+A prediction the model made, kept so it can later be compared against the actual
+observed outcome (shadow mode) and marked right or wrong.
+_Avoid_: guess, inference log, prediction log.
+
+**Model run**:
+The metadata of one training run — when it ran, how it scored, and where its
+weights artifact lives; the learned weights themselves live in a `.pt` file, not
+here.
+_Avoid_: training job, experiment, checkpoint.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

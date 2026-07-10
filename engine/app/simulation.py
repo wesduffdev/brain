@@ -15,6 +15,7 @@ from app.config_service import ConfigService
 from app.domain.being_state import BeingState
 from app.services.emotion_service import EmotionService
 from app.services.need_service import NeedService
+from app.services.perception_service import PerceptionService
 from app.services.tick_service import TickService
 
 
@@ -23,6 +24,8 @@ class Simulation:
         self._clock = TickService()
         self._needs = NeedService(config.need_policies())
         self._emotion = EmotionService(config.emotion_rules(), config.default_emotion())
+        self._perception = PerceptionService(config.object_catalog())
+        self._room = config.room()
 
         needs = config.initial_needs()
         self.being = BeingState(
@@ -44,4 +47,9 @@ class Simulation:
         return self.state()
 
     def state(self) -> Dict:
-        return self.being.snapshot(self._clock.current_tick)
+        """A snapshot of the being plus what it currently perceives of its room.
+        The `perceived` block is the being's view of the world, produced by the
+        PerceptionService — never the true world state (ADR 0002)."""
+        snapshot = self.being.snapshot(self._clock.current_tick)
+        snapshot["perceived"] = self._perception.perceive(self._room)
+        return snapshot

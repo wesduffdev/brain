@@ -1,0 +1,18 @@
+# The one room the being lives in for v0. This is structural world-truth:
+# which objects share the room with the being. The being does NOT read this
+# directly — the PerceptionService turns it into a *perceived* view (ADR 0002).
+# A later slice adds more rooms; for now there is exactly one.
+#
+# base_confidence: how clearly things in this room can be perceived (0..1)
+#   before any environmental condition (a dark or loud room — the environment
+#   slice) erodes recognition. 1.0 = fully certain. Tuning perceptual clarity is
+#   a config edit, never a code change.
+# contains: the ids of the objects present, defined in object_properties.yaml.
+
+room:
+  id: room_001
+  base_confidence: 1.0
+  contains:
+    - obj_red_ball
+    - obj_soft_blanket
+    - obj_wooden_block

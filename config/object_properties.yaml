@@ -18,6 +18,7 @@ properties:
   - heavy
   - rubbery
   - warm
+  - hot
   - red
   - blue
   - wooden
@@ -41,4 +42,8 @@ objects:
   obj_wooden_block:
     developerLabel: Wooden Block
     properties: [square, hard, heavy, wooden, smooth]
+    affordances: [look, touch, push, grab]
+  obj_hot_lamp:
+    developerLabel: Hot Lamp
+    properties: [hot, hard, heavy, smooth]
     affordances: [look, touch, push, grab]

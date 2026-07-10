@@ -1,0 +1,22 @@
+{
+  "name": "jarvis-renderer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "PixiJS renderer for the situated-being simulation. Draws the being's render frames (ADR 0004) and forwards player commands. Owns no psychology.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "pixi.js": "^8.5.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}

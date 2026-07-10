@@ -14,11 +14,13 @@ from typing import Dict, List, Mapping, Optional, Tuple
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
 from app.policies import (
+    ActionPolicy,
     CommandSpec,
     EmotionRule,
     EnvironmentPolicy,
     NeedTickPolicy,
     RenderHintsPolicy,
+    SafetyRule,
 )
 
 # Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
@@ -37,6 +39,8 @@ class ConfigService:
         render_hints: Optional[Mapping] = None,
         commands: Optional[Mapping] = None,
         outcome: Optional[Mapping] = None,
+        actions: Optional[Mapping] = None,
+        safety: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
@@ -46,6 +50,8 @@ class ConfigService:
         self._render_hints = render_hints or {}
         self._commands = commands or {}
         self._outcome = outcome or {}
+        self._actions = actions or {}
+        self._safety = safety or {}
 
     # --- construction -----------------------------------------------------
 
@@ -60,6 +66,8 @@ class ConfigService:
         render_hints: Optional[Mapping] = None,
         commands: Optional[Mapping] = None,
         outcome: Optional[Mapping] = None,
+        actions: Optional[Mapping] = None,
+        safety: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -72,6 +80,8 @@ class ConfigService:
             render_hints,
             commands,
             outcome,
+            actions,
+            safety,
         )
 
     @classmethod
@@ -89,6 +99,8 @@ class ConfigService:
         render_hints = yaml.safe_load((root / "render_hints.yaml").read_text())
         commands = yaml.safe_load((root / "commands.yaml").read_text())
         outcome = yaml.safe_load((root / "outcome_labels.yaml").read_text())
+        actions = yaml.safe_load((root / "actions.yaml").read_text())
+        safety = yaml.safe_load((root / "safety_rules.yaml").read_text())
         return cls(
             tick_rates,
             emotions,
@@ -98,6 +110,8 @@ class ConfigService:
             render_hints,
             commands,
             outcome,
+            actions,
+            safety,
         )
 
     # --- ticks / needs ----------------------------------------------------
@@ -205,6 +219,90 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
+
+    def action_policies(self) -> Dict[str, ActionPolicy]:
+        """Every action the being can take, keyed by name, in authored order.
+        Utility weights + outcome rules come from `actions.yaml`; the timing
+        (duration/cooldown) from the `actions` block of `tick_rates.yaml` — the
+        single tuning surface for time (BRIEF §10). An action either is `free`
+        (self-directed, no affordance) or names an object affordance from the
+        vocabulary; the outcomes it references must be real outcome labels. An
+        absent file yields no actions (so pre-decision slices are unchanged)."""
+        affordance_vocab = set(self._objects.get("affordances", []) or [])
+        outcome_vocab = set(self.outcome_labels())
+        timing = self._tick_rates.get("actions", {}) or {}
+
+        def _check_outcome(action_name: str, outcome: str) -> None:
+            if outcome_vocab and outcome not in outcome_vocab:
+                raise ValueError(
+                    f"action {action_name!r}: outcome {outcome!r} is not in the "
+                    f"outcome vocabulary (config/outcome_labels.yaml)"
+                )
+
+        policies: Dict[str, ActionPolicy] = {}
+        for name, raw in (self._actions.get("actions", {}) or {}).items():
+            spec = raw or {}
+            free = bool(spec.get("free", False))
+            affordance = None if free else spec.get("affordance")
+            if not free and affordance is None:
+                raise ValueError(
+                    f"action {name!r}: must be `free: true` or name an `affordance`"
+                )
+            if affordance is not None and affordance_vocab and affordance not in affordance_vocab:
+                raise ValueError(
+                    f"action {name!r}: affordance {affordance!r} is not in the vocabulary"
+                )
+
+            utility = spec.get("utility", {}) or {}
+            expected = tuple(spec.get("expected_outcomes", []) or [])
+            property_outcomes = {
+                str(prop): tuple(outcomes or [])
+                for prop, outcomes in (spec.get("property_outcomes", {}) or {}).items()
+            }
+            for outcome in expected:
+                _check_outcome(name, outcome)
+            for outcomes in property_outcomes.values():
+                for outcome in outcomes:
+                    _check_outcome(name, outcome)
+
+            time_spec = timing.get(name, {}) or {}
+            policies[str(name)] = ActionPolicy(
+                name=str(name),
+                affordance=affordance,
+                base=float(utility.get("base", 0.0)),
+                need_weights={n: float(w) for n, w in (utility.get("needs", {}) or {}).items()},
+                emotion_bonuses={e: float(b) for e, b in (utility.get("emotions", {}) or {}).items()},
+                expected_outcomes=expected,
+                property_outcomes=property_outcomes,
+                reason=str(spec.get("reason", "")),
+                duration_ticks=int(time_spec.get("duration_ticks", 0)),
+                cooldown_ticks=int(time_spec.get("cooldown_ticks", 0)),
+            )
+        return policies
+
+    def safety_rules(self) -> Tuple[SafetyRule, ...]:
+        """The hard guardrails SafetyService enforces (ADR 0009), in authored
+        order. A rule's `blocked_property` must be a real object property — the
+        same fail-loud vocabulary discipline as the object catalog. An absent
+        file yields no rules."""
+        property_vocab = set(self._objects.get("properties", []) or [])
+        rules = []
+        for spec in (self._safety.get("rules", []) or []):
+            prop = str(spec["blocked_property"])
+            if property_vocab and prop not in property_vocab:
+                raise ValueError(
+                    f"safety rule: blocked_property {prop!r} is not in the vocabulary"
+                )
+            rules.append(
+                SafetyRule(
+                    action=str(spec["action"]),
+                    blocked_property=prop,
+                    reason=str(spec.get("reason", "")),
+                )
+            )
+        return tuple(rules)
 
     # --- render / commands ------------------------------------------------
 

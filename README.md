@@ -101,7 +101,8 @@ strictly top-to-bottom.
 2. **Objects + a room; the being perceives what is near.** ✅
 3. Environmental conditions (light/dark, sound, temperature) that move
    contextual needs like safety — this is what makes `scared`/fear fire.
-4. Actions + a simple rule/utility decision (generic object interactions).
+4. **Actions + a simple rule/utility decision (generic object interactions);
+   safety guardrails hard-block unsafe actions.** ✅
 5. **FastAPI engine: REST `/state` + WebSocket tick stream; `docker-compose.yml`
    (engine + postgres).** ✅
 6. Postgres persistence: interaction events + training examples.
@@ -111,8 +112,11 @@ strictly top-to-bottom.
    in [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
    Shadow-mode inference + prediction/actual comparison, and training on real
    stored examples, come next.)*
-8. PixiJS renderer showing the being's current emotion/action. *(the wire
-   contract is pinned in [ADR 0004](docs/adr/0004-render-state-contract.md).)*
+8. **PixiJS renderer showing the being's current emotion/needs; sends a
+   `player_command` back.** ✅ *(the wire contract is pinned in
+   [ADR 0004](docs/adr/0004-render-state-contract.md); how the renderer
+   authenticates in [ADR 0010](docs/adr/0010-renderer-authentication.md).
+   `pose`/`action` render once V0-4 lands.)*
 
 Each slice is test-first and ends in something observable. See
 [`docs/adr/`](docs/adr/) for the decisions behind the structure and

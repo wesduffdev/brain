@@ -48,6 +48,33 @@ affordances rather than a human name. Its developer label is a human-only
 convenience the being never knows.
 _Avoid_: item, entity, thing.
 
+**Affordance**:
+What an object offers to be done to it — `look`, `touch`, `push`, `grab`,
+`drop`. An action that manipulates an object is valid only if the object offers
+its affordance; self-directed actions need none.
+_Avoid_: capability, verb, interaction type.
+
+**Action**:
+One thing the being does toward an object in a tick — observe, approach,
+withdraw, touch, grab, push. Always the being's own doing, self- and
+world-directed only; there is no caregiver-directed action. Distinct from a
+player command, which is the world's doing.
+_Avoid_: move, behaviour, command, activity.
+
+**Decision**:
+The being's choice of a single action toward a single object this tick, made by
+utility scoring over its needs, emotion, and what it perceives — carrying the
+action, its target, the felt emotion, and a stated reason. A safety rule can
+forbid a candidate, and no score ever overrides it.
+_Avoid_: plan, policy, choice engine, AI move.
+
+**Safety rule**:
+A hard guardrail that forbids an action on an object with a given property (e.g.
+no touching something hot). Absolute: a high utility — or, later, a confident
+learned prediction — can never bypass it. Every blocked path leaves the being a
+safe action to take instead.
+_Avoid_: constraint, penalty, filter, validation.
+
 **Room**:
 The local place the being occupies and perceives; holds objects and its
 environmental conditions.
@@ -117,6 +144,13 @@ A presentation-only cue for how an emotion looks — mouth, eyes, effects, a
 thought glyph — looked up from the being's already-derived emotion. It encodes
 no decision; retuning it never changes what the being feels.
 _Avoid_: sprite, animation, expression state.
+
+**Renderer**:
+The client that draws the being from the engine's render frames and forwards
+player commands back. It owns no psychology and makes no decision — it presents
+what the engine already decided and sends raw intent. In v0 it is a browser
+PixiJS app; the term names the role, not the technology.
+_Avoid_: frontend, UI, client, view, PixiJS app.
 
 **Player command**:
 A raw player intent aimed at the world — e.g. presenting an object into the room

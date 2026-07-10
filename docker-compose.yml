@@ -1,7 +1,7 @@
 # Docker Compose skeleton for the situated-being simulation (ticket V0-5).
-# BRIEF §6 is the reference shape. Services: the Python `engine`, `postgres`, and
-# the `ml-trainer` job (V0-8) under `profiles: [training]`. The `renderer`
-# (V0-11) is added by its own slice.
+# BRIEF §6 is the reference shape. Services: the Python `engine`, `postgres`, the
+# PixiJS `renderer` (V0-11), and the `ml-trainer` job (V0-8) under
+# `profiles: [training]`.
 
 services:
   engine:
@@ -31,6 +31,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  renderer:
+    # The PixiJS front-end (V0-11, BRIEF §6). Vite dev server; the source is
+    # bind-mounted for live edits with an anonymous volume shielding
+    # node_modules. It draws render frames (ADR 0004) and forwards player
+    # commands — it owns no psychology (architectural rule #1).
+    build: ./renderer
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser runs on the host, so it reaches the engine at localhost:8000
+      # (the published port), not the compose-internal `engine` hostname.
+      VITE_ENGINE_HOST: ${VITE_ENGINE_HOST:-localhost:8000}
+      # v0 has no login (ADR 0010): mint a service token with `make token` and
+      # set RENDERER_TOKEN in your .env. Empty means the engine (AUTH_REQUIRED)
+      # will reject the handshake — expected until you provide one.
+      VITE_ENGINE_TOKEN: ${RENDERER_TOKEN:-}
+    volumes:
+      - ./renderer:/app
+      - /app/node_modules
+    depends_on:
+      - engine
 
   ml-trainer:
     # The PyTorch training sidecar/job (BRIEF §5, §11). Reuses the lean engine

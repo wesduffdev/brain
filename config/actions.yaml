@@ -1,0 +1,86 @@
+# What the being can DO, and how much it wants to (ADR 0009).
+#
+# Each action is scored by UTILITY and the highest safe, not-on-cooldown action
+# wins. Utility = base + sum(needs[n] * weight) + emotions[dominant_emotion].
+# Weights may be negative. Retuning temperament — how curious, how cautious the
+# being is — is a change here, never in Python.
+#
+# affordance: the object affordance this action needs (from the affordances
+#   vocabulary in object_properties.yaml); the object must offer it.
+# free: true  -> a self-/world-directed action (move toward/away) that needs no
+#   affordance; any perceived object can be its target. There is NO
+#   caregiver-directed action — the being acts on itself and its world only.
+# expected_outcomes / property_outcomes: the RULE LAYER. `expected_outcomes` are
+#   always anticipated; each property in `property_outcomes` adds its outcomes
+#   when that property is present. Outcomes are drawn from outcome_labels.yaml —
+#   the single outcome vocabulary (a typo or made-up outcome is rejected at load).
+#   These fill an InteractionEvent's expected (from perceived properties) and
+#   observed (from true properties) outcomes.
+# reason: the human-readable justification surfaced to the renderer.
+#
+# Action TIMING (duration_ticks / cooldown_ticks) lives in tick_rates.yaml — the
+# single tuning surface for time (BRIEF §10) — not here.
+
+actions:
+  observe:
+    affordance: look
+    utility:
+      base: 2.0
+      needs: { curiosity: 0.04 }
+      emotions: { curious: 2.0, scared: 0.5 }
+    expected_outcomes: [pleasant]
+    reason: "curiosity is high and it looks safe, so I take a careful look"
+
+  approach:
+    free: true
+    utility:
+      base: 1.5
+      needs: { curiosity: 0.03 }
+      emotions: { curious: 2.5, scared: -4.0 }
+    expected_outcomes: [pleasant]
+    reason: "curiosity is high and predicted risk is low, so I move closer"
+
+  withdraw:
+    free: true
+    utility:
+      base: 0.2
+      needs: {}
+      emotions: { scared: 6.0, curious: -2.0 }
+    expected_outcomes: []
+    reason: "this feels unsafe, so I move away"
+
+  touch:
+    affordance: touch
+    utility:
+      base: 1.0
+      needs: { curiosity: 0.02, comfort: -0.02 }
+      emotions: { curious: 0.5, scared: -5.0 }
+    expected_outcomes: [pleasant]
+    property_outcomes:
+      soft: [pleasant]
+      hot: [causes_pain, scary]
+    reason: "reaching out to touch it"
+
+  grab:
+    affordance: grab
+    utility:
+      base: 0.8
+      needs: { curiosity: 0.01, comfort: -0.03 }
+      emotions: { curious: 0.3, scared: -5.0 }
+    expected_outcomes: []
+    property_outcomes:
+      soft: [pleasant]
+      hot: [causes_pain, scary]
+    reason: "reaching to hold it"
+
+  push:
+    affordance: push
+    utility:
+      base: 0.7
+      needs: { curiosity: 0.02 }
+      emotions: { curious: 0.5, scared: -1.0 }
+    expected_outcomes: []
+    property_outcomes:
+      round: [rolls]
+      hard: [makes_noise]
+    reason: "giving it a push to see what happens"

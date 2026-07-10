@@ -113,6 +113,14 @@ git worktree** so agents never share a working tree:
   commit inside their worktree and report back; they never push, merge, open
   PRs, or write to Trello. The orchestrator merges slice branches into the wave
   branch, opens the wave PR, and mirrors state to the board.
+- **A sub-agent may escalate to a workflow.** When a slice is large enough to
+  warrant decomposition (many independent files, a fan-out-then-verify shape), a
+  sub-agent may spawn a workflow or its own helper agents to complete it. The
+  slice's contract still holds: all work stays inside that slice's worktree;
+  nested agents must not write the same files concurrently (partition the files
+  or serialize); the slice still lands as commits on its `slice/<ticket>` branch;
+  and the sub-agent still returns one completion report. Keep the fan-out
+  proportional — a small slice needs no workflow.
 
 ## Task source — the NPC Trello board (guardrails)
 

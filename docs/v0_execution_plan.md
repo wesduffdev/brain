@@ -411,7 +411,13 @@ the git commit/PR (board = intent, repo = truth).
 
 ### 6.2 Sub-agent (implementer) — one card = one vertical slice
 
-1. **Claim** confirmed by the orchestrator; branch from `main`.
+A sub-agent may spawn a workflow or helper agents when a slice is large enough to
+warrant decomposition (see `CLAUDE.md` → "Parallel execution — git worktrees and
+wave PRs"); the worktree, `slice/<ticket>` branch, and single-completion-report
+contract still hold, and nested agents must not write the same files at once.
+
+1. **Claim** confirmed by the orchestrator; work in the slice's worktree on
+   `slice/<ticket>` (branched off the wave branch).
 2. **Red first:** write behavior-driven tests through the public surface, run
    them, observe them **fail**.
 3. **Green:** implement behind the module seam until the suite passes

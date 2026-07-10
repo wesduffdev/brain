@@ -10,8 +10,8 @@ architecture is `docs/BRIEF.md`.
 ## Design boundary (applies to every change)
 
 This is a serious simulation. Within it, the being's state and the world's
-events carry real, felt consequences — distress, fear, neglect-like conditions
-and negative outcomes are modeled honestly. Those consequences are always
+events carry real, felt consequences — distress, fear, deprivation, and
+negative outcomes are modeled honestly. Those consequences are always
 **abstract**: state changes (trust / stress / comfort / pain / fear deltas),
 warnings, and recovery paths — never step-by-step depictions of real-world
 harm. Every harmful path has a visible consequence and a recovery path. The

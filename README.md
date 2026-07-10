@@ -102,7 +102,9 @@ strictly top-to-bottom.
 3. Environmental conditions (light/dark, sound, temperature) that move
    contextual needs like safety — this is what makes `scared`/fear fire.
 4. **Actions + a simple rule/utility decision (generic object interactions);
-   safety guardrails hard-block unsafe actions.** ✅
+   a safety *invariant floor* blocks only simulation-breaking actions, while
+   recoverable-but-harmful ones (touching something hot) are allowed and land
+   felt consequences the being learns from** ([ADR 0014](docs/adr/0014-invariant-floor-and-outcome-state-effects.md)). ✅
 5. **FastAPI engine: REST `/state` + WebSocket tick stream; `docker-compose.yml`
    (engine + postgres).** ✅
 6. Postgres persistence: interaction events + training examples.

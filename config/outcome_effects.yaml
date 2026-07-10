@@ -1,0 +1,27 @@
+# The FELT CONSEQUENCE of each outcome on the being's needs (ADR 0014).
+#
+# This is what makes a harmful action land real, possibly-lasting harm instead
+# of being hard-blocked. When the being acts, the action's OBSERVED outcomes
+# (config/actions.yaml, from the object's true properties) are looked up here and
+# their per-need deltas are summed and applied — clamped to each need's own band
+# (config/tick_rates.yaml, the single home for a need's floor/ceiling).
+#
+# Per the design boundary (docs/design_boundary.md, ADR 0013), harm is ALWAYS
+# abstract internal state — deltas on pain / safety / comfort and the emotions
+# and behaviors that follow — never any depiction of, or instruction for, harm.
+#
+# Keyed outcome_label -> { need: delta }. An outcome named here must be a real
+# outcome label (config/outcome_labels.yaml); a typo is rejected at load, the
+# same fail-loud discipline as the object catalog. An outcome with no entry (or a
+# need with no entry) moves nothing. Retuning how much an experience hurts — or
+# giving pleasant outcomes a positive effect — is a change HERE, never in Python.
+
+effects:
+  # Touching something hot hurts: a pain spike, felt safety crashes (which reads
+  # as fear once it crosses the `scared` threshold in emotions.yaml), and comfort
+  # is lost. The pain then decays over ticks (recovery); the drop in felt safety
+  # is not auto-restored, so the fear can linger.
+  causes_pain: { pain: 45, safety: -40, comfort: -20 }
+
+  # A frightening experience further erodes felt safety on its own.
+  scary:       { safety: -20 }

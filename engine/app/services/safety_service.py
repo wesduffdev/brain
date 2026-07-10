@@ -1,14 +1,21 @@
-"""SafetyService — the hard guardrail on what the being may do (ADR 0009).
+"""SafetyService — the invariant floor on what the being may do (ADR 0009,
+narrowed by ADR 0013/0014).
 
 It answers one question: is taking this action on an object with these perceived
 properties forbidden? It is deliberately separate from the DecisionService so the
-guardrail is absolute — the decision layer asks it about every candidate and
-drops any it blocks, so a high utility (or, later, a confident learned
-prediction) can never buy its way past safety. The rules live in
-`config/safety_rules.yaml`; this service holds no thresholds of its own.
+floor is absolute — the decision layer asks it about every candidate and drops
+any it blocks, so a high utility (or, later, a confident learned prediction) can
+never buy its way past it. The rules live in `config/safety_rules.yaml`; this
+service holds no thresholds of its own.
 
-Per the design boundary, a blocked action carries an abstract, human-readable
-reason (a hot surface would cause pain) — never any depiction of harm.
+The floor blocks only genuinely *simulation-breaking* actions, not merely harmful
+ones: recoverable-but-harmful actions (touching something hot) are allowed and
+their harm lands as felt consequences on the being's needs (see
+`OutcomeEffectPolicy`), not as a block — that is how the being learns cause and
+effect. In v0 nothing is simulation-breaking, so the floor is empty and this
+service permits everything; the seam stays so a rule can reinstate a hard block.
+Per the design boundary, any rule's reason is abstract and human-readable — never
+any depiction of harm.
 """
 from __future__ import annotations
 

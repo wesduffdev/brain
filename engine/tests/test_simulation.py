@@ -27,8 +27,13 @@ def test_a_fresh_being_is_born_calm():
 
 
 def test_a_left_alone_being_grows_curious_as_curiosity_climbs():
-    # Shipped config: curiosity starts 55, +1 every 15 ticks -> 70 by tick 225.
-    sim = _fresh()
+    # Left TRULY alone — an empty room, nothing to act on and no world events —
+    # the being's curiosity drifts up on its own (shipped config: starts 55, +1
+    # every 15 ticks -> 70 by tick 225) until it reads as curious. Isolated from
+    # object interactions on purpose: this pins need-drift -> emotion. (Put the
+    # being in a room with a hot object and it will touch it, be hurt, and turn
+    # scared instead — see test_harmful_action_consequences and the demo.)
+    sim = Simulation(ConfigService.from_files(_CONFIG_ROOT).with_room_contents([]))
     assert sim.state()["emotion"] == "calm"
 
     seen = {sim.state()["emotion"]}

@@ -88,9 +88,12 @@ def test_the_demo_runs_the_being_alone_with_a_named_object(capsys):
     assert "Red Ball" in out
 
 
-def test_the_demo_defaults_to_the_hot_lamp_and_safety_holds(capsys):
+def test_the_demo_defaults_to_the_hot_lamp_and_the_being_can_be_hurt_by_it(capsys):
+    # The hot lamp is no longer hard-blocked (ADR 0013/0014): the being reaches
+    # out, touches it, and is hurt — a recorded `causes_pain` outcome.
     demo.main(["5"])
 
     out = capsys.readouterr().out
     assert "Hot Lamp" in out
-    assert "safety held" in out
+    assert "harmful contact" in out
+    assert "causes_pain" in out

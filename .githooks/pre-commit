@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# Guardrail: never commit directly to main. All work goes through a worktree
+# branch and reaches main only via a reviewed PR. See CLAUDE.md.
+# Installed by `make setup` (git config core.hooksPath .githooks).
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+  echo "" >&2
+  echo "  X  Direct commits to '$branch' are blocked." >&2
+  echo "     Work in a git worktree on a branch, then open a PR:" >&2
+  echo "       git worktree add .claude/worktrees/<name> -b <branch> main" >&2
+  echo "     See CLAUDE.md -> 'Parallel execution' (never work on main)." >&2
+  echo "" >&2
+  exit 1
+fi
+exit 0

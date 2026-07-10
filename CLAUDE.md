@@ -90,8 +90,20 @@ hands services typed policies. Retuning must be a config change only.
   the same slice, not as a follow-up.
 - One source of truth per fact: the roadmap lives in `README.md`; the brief in
   `docs/BRIEF.md`. Link, don't restate.
+- **Governance is indexed in `README.md`.** When you add or change a rule, hook,
+  guardrail, or sub-agent convention in `CLAUDE.md`, add/update its row in the
+  "How we work (governance index)" table in `README.md` **in the same change** —
+  one row: what it is, why, and what it does.
 
 ## Parallel execution — git worktrees and wave PRs
+
+**Never commit to `main` directly.** All work — feature slices, chores, docs,
+even edits to these rules — happens in a git worktree on a branch and reaches
+`main` only through a reviewed PR. This is enforced: a `pre-commit` hook
+(`.githooks/pre-commit`, installed by `make setup` via `core.hooksPath`) rejects
+any commit made on `main`, so `main` only ever advances by merging a PR. A
+worktree is cheap — create one even for a one-line change:
+`git worktree add .claude/worktrees/<name> -b <branch> main`.
 
 When several slices are worked at once (a "wave"), each slice runs in its **own
 git worktree** so agents never share a working tree:
@@ -154,6 +166,30 @@ through the ticket system:
    blocked and re-ticketed, not merged.
 4. **Message the director** when a bug is found and again when its hotfix merges
    — the same milestone cadence used for slice completion and wave-PR roll-up.
+
+### Closing a wave (after its PR merges to `main`)
+
+When a human accepts and merges a wave's PR, the orchestrator closes it out —
+verify first, then tidy — and reports the result:
+
+1. **Sync `main`** — `git pull` so local `main` matches the merged remote.
+2. **Verify the merged tree** — run the full suite (`make test`) and a runtime
+   smoke (the demo, plus the Docker stack when a daemon is available); it must be
+   green with no errors.
+3. **If anything fails, run the self-healing loop above** (bug ticket →
+   `hotfix/<ticket>` → verify). The wave PR is already closed, so the fix lands
+   as its own PR to `main`. Do not tidy until green.
+4. **Only when green, tidy git** — remove the wave's worktrees and delete the
+   merged `slice/*` and `wave/<n>` branches (local and remote). Never delete an
+   unmerged branch.
+5. **Reflect the board** — move the wave's cards to `done` (the human's merge is
+   the Done authorization).
+6. **Report to the director** — synced + verified + cleaned, or, if a defect
+   surfaced, the bug-ticket link and hotfix status. Report faithfully (show the
+   test result).
+
+This is triggered by a human merging the PR — an event the harness cannot see —
+so it is an orchestrator procedure, not a hook.
 
 ## Task source — the NPC Trello board (guardrails)
 

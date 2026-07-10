@@ -57,7 +57,7 @@ what a later slice fills in:
 | `tick`      | integer                      | present  | Domain `state()` today. |
 | `emotion`   | string (dominant emotion)    | present  | Domain `state()` today — a bare string, one of the v0 emotions below. |
 | `intensity` | float `0.0–1.0`              | absent   | Domain emotion is a bare string today, so `RenderStateService` supplies a neutral default until `EmotionState` carries an intensity (emotion/action work, ~V0-4). |
-| `needs`     | object `{name: int 0–100}`   | present  | Domain `state()` today — the seven needs from `config/tick_rates.yaml`. |
+| `needs`     | object `{name: int 0–100}`   | present  | Domain `state()` today — the six needs from `config/tick_rates.yaml`. |
 | `pose`      | string                       | absent   | Arrives with **V0-4** (actions / decision). Renderer treats absent as unknown/idle. |
 | `action`    | string                       | absent   | Arrives with **V0-4** (`currentAction`). Absent until then. |
 | `visual`    | object (see below)           | present† | Presentation hints derived by `RenderStateService` from emotion/action. †The engine may emit a minimal/empty `visual` in v0; it is never psychology, only draw hints. |
@@ -68,7 +68,7 @@ what a later slice fills in:
   — with `happy`, `excited`, `comforted` reachable only once interactions land.
   Emotion is always **derived** engine-side; the renderer never computes it.
 - **`needs`** is a flat map of need name → integer clamped `0–100`. In v0 the
-  keys are `hunger, sleep, comfort, warmth, curiosity, safety, hygiene`. The
+  keys are `hunger, sleep, comfort, warmth, curiosity, safety`. The
   renderer must not assume a fixed key set — it renders whatever needs arrive.
 - **`visual`** carries only draw hints: `mouth` (e.g. `small_open`), `eyes`
   (e.g. `wide`), `effects` (array, e.g. `["head_tilt"]`), `thought` (a short
@@ -106,19 +106,15 @@ interpret outcomes — it forwards intent and draws frames. The being's response
 to a presented object is decided by the engine's psychology (perception →
 decision → safety), exactly as if the object had appeared any other way.
 
-### Design boundary and no-caregiver reaffirmation
+### Design boundary on the wire
 
 This contract carries the project's design boundary onto the wire:
 
-- **No caregiver concept.** There is no caregiver in this simulation and no
-  caregiver-directed command or frame field. `player_command` expresses a
-  player acting on the **world** (e.g. presenting an object), never a caregiver
-  the being seeks or summons. The legacy "seek caregiver" / "cry to summon" /
-  "freeze" phrasing in `BRIEF.md` §9 (the light example, `EmotionState`
-  examples) is **superseded** by ADR 0001, `CLAUDE.md`, and this ADR; no such
-  action or command exists. Actions the frame can report (once V0-4 lands) are
-  self- and world-directed only (observe / approach / withdraw / touch / grasp
-  / push …).
+- **Self- and world-directed only.** `player_command` expresses a player acting
+  on the **world** (e.g. presenting an object); there is no command or frame
+  field that summons or depends on an external actor. Actions the frame can
+  report (once V0-4 lands) are self- and world-directed only (observe / approach
+  / withdraw / touch / grasp / push …).
 - **Harm stays abstract.** The frame conveys the being's state — including
   distress, `scared`, low safety — as abstract signals (emotion string,
   intensity, need levels, visual hints), never a depiction of real-world harm.

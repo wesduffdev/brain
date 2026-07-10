@@ -5,18 +5,23 @@ in and out so callers can never alias the stored record); it is the seam the
 behavior suite drives and needs no database. `PostgresBeingRepository` maps the
 same port onto the SQLAlchemy ORM over a live session.
 
-Both satisfy `app.ports.repositories.BeingRepository`. Nothing writes beings
-into the tick loop yet — this delivers the seam; wiring events through it waits
-for V0-4, when InteractionEvents first exist.
+Both satisfy `app.ports.repositories.BeingRepository`. The event and training-
+example adapters (V0-7b, ADR 0012) follow the same shape behind their own ports;
+events and examples are append-only, so those adapters `add` and read back rather
+than upserting by id. The Simulation writes through these ports as it runs; it
+never touches the ORM.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.db import models
 from app.db.models import Being
 from app.domain.being_state import BeingState
+from app.domain.interaction_event import InteractionEvent
+from app.domain.training_example import TrainingExample
 
 
 def _copy(being: BeingState) -> BeingState:
@@ -56,3 +61,105 @@ class PostgresBeingRepository:
         if row is None:
             return None
         return BeingState(being_id=row.being_id, needs=dict(row.needs), emotion=row.emotion)
+
+
+def _event_from_row(row) -> InteractionEvent:
+    return InteractionEvent(
+        being_id=row.being_id,
+        tick=row.tick,
+        object_id=row.object_id,
+        action=row.action,
+        expected_outcome=tuple(row.expected_outcome or ()),
+        observed_outcome=tuple(row.observed_outcome or ()),
+        emotion_before=row.emotion_before,
+        emotion_after=row.emotion_after,
+    )
+
+
+class InMemoryInteractionEventRepository:
+    """An append-only event store in a list — the test seam, no database."""
+
+    def __init__(self) -> None:
+        self._events: List[InteractionEvent] = []
+
+    def add(self, event: InteractionEvent) -> None:
+        self._events.append(event)
+
+    def all(self) -> List[InteractionEvent]:
+        return list(self._events)
+
+
+class PostgresInteractionEventRepository:
+    """An interaction-event store backed by Postgres via a SQLAlchemy ``Session``."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, event: InteractionEvent) -> None:
+        self._session.merge(  # insert-or-update by event_id, so re-runs are idempotent
+            models.InteractionEvent(
+                event_id=event.event_id,
+                being_id=event.being_id,
+                object_id=event.object_id,
+                action=event.action,
+                expected_outcome=list(event.expected_outcome),
+                observed_outcome=list(event.observed_outcome),
+                emotion_before=event.emotion_before,
+                emotion_after=event.emotion_after,
+                tick=event.tick,
+            )
+        )
+        self._session.commit()
+
+    def all(self) -> List[InteractionEvent]:
+        rows = (
+            self._session.query(models.InteractionEvent)
+            .order_by(models.InteractionEvent.tick, models.InteractionEvent.event_id)
+            .all()
+        )
+        return [_event_from_row(row) for row in rows]
+
+
+class InMemoryTrainingExampleRepository:
+    """An append-only training-example store in a list — the test seam."""
+
+    def __init__(self) -> None:
+        self._examples: List[TrainingExample] = []
+
+    def add(self, example: TrainingExample) -> None:
+        self._examples.append(example)
+
+    def all(self) -> List[TrainingExample]:
+        return list(self._examples)
+
+
+class PostgresTrainingExampleRepository:
+    """A training-example store backed by Postgres via a SQLAlchemy ``Session``."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, example: TrainingExample) -> None:
+        self._session.add(
+            models.TrainingExample(
+                event_id=example.event_id,
+                input_features=list(example.input_features),
+                output_labels=list(example.output_labels),
+            )
+        )
+        self._session.commit()
+
+    def all(self) -> List[TrainingExample]:
+        rows = (
+            self._session.query(models.TrainingExample)
+            .order_by(models.TrainingExample.id)
+            .all()
+        )
+        return [
+            TrainingExample(
+                event_id=row.event_id,
+                input_features=tuple(row.input_features or ()),
+                output_labels=tuple(row.output_labels or ()),
+            )
+            for row in rows
+        ]

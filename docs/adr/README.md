@@ -13,3 +13,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0006](0006-environmental-conditions-to-contextual-need-seam.md) | Environmental conditions → contextual-need seam (fear can fire) | Accepted |
 | [0007](0007-persistence-repository-port-and-schema-seam.md) | Persistence: repository-port and schema seam | Accepted |
 | [0008](0008-outcome-predictor-and-feature-encoding.md) | Outcome predictor + feature/label encoding contract | Accepted |
+| [0010](0010-renderer-authentication.md) | Renderer authentication: server-minted service token via env (no login in v0) | Accepted |

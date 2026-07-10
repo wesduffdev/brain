@@ -118,6 +118,13 @@ thought glyph — looked up from the being's already-derived emotion. It encodes
 no decision; retuning it never changes what the being feels.
 _Avoid_: sprite, animation, expression state.
 
+**Renderer**:
+The client that draws the being from the engine's render frames and forwards
+player commands back. It owns no psychology and makes no decision — it presents
+what the engine already decided and sends raw intent. In v0 it is a browser
+PixiJS app; the term names the role, not the technology.
+_Avoid_: frontend, UI, client, view, PixiJS app.
+
 **Player command**:
 A raw player intent aimed at the world — e.g. presenting an object into the room
 — sent by a renderer and validated by the engine before it can matter. It never

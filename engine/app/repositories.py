@@ -21,6 +21,7 @@ from app.db import models
 from app.db.models import Being
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
 
 
@@ -42,6 +43,21 @@ class InMemoryBeingRepository:
     def get(self, being_id: str) -> Optional[BeingState]:
         stored = self._beings.get(being_id)
         return _copy(stored) if stored is not None else None
+
+
+class InMemoryPredictionRecordRepository:
+    """A shadow-mode prediction store held in a list — the seam the behavior
+    suite drives, no database required. Records are immutable value objects
+    (`PredictionRecord`), so it stores and returns them directly."""
+
+    def __init__(self) -> None:
+        self._records: List[PredictionRecord] = []
+
+    def add(self, record: PredictionRecord) -> None:
+        self._records.append(record)
+
+    def all(self) -> List[PredictionRecord]:
+        return list(self._records)
 
 
 class PostgresBeingRepository:

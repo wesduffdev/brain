@@ -9,9 +9,10 @@ connection string.
 The being aggregate has a port, `BeingRepository` (V0-7). As the learning loop
 produces real records, each gets its own port here, added when it is actually
 needed rather than speculatively: `InteractionEventRepository` and
-`TrainingExampleRepository` land with the event→example wiring (V0-7b, ADR 0012).
-Events and examples are append-only facts, so their ports `add` and read back,
-rather than upserting by id like the being's mutable snapshot.
+`TrainingExampleRepository` land with the event→example wiring (V0-7b, ADR 0012),
+and `PredictionRecordRepository` with shadow mode (V0-9, ADR 0011). Events,
+examples, and predictions are append-only facts, so their ports `add` and read
+back, rather than upserting by id like the being's mutable snapshot.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from typing import List, Optional, Protocol
 
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
 
 
@@ -55,4 +57,21 @@ class TrainingExampleRepository(Protocol):
 
     def all(self) -> List[TrainingExample]:
         """Every stored training example, oldest first."""
+        ...
+
+
+class PredictionRecordRepository(Protocol):
+    """Stores shadow-mode prediction records for later comparison (ADR 0011).
+
+    Append-only: each interaction adds one record. The in-memory fake
+    (`app.repositories`) is the seam the behavior suite drives; a Postgres-backed
+    adapter onto the `prediction_records` table follows with the persistence
+    wiring."""
+
+    def add(self, record: PredictionRecord) -> None:
+        """Append ``record`` to the store."""
+        ...
+
+    def all(self) -> List[PredictionRecord]:
+        """Every stored record, oldest first."""
         ...

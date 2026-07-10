@@ -111,8 +111,11 @@ strictly top-to-bottom.
    in [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
    Shadow-mode inference + prediction/actual comparison, and training on real
    stored examples, come next.)*
-8. PixiJS renderer showing the being's current emotion/action. *(the wire
-   contract is pinned in [ADR 0004](docs/adr/0004-render-state-contract.md).)*
+8. **PixiJS renderer showing the being's current emotion/needs; sends a
+   `player_command` back.** ✅ *(the wire contract is pinned in
+   [ADR 0004](docs/adr/0004-render-state-contract.md); how the renderer
+   authenticates in [ADR 0010](docs/adr/0010-renderer-authentication.md).
+   `pose`/`action` render once V0-4 lands.)*
 
 Each slice is test-first and ends in something observable. See
 [`docs/adr/`](docs/adr/) for the decisions behind the structure and

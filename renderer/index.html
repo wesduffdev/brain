@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jarvis — being renderer</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #10141c;
+        color: #e6e9ef;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+      }
+      #status { font-size: 13px; opacity: 0.75; }
+      #stage { border-radius: 8px; overflow: hidden; }
+      #panel { display: flex; gap: 8px; align-items: center; }
+      button {
+        background: #2a3550;
+        color: #e6e9ef;
+        border: 1px solid #3d4b6e;
+        border-radius: 6px;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      button:hover { background: #34406099; }
+    </style>
+  </head>
+  <body>
+    <div id="status">connecting…</div>
+    <div id="stage"></div>
+    <div id="panel"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

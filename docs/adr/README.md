@@ -13,7 +13,8 @@ ADR — supersede it with a new one and update both statuses.
 | [0006](0006-environmental-conditions-to-contextual-need-seam.md) | Environmental conditions → contextual-need seam (fear can fire) | Accepted |
 | [0007](0007-persistence-repository-port-and-schema-seam.md) | Persistence: repository-port and schema seam | Accepted |
 | [0008](0008-outcome-predictor-and-feature-encoding.md) | Outcome predictor + feature/label encoding contract | Accepted |
-| [0009](0009-decision-utility-and-safety-guardrail-seam.md) | Decision (utility) + safety-guardrail seam | Accepted |
+| [0009](0009-decision-utility-and-safety-guardrail-seam.md) | Decision (utility) + safety-guardrail seam | Accepted (safety stance refined by [0013](0013-reframed-design-boundary.md)) |
 | [0010](0010-renderer-authentication.md) | Renderer authentication: server-minted service token via env (no login in v0) | Accepted |
 | [0011](0011-prediction-shadow-mode-and-predictor-port.md) | Prediction shadow mode + predictor-port seam | Accepted |
 | [0012](0012-interaction-event-and-training-example-ports.md) | Interaction-event and training-example repository ports (event→example wiring) | Accepted |
+| [0013](0013-reframed-design-boundary.md) | Reframed design boundary: honest, possibly-lasting harm; no forced recovery | Accepted |

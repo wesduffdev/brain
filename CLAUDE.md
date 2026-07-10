@@ -9,14 +9,19 @@ architecture is `docs/BRIEF.md`.
 
 ## Design boundary (applies to every change)
 
-This is a serious simulation. Within it, the being's state and the world's
-events carry real, felt consequences — distress, fear, deprivation, and
-negative outcomes are modeled honestly. Those consequences are always
-**abstract**: state changes (trust / stress / comfort / pain / fear deltas),
-warnings, and recovery paths — never step-by-step depictions of real-world
-harm. Every harmful path has a visible consequence and a recovery path. The
-project must never become instructional content for harming a real or
-vulnerable being. See `docs/design_boundary.md`.
+This is a serious simulation for studying **simulated psychology**. The being's
+state and the world's events carry real, felt consequences — distress, fear,
+deprivation, and harm are modeled honestly and **un-sanitized**, and those
+consequences **can be lasting** (conditioned fear, degraded trust, trait drift,
+non-recovery). The being can take harmful actions and suffer for them — that is
+how it learns; there is **no requirement that every harm be recoverable**
+(recovery is modeled only where it plausibly exists). Harm is always represented
+as **abstract internal state** — deltas on trust / stress / comfort / pain /
+fear and the emotions and behaviors that follow — **never** step-by-step
+depictions of, or instructions for, harming a real or vulnerable being. Modeling
+harm inside the simulation is in bounds; producing real-world-harm instructions
+is out of bounds. Adults only. See `docs/design_boundary.md` and
+`docs/adr/0013-reframed-design-boundary.md`.
 
 ## Development process (applies to every request)
 

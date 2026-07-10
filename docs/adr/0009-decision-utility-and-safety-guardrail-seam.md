@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. The **hard** safety-guardrail stance recorded below (safety *blocks*
+harmful actions) is refined by [ADR 0013](0013-reframed-design-boundary.md) and
+reshaped by ticket **V0-SAFE**: recoverable-but-harmful actions become **allowed
+and learnable**, and only simulation-breaking actions stay blocked. The
+decision/safety *seam* below is unchanged; what the guardrail blocks narrows.
 
 ## Date
 

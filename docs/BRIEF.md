@@ -53,12 +53,15 @@ The simulation may model high-stress situations, supportive and harsh
 conditions, deprivation, and consequences to trust, stress response, and
 temperament. These are simulation outcomes, not endorsements.
 
-Harm is abstract. Negative actions and hazards are represented as
-state changes (trust / stress / comfort / pain / fear deltas), warnings,
-recovery paths, and behavior consequences — never step-by-step depictions of
-real-world harm. Every harmful path has a visible consequence and a recovery
-path. The simulation must never become instructional content for harming a
-real or vulnerable being.
+Harm is abstract, honest, and may be lasting. Negative actions and hazards are
+represented as state changes (trust / stress / comfort / pain / fear deltas)
+and the behaviors that follow — never step-by-step depictions of real-world
+harm. Consequences can be lasting (conditioned fear, degraded trust, trait
+drift, non-recovery); the being can take harmful actions and suffer for them,
+which is how it learns. There is no requirement that every harm be recoverable —
+recovery is modeled only where it plausibly exists. The one invariant: the
+simulation must never become instructional content for harming a real or
+vulnerable being. (See ADR 0013, which reframes this section.)
 
 ---
 

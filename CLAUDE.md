@@ -95,6 +95,27 @@ hands services typed policies. Retuning must be a config change only.
   "How we work (governance index)" table in `README.md` **in the same change** —
   one row: what it is, why, and what it does.
 
+### Security & operational guardrails
+
+Security is a foundation the engine carries from the start, not a later slice.
+See [`docs/adr/0005-api-authentication.md`](docs/adr/0005-api-authentication.md).
+
+- **Secrets are never committed.** Real secrets and keys live in an untracked
+  `.env` (and `*.pem`/`*.key`), never in the repo; only `.env.example` with
+  placeholders is committed. The `pre-commit` hook backs this with a conservative
+  scan that blocks a staged `.env`, `*.pem`/`*.key`, or a PEM/AWS-key literal —
+  it does **not** flag generic `SECRET=`/entropy (kept low-noise on purpose).
+- **API auth is always-on JWT, config-gated, and tested.** Every protected route
+  (`GET /state`, and player commands as they land) runs the `require_auth`
+  dependency; `/ws` verifies a handshake token; `GET /health` is public. Auth is
+  always in the code path and gated only by the `AUTH_REQUIRED` flag — **there is
+  no localhost/loopback bypass**. The behaviour (public health, 401 without/with
+  a bad token, 200 with a valid one, WS reject/accept) is covered by tests.
+- **Local dev uses the same path.** Run with `AUTH_REQUIRED=true` and a
+  `JWT_SECRET`, and mint a service token with `make token` (`python -m
+  app.auth_token`) to call the API — dev exercises the real guard, not a bypass.
+  Setting `AUTH_REQUIRED=false` is an explicit, documented dev-only no-op.
+
 ## Parallel execution — git worktrees and wave PRs
 
 **Never commit to `main` directly.** All work — feature slices, chores, docs,

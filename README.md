@@ -15,9 +15,10 @@ today.
 
 A being whose **needs drift over ticks (config-driven)** and whose **dominant
 emotion is derived from those needs**; it **perceives the objects in its room**
-(each with a confidence); and it is exposed over an **HTTP + WebSocket API**,
-runnable as a **Docker Compose stack** (engine + postgres). No database code,
-ML, actions, or renderer yet — those are later slices.
+(each with a confidence); and it is exposed over an **authenticated HTTP +
+WebSocket API** (always-on JWT), runnable as a **Docker Compose stack** (engine +
+postgres). No database code, ML, actions, or renderer yet — those are later
+slices.
 
 ```
 config/
@@ -57,9 +58,31 @@ make up             # docker compose up --build  (engine :8000, postgres :5432)
 make down           # stop + remove volumes
 ```
 
+The API is authenticated (always-on JWT — [ADR 0005](docs/adr/0005-api-authentication.md)).
+Copy `.env.example` to `.env` and set a `JWT_SECRET`, then mint a service token
+and call the API with it:
+
+```bash
+cp .env.example .env                       # then edit JWT_SECRET
+export $(grep -v '^#' .env | xargs)        # load JWT_SECRET etc. into the shell
+make run &                                  # serve on :8000
+
+curl -s localhost:8000/health              # public → {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}\n' \
+  localhost:8000/state                     # no token → 401
+TOKEN=$(make -s token)                      # mint a token with the same secret
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8000/state                     # → 200 + the being's snapshot
+```
+
+The WebSocket `/ws` takes the token as `?token=<jwt>` or the `Authorization`
+header. Set `AUTH_REQUIRED=false` only for throwaway local dev (a documented
+dev-only no-op — there is no localhost bypass).
+
 No `make`? The equivalent is `python3 -m venv engine/.venv`, install
 `engine/requirements.txt` into it, then run modules from `engine/` with
-`PYTHONPATH=.` (e.g. `python -m app.demo 300`, `python -m pytest`).
+`PYTHONPATH=.` (e.g. `python -m app.demo 300`, `python -m pytest`,
+`python -m app.auth_token`).
 
 ## Roadmap (vertical slices)
 
@@ -99,6 +122,8 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Config-driven tuning | Retune without touching code | Rates/thresholds/vocab live in `config/*.yaml`; only `ConfigService` reads them |
 | ADRs | Durable decision record | One `docs/adr/NNNN` per significant decision; never rewritten, only superseded |
 | No commits on `main` (hook) | Keep `main` reviewed and clean | `.githooks/pre-commit` rejects commits on `main`; all work is a worktree branch → PR |
+| API auth (always-on JWT) | Close the state surface by default | Every protected route runs `require_auth` (HS256, sig+exp+iss+aud); `/health` public; always in the code path, gated only by `AUTH_REQUIRED` — no loopback bypass ([ADR 0005](docs/adr/0005-api-authentication.md)) |
+| Secrets never committed (env + scan) | Keep secrets out of git | `.env`/`*.pem`/`*.key` gitignored (only `.env.example` committed); the `pre-commit` hook blocks a staged `.env`, key file, or PEM/AWS-key literal |
 | Worktrees + wave PRs | Parallel work without clobbering | Each slice runs in its own worktree/branch; a wave rolls up into a single PR |
 | Orchestrator vs sub-agents | Clear ownership | Orchestrator owns git + the board; sub-agents own code, commit in their worktree, and report |
 | Sub-agent → workflow escalation | Scale to large slices | A sub-agent may spawn a workflow/helper agents, staying within its worktree contract |

@@ -17,8 +17,10 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 
+from app import auth
+from app.auth import AuthConfig, require_auth
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.simulation import Simulation
@@ -32,12 +34,15 @@ def create_app(
     clock: Optional[ClockPort] = None,
     tick_interval_seconds: Optional[float] = None,
     config_root: Optional[str] = None,
+    auth_config: Optional[AuthConfig] = None,
 ) -> FastAPI:
     """Build the app around a being and a clock.
 
     Everything is injectable so tests can drive a fake being and a fake clock;
     left to their defaults, the being is loaded from `config/` and the clock is
-    the wall clock, which is what `uvicorn app.main:app` runs.
+    the wall clock, which is what `uvicorn app.main:app` runs. Authentication is
+    read from the environment (`AuthConfig.from_env()`) unless one is injected —
+    it is always in the code path and gated only by `AUTH_REQUIRED` (ADR 0005).
     """
     if simulation is None or tick_interval_seconds is None:
         config = ConfigService.from_files(
@@ -49,18 +54,35 @@ def create_app(
             tick_interval_seconds = config.tick_duration_ms() / 1000.0
 
     clock = clock if clock is not None else WallClock()
+    auth_config = auth_config if auth_config is not None else AuthConfig.from_env()
+    guard = require_auth(auth_config)
 
     app = FastAPI(title="jarvis engine", version="0")
 
-    @app.get("/state")
+    @app.get("/health")
+    async def health():
+        # Public liveness probe (Docker/uptime): no token required.
+        return {"status": "ok"}
+
+    @app.get("/state", dependencies=[Depends(guard)])
     async def get_state():
         # Return the snapshot as-is; FastAPI serializes the whole dict, so no
-        # field list is hard-coded here.
+        # field list is hard-coded here. Protected: the guard runs first.
         return simulation.state()
 
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):
+        # Verify the handshake token (query `?token=` or the Authorization
+        # header) before streaming; a bad token is closed with policy code 1008.
+        token = websocket.query_params.get("token") or auth.bearer_token(
+            websocket.headers.get("authorization")
+        )
         await websocket.accept()
+        try:
+            auth.authenticate_ws(auth_config, token)
+        except auth.AuthError:
+            await websocket.close(code=1008)
+            return
         try:
             while True:
                 frame = simulation.tick()

@@ -4,6 +4,10 @@ Observable through the public HTTP/WebSocket boundary: `GET /state` returns the
 being's current snapshot, and the WebSocket endpoint streams one `state()` frame
 per tick. Time is injected through a clock seam, so tests drive a fake clock —
 no real time passes and the stream is deterministic.
+
+`/state` and `/ws` are now behind JWT auth (V0-SEC, ADR 0005); the suite runs
+with auth on (see `conftest.py`), so these tests present a token minted by the
+`mint` fixture. The generic-serialization behavior is unchanged.
 """
 from __future__ import annotations
 
@@ -14,6 +18,10 @@ from fastapi.testclient import TestClient
 from app.config_service import ConfigService
 from app.main import create_app
 from app.simulation import Simulation
+
+
+def _bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _tiny_config() -> ConfigService:
@@ -74,34 +82,34 @@ class _CountingClock:
         await asyncio.Event().wait()  # block until the server task is cancelled
 
 
-def test_state_endpoint_returns_the_current_snapshot():
+def test_state_endpoint_returns_the_current_snapshot(mint):
     sim = Simulation(_tiny_config())
     client = TestClient(create_app(simulation=sim, tick_interval_seconds=0))
 
-    resp = client.get("/state")
+    resp = client.get("/state", headers=_bearer(mint()))
 
     assert resp.status_code == 200
     assert resp.json() == sim.state()  # the current snapshot, unadvanced
 
 
-def test_state_endpoint_serializes_whatever_the_snapshot_contains():
+def test_state_endpoint_serializes_whatever_the_snapshot_contains(mint):
     # A snapshot with fields the current core never emits must still round-trip.
     client = TestClient(create_app(simulation=_StubSimulation(), tick_interval_seconds=0))
 
-    body = client.get("/state").json()
+    body = client.get("/state", headers=_bearer(mint())).json()
 
     assert body["perceived"] == {"obj_red_ball": 0.8}
     assert body["currentAction"] == "observe"
     assert body["surprised"] is True
 
 
-def test_stream_pushes_one_state_frame_per_tick_with_increasing_tick():
+def test_stream_pushes_one_state_frame_per_tick_with_increasing_tick(mint):
     sim = Simulation(_tiny_config())
     reference = Simulation(_tiny_config())  # identical config → identical drift
     app = create_app(simulation=sim, clock=_CountingClock(allowed=3), tick_interval_seconds=0)
     client = TestClient(app)
 
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect(f"/ws?token={mint()}") as ws:
         frames = [ws.receive_json() for _ in range(3)]
 
     ticks = [f["tick"] for f in frames]

@@ -20,6 +20,14 @@ services:
       CONFIG_ROOT: /config
       DATABASE_URL: postgresql+psycopg://sim:sim@postgres:5432/being_sim
       MODEL_PATH: /models/outcome_predictor.pt
+      # API auth (V0-SEC, ADR 0005). Values are interpolated from your shell or
+      # the project-root `.env` (see `.env.example`) — a real secret is never
+      # committed. JWT_SECRET is required; the rest fall back to their defaults.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (see .env.example)}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      JWT_ISSUER: ${JWT_ISSUER:-jarvis}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-jarvis-engine}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
     depends_on:
       postgres:
         condition: service_healthy

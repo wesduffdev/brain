@@ -1,0 +1,25 @@
+# Presentation-only draw hints for the renderer, keyed by the being's dominant
+# emotion. RenderStateService maps `emotion -> visual` here when it builds the
+# ADR-0004 `being_state_update` frame; it encodes NO psychology — the emotion is
+# already decided engine-side, this only says how that emotion LOOKS. Retuning a
+# face is a config edit here, never a code change. The renderer ignores hint keys
+# it does not recognise, so a new hint is safe to add.
+#
+# intensity_default: the neutral emotion intensity (0..1) RenderStateService
+#   reports until the emotion model carries a real intensity (arrives ~V0-4).
+
+intensity_default: 0.5
+
+# The fallback face for any emotion without an explicit entry below.
+default: { mouth: neutral, eyes: neutral, effects: [], thought: "" }
+
+emotions:
+  calm:       { mouth: neutral,    eyes: soft,   effects: [],          thought: "" }
+  curious:    { mouth: small_open, eyes: wide,   effects: [head_tilt], thought: "?" }
+  hungry:     { mouth: frown,      eyes: narrow, effects: [],          thought: "food" }
+  sleepy:     { mouth: neutral,    eyes: droopy, effects: [yawn],      thought: "zzz" }
+  scared:     { mouth: open,       eyes: wide,   effects: [tremble],   thought: "!" }
+  frustrated: { mouth: frown,      eyes: narrow, effects: [],          thought: "grr" }
+  happy:      { mouth: smile,      eyes: soft,   effects: [],          thought: "" }
+  excited:    { mouth: big_open,   eyes: wide,   effects: [bounce],    thought: "!" }
+  comforted:  { mouth: smile,      eyes: soft,   effects: [],          thought: "" }

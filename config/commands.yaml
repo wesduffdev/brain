@@ -1,0 +1,11 @@
+# The v0 player-command vocabulary. CommandService validates every inbound
+# `player_command` (ADR 0004) against this set before it can become an input to
+# the engine; an unknown command is rejected. The command set is small in v0 and
+# grows in later slices — adding one is a config edit here, agreed with the
+# renderer through this file plus the ADR.
+#
+# requires_target: whether the command must carry a `targetId` naming a known
+#   object (the object catalog in object_properties.yaml) to be valid.
+
+commands:
+  present_object: { requires_target: true }

@@ -107,11 +107,12 @@ strictly top-to-bottom.
    (engine + postgres).** ✅
 6. Postgres persistence: interaction events + training examples.
 7. PyTorch outcome predictor + `ml-trainer` sidecar, running in shadow mode.
-   *(Trainer scaffold landed: a multi-label net trains on a synthetic seed set
-   via `ml-trainer` / `make train`; the feature/label encoding contract is pinned
-   in [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
-   Shadow-mode inference + prediction/actual comparison, and training on real
-   stored examples, come next.)*
+   *(Trainer landed: a multi-label net trains via `ml-trainer` / `make train` on
+   the real stored `training_examples` when a database holds them, and on a
+   config-derived synthetic seed set otherwise; each run records a `model_runs`
+   row. The feature/label encoding contract is pinned in
+   [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
+   Shadow-mode inference + prediction/actual comparison come next.)*
 8. **PixiJS renderer showing the being's current emotion/needs; sends a
    `player_command` back.** ✅ *(the wire contract is pinned in
    [ADR 0004](docs/adr/0004-render-state-contract.md); how the renderer

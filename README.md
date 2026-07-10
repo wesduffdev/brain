@@ -119,6 +119,7 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | TDD, red-first | Prove behavior, not methods | Write behavior tests, watch them fail, then implement to green |
 | Deep modules | Simple interfaces, testable seams | Lots of behavior behind one small public class; no port until something varies across it |
 | Deep-module review gate | Catch design drift early | `/legacy-deep-module-review` runs after each slice, before it is called done |
+| Domain-model gate | Keep the ubiquitous language current | After each slice, update root `CONTEXT.md` (via the `domain-modeling` skill) with new/changed terms; an ADR only per its 3-part test |
 | Config-driven tuning | Retune without touching code | Rates/thresholds/vocab live in `config/*.yaml`; only `ConfigService` reads them |
 | ADRs | Durable decision record | One `docs/adr/NNNN` per significant decision; never rewritten, only superseded |
 | No commits on `main` (hook) | Keep `main` reviewed and clean | `.githooks/pre-commit` rejects commits on `main`; all work is a worktree branch → PR |

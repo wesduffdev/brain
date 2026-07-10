@@ -75,6 +75,18 @@ becomes an ADR and, if larger, its own next slice — never silently deferred).
 Sub-agents include the review outcome in their vertical-slice completion report;
 the orchestrator does not treat a card as review-ready until it has run.
 
+### Domain-model update after every slice
+
+After each slice reaches green — alongside the deep-module review — keep the
+project's **ubiquitous language** current. Apply the `domain-modeling` skill: add
+or sharpen the root `CONTEXT.md` glossary for any domain terms the slice
+introduced or changed, in the skill's CONTEXT format (what a term *is*, plus
+`_Avoid_` synonyms — a pure glossary, no implementation detail). Create
+`CONTEXT.md` lazily if it is absent. Record an ADR only when the skill's 3-part
+test holds (hard to reverse · surprising without context · a real trade-off). If
+a term genuinely needs the director's judgment, surface it in the completion
+report rather than block; sub-agents note the domain-model outcome there.
+
 ### Config-driven tuning
 
 Drift rates, thresholds, timings, and vocabularies live in `config/*.yaml`, not

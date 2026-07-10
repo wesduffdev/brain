@@ -12,3 +12,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0005](0005-api-authentication.md) | Always-on API authentication (HS256 JWT) | Accepted |
 | [0006](0006-environmental-conditions-to-contextual-need-seam.md) | Environmental conditions → contextual-need seam (fear can fire) | Accepted |
 | [0007](0007-persistence-repository-port-and-schema-seam.md) | Persistence: repository-port and schema seam | Accepted |
+| [0008](0008-outcome-predictor-and-feature-encoding.md) | Outcome predictor + feature/label encoding contract | Accepted |

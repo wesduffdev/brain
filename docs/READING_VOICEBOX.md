@@ -15,6 +15,14 @@ Fits the repo discipline: one-sentence outcomes, TDD red-first, config-driven,
 deep modules, per-slice deep-module + domain-model gates, ADRs where warranted.
 See [`CLAUDE.md`](../CLAUDE.md) and [`docs/BRIEF.md`](BRIEF.md).
 
+> **Do the self-narration track first.** Before reading external documents, the
+> being should be able to talk about its *own* experience — a smaller,
+> fully-grounded slice that reuses the existing memory + narration services and
+> front-loads this plan's conversational surface and voice. See
+> [`docs/SELF_NARRATION.md`](SELF_NARRATION.md). The **R-series below is sequenced
+> after the S-series**; S2 shares the model-adapter wiring (R2) and S4 shares the
+> voicebox (R8) — built once in S, reused here.
+
 ---
 
 ## 1. The vision (north star)

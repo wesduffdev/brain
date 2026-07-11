@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
+from app.domain.motion import Motion
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
 from app.policies import (
@@ -24,6 +25,7 @@ from app.policies import (
     ExplorationPolicy,
     GraphEdgePolicy,
     MemoryPriorityPolicy,
+    MotionPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
@@ -62,6 +64,7 @@ class ConfigService:
         "learning_rates",
         "decision_weights",
         "traits",
+        "motion",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -113,6 +116,7 @@ class ConfigService:
         learning_rates: Optional[Mapping] = None,
         decision_weights: Optional[Mapping] = None,
         traits: Optional[Mapping] = None,
+        motion: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -131,6 +135,7 @@ class ConfigService:
             learning_rates=learning_rates,
             decision_weights=decision_weights,
             traits=traits,
+            motion=motion,
         )
 
     @classmethod
@@ -158,6 +163,7 @@ class ConfigService:
             "learning_rates": "learning_rates.yaml",
             "decision_weights": "decision_weights.yaml",
             "traits": "traits.yaml",
+            "motion": "motion.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -270,6 +276,51 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    def motion_policy(self) -> MotionPolicy:
+        """How perceived object MOTION becomes the being's approach STIMULUS (ADR
+        0027): the normalization/threshold tuning and the authored per-object
+        kinematic seeds (position, velocity, size), both from `config/motion.yaml`.
+        A motion seed must name a catalogued object — the same fail-loud vocabulary
+        discipline as the object catalog and safety rules. An absent config yields
+        an empty policy: no object moves, no stimulus is raised, and every
+        pre-motion slice behaves unchanged."""
+        motion = self._motion or {}
+        normalization = motion.get("normalization", {}) or {}
+        approach = motion.get("approach", {}) or {}
+        defaults = {
+            str(name): float(value)
+            for name, value in (motion.get("sensory_defaults", {}) or {}).items()
+        }
+        catalog = self.object_catalog()
+        motions: Dict[str, Motion] = {}
+        for object_id, spec in (motion.get("objects", {}) or {}).items():
+            object_id = str(object_id)
+            if catalog and object_id not in catalog:
+                known = ", ".join(sorted(catalog))
+                raise ValueError(
+                    f"motion seed for unknown object {object_id!r}; known objects: {known}"
+                )
+            spec = spec or {}
+            position = tuple(float(c) for c in (spec.get("position", [0.0, 0.0]) or [0.0, 0.0]))
+            velocity = tuple(float(c) for c in (spec.get("velocity", [0.0, 0.0]) or [0.0, 0.0]))
+            motions[object_id] = Motion(
+                object_id=object_id,
+                position=position,
+                velocity=velocity,
+                size=float(spec.get("size", 0.0)),
+            )
+        return MotionPolicy(
+            max_distance=float(normalization.get("max_distance", 10.0)),
+            max_speed=float(normalization.get("max_speed", 5.0)),
+            max_acceleration=float(normalization.get("max_acceleration", 5.0)),
+            max_time_to_contact=float(normalization.get("max_time_to_contact", 10.0)),
+            max_size=float(normalization.get("max_size", 1.0)),
+            max_size_change_rate=float(normalization.get("max_size_change_rate", 1.0)),
+            min_closing_speed=float(approach.get("min_closing_speed", 0.0)),
+            sensory_defaults=defaults,
+            motions=motions,
+        )
 
     def resolve_object(self, selector: str) -> str:
         """Map a human-typed selector (`ball`, `Red Ball`, `obj_red_ball`) to a

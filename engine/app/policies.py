@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Dict, Mapping, Optional, Tuple
 
 from app.domain.motion import Motion
+from app.ports.voice import VoiceParams
 
 # Valid values for NeedTickPolicy.direction.
 INCREASE = "increase"
@@ -1114,3 +1115,39 @@ class LocalModelPolicy:
     model: str = ""
     base_url_env: str = "OLLAMA_BASE_URL"
     timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
+class VoicePolicy:
+    """How the being SPEAKS its self-report aloud (S4, ADR 0034), from
+    ``config/voice.yaml``. `engine` selects the `VoicePort` engine (the open-source
+    ``espeak-ng`` by default; ``fake`` for a demo/test); `voice`/`rate`/`pitch` are
+    the neutral voice the being speaks with, and `emotion_params` is the optional
+    per-emotion override (a scared voice faster and higher, a sleepy one slower and
+    lower) — so what the being SOUNDS like tracks how it FEELS. `params_for(emotion)`
+    resolves the two into a `VoiceParams`, falling back to the neutral voice for an
+    unmapped emotion. Every value lives in config, so retuning the being's voice — or
+    switching engines — is a config change, never a code one (the config-driven-tuning
+    rule); an absent file yields the safe espeak-ng defaults.
+    """
+
+    engine: str = "espeak-ng"
+    voice: str = "en"
+    rate: int = 175
+    pitch: int = 50
+    emotion_params: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+
+    def default_params(self) -> VoiceParams:
+        """The neutral voice, before any emotion override."""
+        return VoiceParams(voice=self.voice, rate=self.rate, pitch=self.pitch)
+
+    def params_for(self, emotion: str) -> VoiceParams:
+        """The voice for a being feeling `emotion` — the neutral voice with the
+        emotion's authored `rate`/`pitch` override applied; the neutral voice for
+        an emotion with no mapping."""
+        override = self.emotion_params.get(str(emotion), {}) or {}
+        return VoiceParams(
+            voice=self.voice,
+            rate=int(override.get("rate", self.rate)),
+            pitch=int(override.get("pitch", self.pitch)),
+        )

@@ -21,14 +21,25 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from app import auth
 from app.auth import AuthConfig, require_auth
 from app.adapters.narrator import build_narrator
+from app.adapters.voice import build_voice
 from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
+from app.ports.voice import VoicePort
+from app.policies import VoicePolicy
 from app.services.command_service import CommandError, CommandService
 from app.services.memory_summary_service import MemorySummaryService
 from app.services.narration_service import NarrationService
@@ -49,6 +60,7 @@ def create_app(
     render_state_service: Optional[RenderStateService] = None,
     command_service: Optional[CommandService] = None,
     self_report_service: Optional[SelfReportService] = None,
+    voice: Optional[VoicePort] = None,
 ) -> FastAPI:
     """Build the app around a being, a clock, and the render/command services.
 
@@ -63,12 +75,14 @@ def create_app(
     # so the lifespan can close it on shutdown. An injected simulation owns its
     # own lifecycle, so there is nothing here to tear down.
     built: Optional[BuiltSimulation] = None
+    voice_policy: Optional[VoicePolicy] = None
     if (
         simulation is None
         or tick_interval_seconds is None
         or render_state_service is None
         or command_service is None
         or self_report_service is None
+        or voice is None
     ):
         config = ConfigService.from_files(
             config_root or os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
@@ -92,6 +106,12 @@ def create_app(
             # The grounded self-report surface (S1, ADR 0032): a narrator behind
             # the LanguageModelPort renders the being's own memories into prose.
             self_report_service = _build_self_report(config)
+        if voice is None:
+            # The voicebox (S4, ADR 0034): the VoicePort engine is selected from
+            # config, and the espeak-ng adapter degrades to a no-op on a host with
+            # no binary (voice is an upgrade, not a dependency).
+            voice = build_voice(config)
+            voice_policy = config.voice_policy()
 
     clock = clock if clock is not None else WallClock()
     auth_config = auth_config if auth_config is not None else AuthConfig.from_env()
@@ -146,6 +166,35 @@ def create_app(
             query, memories=simulation.memories(), state=simulation.state()
         )
         return {"query": query, "report": report}
+
+    @app.post("/speak", dependencies=[Depends(guard)])
+    async def post_speak(payload: dict = Body(...)):
+        # Voice the being's grounded self-report ALOUD (S4, ADR 0034): the SAME
+        # report /ask returns, rendered to audio by the VoicePort. Read-only like
+        # /ask (ADR 0022), behind the same always-on JWT guard (ADR 0005), and the
+        # voice tracks the being's current emotion (rate/pitch from config). When no
+        # TTS engine is on this host the voice is a no-op — still 200, with the text,
+        # so the being is never left mute (voice is an upgrade, not a dependency).
+        query = str(payload.get("query", ""))
+        state = simulation.state()
+        report = self_report_service.report(
+            query, memories=simulation.memories(), state=state
+        )
+        params = (
+            voice_policy.params_for(str(state.get("emotion", "")))
+            if voice_policy is not None
+            else None
+        )
+        audio = voice.synthesize(report, params)
+        if audio is None:
+            return {
+                "spoken": False,
+                "query": query,
+                "report": report,
+                "detail": "voice synthesis unavailable (no TTS engine on this host); "
+                "returning text only",
+            }
+        return Response(content=audio, media_type="audio/wav")
 
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):

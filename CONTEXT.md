@@ -193,6 +193,29 @@ How strongly later learning should attend to a memory — a config-driven score
 raised by surprise (prediction error) and emotional intensity.
 _Avoid_: weight, importance, rank, score.
 
+**Memory retrieval**:
+Recalling the memories relevant to what the being now perceives — by same
+object, similar perceived properties, same action, and salience — before it
+decides.
+_Avoid_: search, lookup, recall query.
+
+**Preference**:
+A learned like/dislike the being forms from its recalled memories — a signed
+bias on an action toward an object; a remembered burn reads negative, a fond
+memory positive.
+_Avoid_: reward, valence (that is the raw outcome sign), affinity.
+
+**Trait (Caution tendency / Curiosity tendency)**:
+A slow personality level in [0,1] that drifts a little from every outcome —
+caution rising from harm, curiosity from safe exploration — settling into an
+individual temperament. Distinct from the `curious` emotion (momentary) and the
+v4 curiosity drive (per-object).
+_Avoid_: personality stat, mood, disposition score.
+
+**Retrieved memory**:
+A remembered interaction paired with how relevant it is to the present choice.
+_Avoid_: match, hit, candidate.
+
 **Model run**:
 The metadata of one training run — when it ran, how it scored, and where its
 weights artifact lives; the learned weights themselves live in a `.pt` file, not
@@ -225,6 +248,31 @@ A raw player intent aimed at the world — e.g. presenting an object into the ro
 decides what the being does; the being's own psychology responds to it, exactly
 as if the object had appeared any other way.
 _Avoid_: action (that is the being's own doing), input event, control.
+
+**Language command**:
+A person's natural-language request, interpreted onto a single allowed action
+the being may take and validated before it becomes a player command; a request,
+never an application.
+_Avoid_: chat, prompt, instruction, order.
+
+**Narration**:
+Readable, non-authoritative text describing the being's current state, derived
+from a state snapshot and never fed back into the sim.
+_Avoid_: description, log, caption, commentary.
+
+**Memory summary**:
+Readable text summarising the being's memory log; read-only, non-authoritative.
+_Avoid_: recap, digest, report.
+
+**Language model**:
+The LLM behind the language-model port that completes a prompt with text (Claude
+by default); never the being's brain.
+_Avoid_: LLM, AI, GPT, oracle.
+
+**Non-authoritative**:
+A description or request that sits on top of the sim and can never mutate state
+or reach the being's decision.
+_Avoid_: read-only (too narrow), advisory.
 
 **Outcome**:
 What happens when the being acts on an object — e.g. it rolls, bounces, falls,

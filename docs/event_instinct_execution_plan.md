@@ -502,20 +502,48 @@ behavior change without its own green suite and observed outcome.
 
 ---
 
-## 7. Orchestration model
+## 7. Orchestration model — parallel tickets, a light orchestrator, workflow-capable sub-agents
 
-Identical to [`post_v0_execution_plan.md` §6](post_v0_execution_plan.md): one
-long-lived **orchestrator** sources cards only from `Ready for Agent`, validates the
-card→slice contract, computes the ready set from §4, claims and dispatches **one
-sub-agent per card** (≤ the wave's width), collects the completion report, verifies
-(suite green + observable outcome, by a *fresh* sub-agent, never the implementer),
-moves the card one state to Review, and mirrors every write to a commit/PR.
-Sub-agents work in `slice/<ticket>` worktrees off a `wave/<n>` branch, red-first TDD,
-run the deep-module-review + domain-model gates, and never write to the board. The
-whole wave rolls up into a single `wave/<n>` → `main` PR; defects found in an open
-wave PR are ticketed and healed on `hotfix/<ticket>` so the PR stays pristine and
-merge-ready. **New infra note:** the orchestrator owns the shared `docker-compose.yml`
-/ `Makefile` / ADR-index / `CONTEXT.md` reconciliation at roll-up.
+Same fleet model as [`post_v0_execution_plan.md` §6](post_v0_execution_plan.md) and
+[`CLAUDE.md`](../CLAUDE.md) ("Orchestrator delegates to sub-agents by default"), made
+explicit for this wave.
+
+**The orchestrator stays light on context.** It holds only the board state, the
+dependency graph (§4), and each sub-agent's *verdict/report* — never raw file
+contents, test logs, or search output. Everything delegable is delegated:
+implementation, verification, shared-file reconciliation, doc authoring, and code
+investigation (an `Explore` agent returns the conclusion, not file dumps). The
+orchestrator's own inline acts are only those a sub-agent cannot do: create
+worktrees/branches, merge a slice into the wave branch, open/roll up the wave PR,
+delete merged branches, and all board/Trello writes. This keeps the long-lived
+orchestrator session small across a multi-wave augmentation.
+
+**The loop, per card.** Source from `Ready for Agent` → validate the card→slice
+contract → compute the ready set from §4 (dispatchable when deps are in Review/Done,
+no `blocked`/overdue label) → claim → dispatch **one implementer sub-agent per card**,
+up to the wave's width (§4) **in parallel** → a **fresh** sub-agent (never the
+implementer) runs the suite/demo and returns a pass/fail verdict → move the card one
+state to Review → mirror every write to a commit/PR. Sub-agents work in
+`slice/<ticket>` worktrees off `wave/<n>`, red-first TDD, run the deep-module-review +
+domain-model gates, and never write to the board.
+
+**Sub-agents may escalate to a workflow.** A slice large enough to warrant
+decomposition (many independent files, a fan-out-then-verify shape) may spawn a
+workflow or helper agents — staying inside its own worktree, **partitioning files so
+nested agents never write the same file concurrently**, landing as commits on its
+`slice/<ticket>` branch, and returning one completion report. **Workflow-eligible
+here (all `L`):** `WORLD-MOTION` (world + perception + event-emit + ADR fan-out),
+`INS-MODEL` (encoder ∥ model ∥ seed-gen ∥ train/eval), `EVT-PERSIST` (five tables +
+outbox + projection consumer), `INS-RT` (consumer + thresholds + idempotency + DLQ),
+`INS-ACT` (decision + emotion + interrupt + two rollout flags). Keep fan-out
+proportional — the `S`/`M` cards (`TICK-INV`, `NN-STRAT`, `EVT-BUS`, `EVT-KAFKA`,
+`RENDER-RX`, `EVT-VALID`) are single-agent slices.
+
+**Roll-up.** The whole wave rolls into a single `wave/<n>` → `main` PR; defects found
+in an open wave PR are ticketed and healed on `hotfix/<ticket>` so the PR stays
+pristine and merge-ready. The orchestrator owns the shared-file reconciliation at
+roll-up: `docker-compose.yml`, `Makefile`, `requirements*.txt`, the ADR index
+(`docs/adr/README.md`), and `CONTEXT.md`.
 
 ---
 

@@ -36,3 +36,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0029](0029-instinct-reaction-emotion-and-action-interrupt.md) | Instinct reaction → emotion bias & safe action interruption (staged, config-gated; extends 0011, relates to 0009/0014/0026) | Accepted |
 | [0030](0030-sensory-sound-and-touch-stimulus-sources.md) | Sensory stimulus sources: sound spike & contact (touch) (extends 0027; consumes 0026 contract) | Accepted |
 | [0031](0031-adaptive-instinct-temperament.md) | Adaptive instinct temperament: habituation & sensitization of reaction sensitivity (extends 0026/0029; relates to the v6 trait drift) | Accepted |
+| [0032](0032-self-report-narration-surface.md) | Self-report narration surface: deterministic template narrator behind the language-model port + `SelfReportService` + `POST /ask` (extends 0022; grounded by 0002, gated by 0005) | Accepted |

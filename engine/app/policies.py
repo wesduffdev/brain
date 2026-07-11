@@ -1039,3 +1039,51 @@ class ReactionResponsePolicy:
     def is_interruptible(self, action: str) -> bool:
         """Whether `action` is one the being may break off on a strong reaction."""
         return action in self.interruptible_actions
+
+
+@dataclass(frozen=True)
+class NarrationPhrasing:
+    """How the deterministic narrator turns a structured memory/state fact into
+    prose (S1, ADR 0032) — the WORD CHOICES only, held as config vocabulary
+    (`config/language.yaml`), never in service code (the config-driven-tuning
+    rule). Three lookup tables map the being's internal vocabulary to plain
+    English: an action to its past-tense verb (`push -> pushed`), an outcome
+    label to a clause (`causes_pain -> it hurt me`), and a derived emotion to a
+    feeling word (`scared -> scared`). Each lookup falls back to the raw token,
+    so an unmapped label still renders (grounded, if terse) rather than dropping
+    — and retuning the being's voice is a YAML change, never a code one.
+    """
+
+    action_past: Mapping[str, str] = field(default_factory=dict)
+    outcome_clause: Mapping[str, str] = field(default_factory=dict)
+    feeling: Mapping[str, str] = field(default_factory=dict)
+
+    def action(self, name: str) -> str:
+        """The past-tense verb for an action; the raw name when unmapped."""
+        return self.action_past.get(name, name)
+
+    def outcome(self, label: str) -> str:
+        """The plain clause for an observed outcome; the raw label when unmapped."""
+        return self.outcome_clause.get(label, label)
+
+    def feel(self, emotion: str) -> str:
+        """The feeling word for a derived emotion; the raw emotion when unmapped."""
+        return self.feeling.get(emotion, emotion)
+
+
+@dataclass(frozen=True)
+class SelfReportPolicy:
+    """How the being reports its own experience (S1, ADR 0032), from the
+    `narrator:`/`report:` blocks of `config/language.yaml`. `narrator_kind`
+    selects the voice behind the shared `LanguageModelPort` — ``"deterministic"``
+    (the offline template narrator, the default) or ``"model"`` (a real LLM, S2);
+    `recent_count` is how many of the most-recent memories a "what have you done
+    recently?" report covers; `salience_emphasis_threshold` is the priority at or
+    above which a memory's felt affect is emphasized. Absent config yields the
+    safe defaults (deterministic, 5, 1.0), so retuning what the being says — and
+    how far back it looks — is a config change only.
+    """
+
+    narrator_kind: str = "deterministic"
+    recent_count: int = 5
+    salience_emphasis_threshold: float = 1.0

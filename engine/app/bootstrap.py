@@ -27,9 +27,12 @@ writes `interaction_events`, `training_examples`, `prediction_records`, and
 at all.
 
 When `DATABASE_URL` is unset (and nothing is injected) it returns a plain
-in-memory `Simulation` — no database, no shadow mode, behavior unchanged. There
-is no hard DB dependency: the connection string is deploy/secret config read from
-the environment only (like `JWT_SECRET`), never authored YAML (ADR 0005).
+in-memory `Simulation` — no database, no shadow mode. It does wire the in-memory
+memory adapter so a DB-less being still REMEMBERS in-process (transient, lost on
+restart), which is what lets the offline self-report surface (`/ask`, S1/ADR
+0032) report grounded experience without a database. There is no hard DB
+dependency: the connection string is deploy/secret config read from the
+environment only (like `JWT_SECRET`), never authored YAML (ADR 0005).
 
 Injected repositories/predictor always win over the environment, so the behavior
 suite drives the whole wiring with in-memory fakes and a fake predictor without a
@@ -65,6 +68,7 @@ from app.ports.repositories import (
     UnitOfWork,
 )
 from app.repositories import (
+    InMemoryMemoryRepository,
     PostgresBeliefRepository,
     PostgresConceptRepository,
     PostgresGraphRepository,
@@ -182,6 +186,14 @@ def build_simulation(
         if predictor is None:
             predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
+
+    # A DB-less being still REMEMBERS in-process (S1, ADR 0032): on the pure
+    # in-memory runtime path (no DATABASE_URL, nothing injected) wire the
+    # in-memory memory adapter so `memories()` fills over ticks and the offline
+    # self-report surface (`/ask`) has something grounded to report. Transient,
+    # like every other in-memory being's state — lost on restart, no DB required.
+    if not url and not persistence_injected and memory_repository is None:
+        memory_repository = InMemoryMemoryRepository()
 
     # Instinct chain wiring (RUNTIME-WIRE): the deployed runtime drives the
     # perception -> instinct -> reaction chain LIVE, in shadow (ADR 0024/0026/

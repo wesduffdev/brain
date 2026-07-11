@@ -670,6 +670,27 @@ reaction thresholds grown from a life of startles (habituation) and harms
 in-process.
 _Avoid_: mood, personality stat, the caution trait.
 
+**Self-report**:
+The being's first-person account of its own experience, produced on request
+(`/ask`) and grounded ONLY in its logged memories — it can say what it has lived,
+never what it has not. It names objects by their perceived properties ("the round
+red thing"), never a developer label, and it describes; it never acts.
+_Avoid_: introspection, confession, status, log dump, self-awareness.
+
+**Narration**:
+Turning the being's state or memories into readable text laid ON TOP of the
+simulation — non-authoritative and read-only. Narration reflects the being; it
+never controls it, feeds back into a decision, or mutates state.
+_Avoid_: narrative, story, commentary, voice-over, dialogue.
+
+**Salience**:
+How strongly a memory stands out — its priority, raised by surprise (prediction
+error) and emotional intensity, so the moments the being was most wrong or most
+affected are held hardest. In a self-report, higher salience emphasizes the felt
+affect ("afterwards I felt VERY scared").
+_Avoid_: priority-as-queue-order, importance, weight, relevance (the recall
+signal).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

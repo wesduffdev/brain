@@ -29,7 +29,10 @@ from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.services.command_service import CommandError, CommandService
+from app.services.memory_summary_service import MemorySummaryService
+from app.services.narration_service import NarrationService
 from app.services.render_state_service import RenderStateService
+from app.services.self_report_service import SelfReportService
 from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -44,6 +47,7 @@ def create_app(
     auth_config: Optional[AuthConfig] = None,
     render_state_service: Optional[RenderStateService] = None,
     command_service: Optional[CommandService] = None,
+    self_report_service: Optional[SelfReportService] = None,
 ) -> FastAPI:
     """Build the app around a being, a clock, and the render/command services.
 
@@ -63,6 +67,7 @@ def create_app(
         or tick_interval_seconds is None
         or render_state_service is None
         or command_service is None
+        or self_report_service is None
     ):
         config = ConfigService.from_files(
             config_root or os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
@@ -82,6 +87,10 @@ def create_app(
             command_service = CommandService(
                 config.command_specs(), config.object_catalog().keys()
             )
+        if self_report_service is None:
+            # The grounded self-report surface (S1, ADR 0032): a narrator behind
+            # the LanguageModelPort renders the being's own memories into prose.
+            self_report_service = _build_self_report(config)
 
     clock = clock if clock is not None else WallClock()
     auth_config = auth_config if auth_config is not None else AuthConfig.from_env()
@@ -125,6 +134,18 @@ def create_app(
             "targetId": accepted.target_id,
         }
 
+    @app.post("/ask", dependencies=[Depends(guard)])
+    async def post_ask(payload: dict = Body(...)):
+        # Answer a natural-language question about the being's own experience,
+        # grounded ONLY in its logged memories (S1, ADR 0032). Read-only: the
+        # self-report reads snapshot dicts and mutates nothing (ADR 0022).
+        # Protected by the same always-on JWT guard as /state (ADR 0005).
+        query = str(payload.get("query", ""))
+        report = self_report_service.report(
+            query, memories=simulation.memories(), state=simulation.state()
+        )
+        return {"query": query, "report": report}
+
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):
         # Verify the handshake token (query `?token=` or the Authorization
@@ -149,6 +170,32 @@ def create_app(
             return
 
     return app
+
+
+def _build_self_report(config: ConfigService) -> SelfReportService:
+    """Wire the self-report surface from config (S1, ADR 0032). The narrator that
+    backs the shared `LanguageModelPort` is chosen by `narrator.kind`: the offline
+    deterministic template narrator by default, or the Claude adapter when the
+    config opts into a real model (S2, env-gated on ANTHROPIC_API_KEY, never
+    reached by the deterministic path or the test suite)."""
+    policy = config.self_report_policy()
+    if policy.narrator_kind == "model":
+        from app.adapters.claude_language_model import ClaudeLanguageModel
+
+        narrator = ClaudeLanguageModel()
+    else:
+        from app.adapters.template_language_model import TemplateLanguageModel
+
+        narrator = TemplateLanguageModel(
+            phrasing=config.narration_phrasing(),
+            salience_emphasis_threshold=policy.salience_emphasis_threshold,
+            neutral_emotion=config.default_emotion(),
+        )
+    return SelfReportService(
+        MemorySummaryService(narrator),
+        NarrationService(narrator),
+        recent_count=policy.recent_count,
+    )
 
 
 app = create_app()

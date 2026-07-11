@@ -10,6 +10,7 @@ SQLAlchemy==2.0.*    # Postgres persistence: ORM models + connection (V0-7)
 psycopg[binary]==3.2.*  # PostgreSQL driver for the postgresql+psycopg dialect
 pytest==8.3.3        # behavior-driven tests
 httpx==0.27.*        # fastapi.testclient.TestClient (test-only)
+confluent-kafka==2.*    # Kafka EventBus runtime adapter (EVT-KAFKA); wheels bundle librdkafka
 
 # ML training deps (torch, numpy) are intentionally NOT here — they live in the
 # training-only set `requirements-train.txt` (V0-8, ADR 0008), installed by the

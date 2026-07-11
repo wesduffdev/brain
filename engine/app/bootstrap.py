@@ -46,7 +46,10 @@ from app.db import models
 from app.db.migrate import create_all
 from app.db.session import create_db_engine, session_factory
 from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
+from app.adapters.in_memory_event_bus import InMemoryEventBus
+from app.adapters.kafka_event_bus import BOOTSTRAP_ENV, KafkaEventBus
 from app.ml.inference import load_predictor
+from app.ml.instinct_inference import load_instinct_predictor
 from app.ports.events import EventConsumer, EventPublisher
 from app.ports.predictor import PredictorPort
 from app.ports.instinct import InstinctPredictorPort
@@ -76,6 +79,10 @@ from app.simulation import Simulation
 # The trained artifact lives beside the trainer's output (see train_outcome_model);
 # absent before training, in which case shadow mode stays off (ADR 0011).
 _DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "outcome_predictor.pt"
+# The instinct artifact lives beside the instinct trainer's output
+# (train_instinct_model); absent before training, in which case the live chain
+# stays inert (None-safe, ADR 0026).
+_DEFAULT_INSTINCT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "instinct.pt"
 
 
 def _noop() -> None:
@@ -176,6 +183,30 @@ def build_simulation(
             predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
 
+    # Instinct chain wiring (RUNTIME-WIRE): the deployed runtime drives the
+    # perception -> instinct -> reaction chain LIVE, in shadow (ADR 0024/0026/
+    # 0029) -- the gap the event-instinct wave deferred here. When the caller
+    # injected no instinct predictor and runtime instinct is enabled, load it:
+    # None-safe -- no torch or no trained artifact => None => the chain stays
+    # inert and the being is byte-identical (the ADR 0011 shadow precedent). The
+    # chain needs ONE shared EventBus as both publisher and consumer; when the
+    # caller injected neither and a predictor is present, build the default bus:
+    # the broker-free InMemoryEventBus (synchronous, so the chain runs live each
+    # tick), or the KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set (broker URL
+    # env-only, like DATABASE_URL). Injected predictor/bus always win over this
+    # auto-wiring, so tests drive the whole chain with fakes and no broker.
+    if instinct_predictor is None and config.instinct_runtime_enabled():
+        instinct_predictor = _load_instinct_predictor(config, env)
+    if (
+        instinct_predictor is not None
+        and event_publisher is None
+        and event_consumer is None
+    ):
+        bus, bus_close = _build_event_bus(config, env)
+        event_publisher = bus
+        event_consumer = bus
+        close = _compose(bus_close, close)
+
     simulation = Simulation(
         config,
         being_id,
@@ -245,3 +276,42 @@ def _load_predictor(config: ConfigService, env: Mapping[str, str]) -> Optional[P
     absent, and raises loudly on a stale artifact (ADR 0008/0011)."""
     model_path = env.get("MODEL_PATH", str(_DEFAULT_MODEL_PATH))
     return load_predictor(config=config, model_path=model_path)
+
+
+def _load_instinct_predictor(
+    config: ConfigService, env: Mapping[str, str]
+) -> Optional[InstinctPredictorPort]:
+    """The instinct predictor for the live chain, or ``None`` when it cannot run
+    (RUNTIME-WIRE). Reads the artifact path from ``INSTINCT_MODEL_PATH`` (default
+    beside the instinct trainer's output); `load_instinct_predictor` returns
+    ``None`` gracefully when torch or the artifact is absent -- so the chain stays
+    inert and the being byte-identical -- and raises loudly on a stale artifact
+    whose feature/label contract disagrees with config (ADR 0026)."""
+    model_path = env.get("INSTINCT_MODEL_PATH", str(_DEFAULT_INSTINCT_MODEL_PATH))
+    return load_instinct_predictor(config=config, model_path=model_path)
+
+
+def _build_event_bus(config: ConfigService, env: Mapping[str, str]):
+    """The shared EventBus the live instinct chain publishes and consumes on (ADR
+    0024), with the teardown that releases it. The default is the broker-free
+    `InMemoryEventBus` -- synchronous in-process delivery, so the whole chain runs
+    live within each tick; when ``KAFKA_BOOTSTRAP_SERVERS`` is set the runtime
+    `KafkaEventBus` is used instead, its broker URL read from the environment only
+    (never authored YAML) and its topic names from config. Returns ``(bus, close)``;
+    the in-memory bus opens nothing, so its teardown is a no-op."""
+    if env.get(BOOTSTRAP_ENV):
+        bus = KafkaEventBus.from_env(topics=config.event_topics_policy(), env=dict(env))
+        return bus, bus.close
+    return InMemoryEventBus(), _noop
+
+
+def _compose(*closers: Callable[[], None]) -> Callable[[], None]:
+    """Chain several teardowns into one, run in order -- so a single
+    `BuiltSimulation.close()` releases everything the wiring opened (the event bus
+    stacked over the DB session/engine)."""
+
+    def close() -> None:
+        for c in closers:
+            c()
+
+    return close

@@ -747,6 +747,20 @@ class ConfigService:
             intensity_loss=str(training.get("intensity_loss", "bce")),
         )
 
+    def instinct_runtime_enabled(self) -> bool:
+        """Whether the DEPLOYED runtime (bootstrap/main) WIRES and drives the
+        instinct chain live (RUNTIME-WIRE), from the `runtime.enabled` flag of
+        `config/instinct.yaml`. Defaults to ``True``: the chain runs in SHADOW
+        (still governed by the `reaction.shadow` / `visual_only` / `allow_interrupt`
+        gates of `instinct_runtime_policy` / `reaction_response_policy`), and it is
+        None-safe -- absent torch or a trained artifact the instinct predictor loads
+        as ``None`` and the chain stays inert, so a lean runtime is byte-identical.
+        Set it ``false`` to keep the chain out of the runtime entirely. This gates
+        only the runtime's AUTO-wiring; an explicitly injected predictor/bus always
+        wins (the bootstrap's injection contract). Retuning is a config change only."""
+        runtime = self._instinct.get("runtime", {}) or {}
+        return bool(runtime.get("enabled", True))
+
     def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
         """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR
         0011), from the `reaction:` block of `config/instinct.yaml`: the per-label

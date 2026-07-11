@@ -32,6 +32,7 @@ from app.adapters.in_memory_event_bus import InMemoryEventBus
 from app.bootstrap import build_simulation
 from app.config_service import ConfigService
 from app.domain.event import DomainEvent
+from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
 from app.services.stimulus_service import PERCEPTION_TOPIC
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -99,9 +100,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     # stimuli it raises as the object moves toward it (WORLD-MOTION, ADR 0027).
     bus = InMemoryEventBus()
     approaches: List[DomainEvent] = []
+    reactions: List[DomainEvent] = []
     bus.subscribe(PERCEPTION_TOPIC, approaches.append)
+    bus.subscribe(INSTINCT_REACTIONS_TOPIC, reactions.append)
+    # Wire perception AND the instinct-reaction stream through ONE shared bus and
+    # let the bootstrap load the trained instinct predictor: the deployed runtime
+    # drives the perception->instinct->reaction chain LIVE, in shadow (RUNTIME-WIRE).
+    # With no torch or no `models/instinct.pt`, the predictor is None and the chain
+    # stays inert -- the demo then runs exactly as it did before.
     with build_simulation(
-        config.with_room_contents([object_id]), event_publisher=bus
+        config.with_room_contents([object_id]),
+        event_publisher=bus,
+        event_consumer=bus,
     ) as sim:
         darken_at = 10
         print(f"--- a curious explorer decides what to do each tick, for {ticks} ticks ---")
@@ -128,6 +138,19 @@ def main(argv: Optional[List[str]] = None) -> None:
             )
         else:
             print("approach stimuli on the bus: none (nothing moved toward the being).")
+
+        triggered = [r for r in reactions if r.payload.get("triggered")]
+        if reactions:
+            print(
+                f"instinct chain (shadow): {len(reactions)} reaction event(s) flowed "
+                f"perception->instinct->reaction, {len(triggered)} triggered and "
+                f"persisted; instinct lag now {sim.instinct_lag()} (no behaviour change)."
+            )
+        else:
+            print(
+                "instinct chain: inert -- no trained instinct model loaded "
+                "(run `python -m app.ml.train_instinct_model` to produce models/instinct.pt)."
+            )
 
         if is_hot:
             harmful = [e for e in on_object if e["action"] in {"touch", "grab"}]

@@ -26,6 +26,7 @@ from app.policies import (
     ExplorationPolicy,
     GraphEdgePolicy,
     InstinctModelPolicy,
+    InstinctConsumePolicy,
     InstinctRuntimePolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
@@ -782,6 +783,21 @@ class ConfigService:
         wins (the bootstrap's injection contract). Retuning is a config change only."""
         runtime = self._instinct.get("runtime", {}) or {}
         return bool(runtime.get("enabled", True))
+
+    def instinct_consume_policy(self) -> InstinctConsumePolicy:
+        """How the DEPLOYED runtime PULLS pending events off a broker-backed EventBus
+        each tick (KAFKA-RUNTIME-LOOP), from the `runtime.consume:` block of
+        `config/instinct.yaml`: `max_messages` (the bounded batch one tick pulls) and
+        `poll_timeout_seconds` (how long each poll waits). Inert on the in-memory
+        default (delivery is synchronous on publish); it governs only the Kafka
+        runtime's per-tick poll cadence. Absent config yields the safe defaults
+        (16 / 0.2s). Retuning the poll cadence is a config change only."""
+        runtime = self._instinct.get("runtime", {}) or {}
+        consume = runtime.get("consume", {}) or {}
+        return InstinctConsumePolicy(
+            max_messages=int(consume.get("max_messages", 16)),
+            poll_timeout_seconds=float(consume.get("poll_timeout_seconds", 0.2)),
+        )
 
     def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
         """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR

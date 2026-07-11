@@ -266,6 +266,11 @@ class Simulation:
         # no chain is built, so the being is byte-identical to the pre-instinct
         # one and the whole prior suite is untouched.
         self._instinct_publisher = event_publisher
+        # The consumer is kept so the tick loop can PULL pending events off a
+        # broker-backed bus each tick (KAFKA-RUNTIME-LOOP); the in-memory bus
+        # delivers synchronously on publish and is never polled.
+        self._event_consumer = event_consumer
+        self._consume_policy = None
         self._instinct_outbox: Optional[InMemoryOutboxRepository] = None
         self._instinct_event_log: Optional[InMemoryEventLogRepository] = None
         self._instinct: Optional[InstinctService] = None
@@ -278,6 +283,9 @@ class Simulation:
         ):
             self._instinct_outbox = InMemoryOutboxRepository()
             self._instinct_event_log = InMemoryEventLogRepository()
+            # How the tick loop pulls pending events off a broker-backed bus
+            # (bounded batch + poll timeout); inert on the in-memory default.
+            self._consume_policy = config.instinct_consume_policy()
             # ADAPTIVE instinct temperament (INS-TEMPERAMENT, ADR 0031): the being's
             # per-label reaction thresholds PERSONALIZE from experience — a harmless
             # startle habituates (raises the threshold, less reactive), a harmful
@@ -405,15 +413,45 @@ class Simulation:
         return self.state()
 
     def _drain_instinct(self) -> None:
-        """Drain the shadow instinct layer's outbox onto the bus — the
-        in-process equivalent of the ADR 0028 relay (publication happens outside
-        any DB transaction). A no-op when no instinct chain is wired."""
+        """Advance the instinct chain and drain its staged reactions onto the bus —
+        the in-process equivalent of the ADR 0028 relay (publication happens outside
+        any DB transaction). A no-op when no instinct chain is wired.
+
+        On a broker-backed bus (Kafka) `publish` only PRODUCES; handlers fire on
+        `consume()`. So the runtime PULLS pending events here, on the tick thread, so
+        the perception->instinct->reaction chain runs within the single-writer tick
+        exactly as the in-memory bus's synchronous `publish` does (KAFKA-RUNTIME-LOOP):
+        pull this tick's perception stimuli so the instinct consumer stages its
+        reactions, drain those onto the bus, then pull the reactions so the reaction
+        consumer latches them for the next tick — the same one-tick cadence as
+        in-memory. On the in-memory default the consumer exposes no `consume` and
+        delivery already happened on publish, so both pulls are no-ops and the shipped
+        stack is byte-identical."""
         if self._instinct is None:
             return
+        self._pump_consumer()
         drain_outbox(
             outbox=self._instinct_outbox,
             event_log=self._instinct_event_log,
             publisher=self._instinct_publisher,
+        )
+        self._pump_consumer()
+
+    def _pump_consumer(self) -> None:
+        """PULL a bounded batch of pending events off a broker-backed consumer and
+        dispatch them to their handlers, so a Kafka-backed chain advances ON THE TICK
+        THREAD — never a background consumer that would race the single writer and
+        break the invariant READ COMMITTED rests on. The in-memory bus delivers
+        synchronously on publish and exposes no `consume`, so this is a no-op there,
+        keeping the shipped default byte-identical. Offsets commit only after a message
+        is handled, and a poison one dead-letters — both in the adapter's `consume`
+        (EVT-KAFKA)."""
+        consume = getattr(self._event_consumer, "consume", None)
+        if consume is None:
+            return
+        consume(
+            max_messages=self._consume_policy.max_messages,
+            timeout=self._consume_policy.poll_timeout_seconds,
         )
 
     def instinct_lag(self) -> int:

@@ -1114,3 +1114,25 @@ class LocalModelPolicy:
     model: str = ""
     base_url_env: str = "OLLAMA_BASE_URL"
     timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
+class SubjectQueryPolicy:
+    """How the being answers a SUBJECT query — "what do you know / how do you feel
+    about X?" (S3, ADR 0034), from the `subject:` block of `config/language.yaml`.
+    `query_markers` are the connectives that INTRODUCE a subject in a question (the
+    word after which the subject term begins — e.g. ``about`` in "what do you know
+    *about* hot things"); a question with none is not a subject query and stays on
+    the S1 recent-experience path. `max_facts` bounds how many learned facts an
+    answer cites (the strongest concepts first). `unknown_response` is what the
+    being says about a subject it has NO learned concept for — an honest
+    no-knowledge line, never an invented one; ``{subject}`` is filled with the term.
+    Absent config yields the safe defaults, so retuning how the being fields a
+    subject — and how honestly it declines an unknown one — is a config change only.
+    """
+
+    query_markers: Tuple[str, ...] = ("about",)
+    max_facts: int = 6
+    unknown_response: str = (
+        "I don't know anything about {subject} — I haven't encountered anything like that."
+    )

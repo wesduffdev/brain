@@ -699,6 +699,25 @@ The fluent voice is an upgrade, never a dependency (the sibling of the predictor
 ensemble's rule fallback).
 _Avoid_: retry, failover (as infra), silent error, default model.
 
+**Subject query**:
+A question that asks the being what it KNOWS or how it FEELS *about* something —
+"what do you know about hot things?", "how do you feel about round things?" —
+answered from what it has LEARNED (its concepts, beliefs, graph explanations, and
+the emotions its memories recorded), keyed on the PERCEIVED property the subject
+resolves to. A subject it has never encountered is declined honestly, never
+invented. Distinct from a self-report of what it has DONE (the recent-experience
+question).
+_Avoid_: topic, search query, question intent, knowledge lookup, FAQ.
+
+**Subject resolver**:
+The step that turns a subject term into the being's PERCEIVED-property tokens
+("hot things" -> `hot`; "the round red thing" -> `round`, `red`), drawn from the
+perceived-property vocabulary — never a developer label or object id (the being
+has no name for a thing, only how it perceives it). A term with no perceptual
+handle ("dragons") resolves to nothing and is answered as unknown; resolving to a
+real property is not the same as having learned about it.
+_Avoid_: parser, intent classifier, entity linker, name lookup, keyword match.
+
 **Salience**:
 How strongly a memory stands out — its priority, raised by surprise (prediction
 error) and emotional intensity, so the moments the being was most wrong or most

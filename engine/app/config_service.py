@@ -25,9 +25,13 @@ from app.policies import (
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
+    PreferencePolicy,
     RenderHintsPolicy,
+    RetrievalPolicy,
     SafetyRule,
     SurprisePolicy,
+    TraitDriftPolicy,
+    TraitPolicy,
 )
 
 # Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
@@ -55,6 +59,7 @@ class ConfigService:
         "outcome_effects",
         "learning_rates",
         "decision_weights",
+        "traits",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -105,6 +110,7 @@ class ConfigService:
         outcome_effects: Optional[Mapping] = None,
         learning_rates: Optional[Mapping] = None,
         decision_weights: Optional[Mapping] = None,
+        traits: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -122,6 +128,7 @@ class ConfigService:
             outcome_effects=outcome_effects,
             learning_rates=learning_rates,
             decision_weights=decision_weights,
+            traits=traits,
         )
 
     @classmethod
@@ -148,6 +155,7 @@ class ConfigService:
             "outcome_effects": "outcome_effects.yaml",
             "learning_rates": "learning_rates.yaml",
             "decision_weights": "decision_weights.yaml",
+            "traits": "traits.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -495,6 +503,54 @@ class ConfigService:
                 for action, weight in (exploration.get("action_weights", {}) or {}).items()
             },
             default_action_weight=float(exploration.get("default_action_weight", 0.0)),
+        )
+
+    # --- learning: memory retrieval, preference, and personality traits (v6) ---
+
+    def retrieval_policy(self) -> RetrievalPolicy:
+        """How strongly the being RECALLS a memory for the object it now perceives
+        (card v6), from the `preference:` block of `traits.yaml`. Absent config
+        yields neutral defaults (property similarity + same object, strict same
+        action, no salience amplification). Retuning what the being recalls is a
+        config change only."""
+        preference = self._traits.get("preference", {}) or {}
+        return RetrievalPolicy(
+            similarity_weight=float(preference.get("similarity_weight", 1.0)),
+            same_object_weight=float(preference.get("same_object_weight", 1.0)),
+            same_action_floor=float(preference.get("same_action_floor", 0.0)),
+            salience_weight=float(preference.get("salience_weight", 0.0)),
+        )
+
+    def preference_policy(self) -> PreferencePolicy:
+        """How strongly recalled memories bias the decision (card v6), from the same
+        `preference:` block. `weight` defaults to ``0.0`` — so a config with no
+        `traits` section forms and stores memories but decides on pure utility
+        exactly as before (the pre-v6 baseline). Retuning how much the past steers
+        the present is a config change only."""
+        preference = self._traits.get("preference", {}) or {}
+        return PreferencePolicy(weight=float(preference.get("weight", 0.0)))
+
+    def trait_policy(self) -> TraitPolicy:
+        """The being's slow-drifting personality (card v6), from the `traits:` block:
+        a caution and a curiosity tendency, each with a start level, a drift rate,
+        and a decision gain. Absent config yields neutral (zero-drift, zero-gain)
+        traits, so a sim with no `traits` section has a personality that neither
+        drifts nor steers behaviour — byte-identical to the pre-v6 baseline. Retuning
+        temperament is a config change only."""
+        traits = self._traits.get("traits", {}) or {}
+        return TraitPolicy(
+            caution=self._trait_drift(traits.get("caution", {}) or {}),
+            curiosity=self._trait_drift(traits.get("curiosity", {}) or {}),
+        )
+
+    @staticmethod
+    def _trait_drift(spec: Mapping) -> TraitDriftPolicy:
+        return TraitDriftPolicy(
+            start=float(spec.get("start", 0.0)),
+            drift_rate=float(spec.get("drift_rate", 0.0)),
+            decision_gain=float(spec.get("decision_gain", 0.0)),
+            min=float(spec.get("min", 0.0)),
+            max=float(spec.get("max", 1.0)),
         )
 
     # --- render / commands ------------------------------------------------

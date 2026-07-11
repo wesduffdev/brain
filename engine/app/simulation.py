@@ -30,7 +30,7 @@ from app.ports.repositories import (
     TrainingExampleRepository,
     UnitOfWork,
 )
-from app.repositories import InMemoryPredictionRecordRepository
+from app.repositories import InMemoryPredictionRecordRepository, InMemorySimilarityRepository
 from app.services.belief_service import BeliefService
 from app.services.concept_service import ConceptService
 from app.services.curiosity_service import CuriosityService
@@ -38,14 +38,17 @@ from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
 from app.services.exploration_policy_service import ExplorationPolicyService
+from app.services.memory_retrieval_service import MemoryRetrievalService
 from app.services.memory_service import MemoryService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
 from app.services.prediction_service import PredictionService
+from app.services.preference_service import PreferenceService
 from app.services.safety_service import SafetyService
 from app.services.similarity_service import SimilarityService
 from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
+from app.services.trait_service import TraitService
 
 
 class Simulation:
@@ -81,6 +84,33 @@ class Simulation:
             if memory_repository is not None
             else None
         )
+        # Retrieval / preference seam (card v6): when the being has a memory store,
+        # each tick it RECALLS the memories relevant to what it now perceives and
+        # lets a remembered burn (or a fond memory) bias the score of the SAFE
+        # candidate actions — a prior negative memory of a *similar* object makes a
+        # risky action less appealing (the hot-lamp generalization). Retrieval leans
+        # on the perceived-property similarity of ADR 0019; it needs only the
+        # stateless Jaccard, so a standalone SimilarityService serves it. Absent a
+        # memory store (or with the config's default zero preference weight) the
+        # being decides on utility exactly as before.
+        self._preference = (
+            PreferenceService(
+                MemoryRetrievalService(
+                    SimilarityService(InMemorySimilarityRepository()), config.retrieval_policy()
+                ),
+                config.outcome_effects(),
+                config.preference_policy(),
+            )
+            if memory_repository is not None
+            else None
+        )
+        # Personality seam (card v6): the being's slow CAUTION / CURIOSITY tendencies
+        # drift a little from every interaction and, once grown, amplify how strongly
+        # its memories steer it. Always present, so temperament rides on the state
+        # snapshot; with the config's default zero drift/gain it neither drifts nor
+        # steers (pre-v6 baseline). Trait drift and the memory bias both stay within
+        # the safety floor — they only ever reshape the safe candidates.
+        self._traits = TraitService(config.trait_policy())
         # Cognitive seam (card v2): when a concept port is injected, every
         # interaction forms/strengthens CONCEPT SCHEMAS keyed on the object's
         # PERCEIVED properties, the being forms BELIEFS about the object from those
@@ -116,7 +146,8 @@ class Simulation:
         )
 
         self._clock = TickService()
-        self._needs = NeedService(config.need_policies(), config.outcome_effects())
+        self._outcome_effects = config.outcome_effects()
+        self._needs = NeedService(config.need_policies(), self._outcome_effects)
         self._environment = EnvironmentService(
             config.environment_policy(), config.need_policies()
         )
@@ -224,6 +255,7 @@ class Simulation:
             perceived=perceived,
             on_cooldown=on_cooldown,
             curiosity=self._curiosity_view,
+            score_bias=self._preference_bias(perceived),
         )
         if decision is None:
             self._current_action = None
@@ -329,6 +361,28 @@ class Simulation:
             perceived_properties=perceived_props,
         )
         self._surprise_view = self._exploration.surprise_map(perceived=perceived, tick=tick)
+        # Personality drifts from what the being just lived: a negative surprise
+        # lifts caution, a safe/rewarding interaction lifts curiosity (card v6).
+        self._traits.observe_interaction(
+            expected=event.expected_outcome,
+            observed=event.observed_outcome,
+            outcome_effects=self._outcome_effects,
+        )
+
+    def _preference_bias(self, perceived):
+        """The remembered-preference score bias for this tick's decision — per
+        (object, action), how the being's recalled memories (reshaped by its current
+        temperament) push each SAFE candidate. ``None`` when the being has no memory
+        store, so the decision falls back to pure utility. The decision applies it
+        only to unblocked candidates, so it never bends the safety floor."""
+        if self._preference is None:
+            return None
+        raw = self._preference.biases(
+            perceived=perceived,
+            actions=self._actions.keys(),
+            memories=self._memory_repo.all(),
+        )
+        return self._traits.modulate(raw)
 
     def _record(self, event: InteractionEvent, true_props, policy) -> None:
         """Persist the event through its port (when one is injected) and derive a
@@ -398,6 +452,14 @@ class Simulation:
             return []
         return [memory.snapshot() for memory in self._memory_repo.all()]
 
+    def traits(self) -> Dict[str, float]:
+        """The being's slow-drifting personality (card v6): its caution and curiosity
+        tendencies, each in ``[0, 1]``, as they stand now. They start from config and
+        drift a little with every interaction — negative surprise lifting caution,
+        safe exploration lifting curiosity — so a long-lived being grows an individual
+        temperament. Always present (unlike the persisted learned facts)."""
+        return self._traits.levels()
+
     def concepts(self) -> List[Dict]:
         """The concept schemas the being has learned (card v2), as plain
         snapshots — each a perceived feature + action + outcome with a confidence
@@ -436,6 +498,7 @@ class Simulation:
         snapshot["perceived"] = self._perception.perceive(self._room)
         snapshot["curiosity"] = dict(self._curiosity_view)
         snapshot["surprise"] = dict(self._surprise_view)
+        snapshot["traits"] = self._traits.levels()
         if self._current_action is not None:
             snapshot["currentAction"] = dict(self._current_action)
         return snapshot

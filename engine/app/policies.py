@@ -228,6 +228,16 @@ class OutcomeEffectPolicy:
                 totals[need_name] = totals.get(need_name, 0) + int(delta)
         return totals
 
+    def net_effect(self, outcomes) -> int:
+        """The net felt consequence of `outcomes` — the sum of every need delta they
+        produce. Negative means the experience eroded the being on balance (a burn:
+        safety and comfort falling), positive means it was rewarding (something
+        pleasant), zero means it left the being unmoved. This is the single scalar
+        VALENCE of an experience the being's learned preferences and trait drift read
+        from — so "was that good or bad for me?" has one config-driven answer."""
+        deltas = self.deltas_for(outcomes)
+        return sum(int(delta) for delta in deltas.values())
+
     def anticipated_cost(self, probabilities: Mapping[str, float]) -> float:
         """The being's anticipated aversive cost of a *predicted* set of outcomes
         (card v3): each outcome's probability weights how much that outcome is
@@ -438,3 +448,109 @@ class RenderHintsPolicy:
     intensity_default: float
     default: Mapping[str, object]
     by_emotion: Mapping[str, Mapping[str, object]]
+
+
+@dataclass(frozen=True)
+class RetrievalPolicy:
+    """How strongly a remembered interaction is RECALLED for the object the being
+    now perceives (card v6). Relevance combines the signals the being cares about:
+
+        relevance = (similarity_weight · property_similarity
+                     + same_object_weight · [same object])
+                    · action_match
+                    · (1 + salience_weight · priority)
+
+    where ``action_match`` is 1.0 when the memory was the SAME action being weighed
+    and ``same_action_floor`` otherwise (0.0 by default — a burn while *touching*
+    does not weigh on whether to *look*). `property_similarity` is the Jaccard
+    overlap of perceived-property sets (`SimilarityService`, ADR 0019), so a
+    never-seen object recalls what the being learned about things that look like it
+    — the generalization the hot-lamp story rests on. `salience_weight` lets a
+    high-emotion / high-error memory (its `priority`) be recalled more strongly. All
+    the numbers live in `config/traits.yaml`; retuning what the being recalls is a
+    config change only.
+    """
+
+    similarity_weight: float = 1.0
+    same_object_weight: float = 1.0
+    same_action_floor: float = 0.0
+    salience_weight: float = 0.0
+
+    def relevance(
+        self, *, similarity: float, same_object: bool, same_action: bool, priority: float
+    ) -> float:
+        """The relevance of a memory with this perceived-property `similarity`, on an
+        object it is/na't about (`same_object`), taken with the same/a different
+        action (`same_action`), and this `priority` (salience). 0.0 when nothing
+        connects the memory to the present choice."""
+        action_match = 1.0 if same_action else float(self.same_action_floor)
+        base = self.similarity_weight * float(similarity) + (
+            self.same_object_weight if same_object else 0.0
+        )
+        return base * action_match * (1.0 + self.salience_weight * float(priority))
+
+
+@dataclass(frozen=True)
+class PreferencePolicy:
+    """How strongly recalled memories bias the decision (card v6). A memory's
+    contribution is its relevance times the VALENCE of what it observed (the
+    felt-consequence net effect: a burn is negative, something pleasant positive),
+    summed over the recalled memories; `weight` scales that sum into the score bias
+    the decision adds to the *safe* candidate. ``weight`` defaults to 0.0 — so a
+    config with no `preference` block leaves the being deciding on utility exactly as
+    before (the pre-v6 baseline), even while it forms and stores memories. Only a
+    config that opts in turns the learned like/dislike on. Retuning how much the past
+    steers the present is a `config/traits.yaml` change, never a code one.
+    """
+
+    weight: float = 0.0
+
+    def bias(self, valence_sum: float) -> float:
+        """The decision score bias for a total recalled `valence_sum`."""
+        return float(self.weight) * float(valence_sum)
+
+
+@dataclass(frozen=True)
+class TraitDriftPolicy:
+    """One slow personality TRAIT and how it drifts from repeated experience (card
+    v6). A trait is a level in ``[min, max]`` that starts at `start` and moves a
+    `drift_rate` fraction of the way toward its ceiling each time an experience
+    pushes it — the same saturating curve concept confidence and familiarity use, so
+    it rises fast at first and then settles into a stable temperament:
+
+        level_next = level + drift_rate · signal · (max − level)
+
+    `signal` in ``[0, 1]`` is how strongly this experience pushed the trait (for
+    caution, how bad-and-surprising the moment was; for curiosity, that it was a safe,
+    rewarding exploration). `decision_gain` is how strongly the *current* level shapes
+    behaviour — caution amplifies the being's aversion to its bad memories. Every
+    number lives in `config/traits.yaml`, so a being's temperament, and how fast it
+    forms, is tuned in config only.
+    """
+
+    start: float = 0.0
+    drift_rate: float = 0.0
+    decision_gain: float = 0.0
+    min: float = 0.0
+    max: float = 1.0
+
+    def drift(self, level: float, signal: float) -> float:
+        """`level` after one experience of strength `signal`, nudged toward `max`
+        and clamped to the trait's band."""
+        moved = float(level) + float(self.drift_rate) * float(signal) * (self.max - float(level))
+        return max(self.min, min(self.max, moved))
+
+
+@dataclass(frozen=True)
+class TraitPolicy:
+    """The being's slow-drifting personality (card v6): a CAUTION tendency and a
+    CURIOSITY tendency, each a `TraitDriftPolicy`. Caution rises from repeated
+    negative surprise (being hurt worse than expected) and amplifies how strongly the
+    being's bad memories hold it back; curiosity rises from repeated positive
+    exploration (safe, rewarding interactions). Both are transient this slice (held in
+    process, like the ADR 0020 familiarity signal). Retuning temperament is a
+    `config/traits.yaml` change only.
+    """
+
+    caution: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)
+    curiosity: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)

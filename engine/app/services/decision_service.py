@@ -32,7 +32,7 @@ numbers live in `config/*.yaml`; this service holds none.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Optional, Sequence, Set
+from typing import Mapping, Optional, Sequence, Set, Tuple
 
 from app.domain.decision import Decision
 from app.ml.encode_features import Example
@@ -80,6 +80,7 @@ class DecisionService:
         perceived: Sequence[Mapping],
         on_cooldown: Set[str],
         curiosity: Optional[Mapping[str, float]] = None,
+        score_bias: Optional[Mapping[Tuple[str, str], float]] = None,
     ) -> Optional[Decision]:
         selectable: list = []
         blocked_top: Optional[_Candidate] = None
@@ -100,11 +101,14 @@ class DecisionService:
                     continue
                 if name in on_cooldown:
                     continue
-                # Prediction and exploration touch only the SAFE candidates — both
-                # apply after the block check, so neither a learned cost nor a
-                # curiosity bonus can rescue a blocked action past the safety floor.
+                # Prediction, exploration, and remembered preference/traits touch
+                # only the SAFE candidates — all apply after the block check, so
+                # neither a learned cost, a curiosity bonus, nor a memory-driven bias
+                # can rescue a blocked action past the safety floor (BRIEF §12).
                 score -= self._anticipated_cost(policy, properties)
                 score += self._exploration_bonus(name, object_id, curiosity)
+                if score_bias is not None:
+                    score += float(score_bias.get((object_id, name), 0.0))
                 selectable.append(_Candidate(score, self._order[name], object_id, name, policy.reason))
 
         if not selectable:

@@ -21,13 +21,18 @@ from app.ml.encode_features import Example, FeatureEncoder
 from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredictor
 from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
+    BeliefRepository,
+    ConceptRepository,
     InteractionEventRepository,
     MemoryRepository,
     PredictionRecordRepository,
+    SimilarityRepository,
     TrainingExampleRepository,
     UnitOfWork,
 )
 from app.repositories import InMemoryPredictionRecordRepository
+from app.services.belief_service import BeliefService
+from app.services.concept_service import ConceptService
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
@@ -36,6 +41,7 @@ from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
 from app.services.prediction_service import PredictionService
 from app.services.safety_service import SafetyService
+from app.services.similarity_service import SimilarityService
 from app.services.tick_service import TickService
 
 
@@ -50,6 +56,9 @@ class Simulation:
         predictor: Optional[PredictorPort] = None,
         prediction_repository: Optional[PredictionRecordRepository] = None,
         memory_repository: Optional[MemoryRepository] = None,
+        concept_repository: Optional[ConceptRepository] = None,
+        belief_repository: Optional[BeliefRepository] = None,
+        similarity_repository: Optional[SimilarityRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
@@ -67,6 +76,31 @@ class Simulation:
         self._memory = (
             MemoryService(memory_repository, config.memory_priority_policy())
             if memory_repository is not None
+            else None
+        )
+        # Cognitive seam (card v2): when a concept port is injected, every
+        # interaction forms/strengthens CONCEPT SCHEMAS keyed on the object's
+        # PERCEIVED properties, the being forms BELIEFS about the object from those
+        # concepts, and it records how SIMILAR the object is to the others it
+        # perceives. All three stage inside the interaction's unit of work below,
+        # so they commit with the event; like memory, they are side effects of
+        # living, never read back into this tick's decision.
+        self._concept_repo = concept_repository
+        self._belief_repo = belief_repository
+        self._similarity_repo = similarity_repository
+        self._concepts = (
+            ConceptService(concept_repository, config.concept_learning_policy())
+            if concept_repository is not None
+            else None
+        )
+        self._beliefs = (
+            BeliefService(self._concepts, belief_repository)
+            if belief_repository is not None and self._concepts is not None
+            else None
+        )
+        self._similarity = (
+            SimilarityService(similarity_repository)
+            if similarity_repository is not None
             else None
         )
         # Transaction boundary (ADR 0017): one interaction's writes — its event,
@@ -221,6 +255,38 @@ class Simulation:
                 self._memory.remember(
                     event, perceived_properties=perceived_props, prediction=prediction
                 )
+            # Concept learning (card v2): distil the interaction into concept
+            # schemas keyed on perceived properties, form beliefs about the object
+            # from them, and record its similarity to the other perceived objects.
+            if self._concepts is not None:
+                self._concepts.observe(
+                    being_id=self.being.being_id,
+                    tick=tick,
+                    object_id=decision.target_id,
+                    action=decision.action,
+                    perceived_properties=perceived_props,
+                    observed_outcomes=observed_outcome,
+                )
+            if self._beliefs is not None:
+                self._beliefs.believe(
+                    being_id=self.being.being_id,
+                    tick=tick,
+                    object_id=decision.target_id,
+                    perceived_properties=perceived_props,
+                    action=decision.action,
+                )
+            if self._similarity is not None:
+                self._similarity.record(
+                    being_id=self.being.being_id,
+                    tick=tick,
+                    object_id=decision.target_id,
+                    perceived_properties=perceived_props,
+                    peers=[
+                        (obj["objectId"], obj["properties"])
+                        for obj in perceived
+                        if obj["objectId"] != decision.target_id
+                    ],
+                )
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
         )
@@ -293,6 +359,31 @@ class Simulation:
         if self._memory_repo is None:
             return []
         return [memory.snapshot() for memory in self._memory_repo.all()]
+
+    def concepts(self) -> List[Dict]:
+        """The concept schemas the being has learned (card v2), as plain
+        snapshots — each a perceived feature + action + outcome with a confidence
+        that rose as interactions confirmed it. Empty when no concept port is
+        injected."""
+        if self._concept_repo is None:
+            return []
+        return [concept.snapshot() for concept in self._concept_repo.all()]
+
+    def beliefs(self) -> List[Dict]:
+        """The beliefs the being has formed about perceived objects (card v2),
+        oldest first — each a per-object prediction inherited from its concepts.
+        Empty when no belief port is injected."""
+        if self._belief_repo is None:
+            return []
+        return [belief.snapshot() for belief in self._belief_repo.all()]
+
+    def similarities(self) -> List[Dict]:
+        """The object-similarity records the being has laid down (card v2), oldest
+        first — how alike, by perceived properties, each acted-on object is to the
+        others in the room. Empty when no similarity port is injected."""
+        if self._similarity_repo is None:
+            return []
+        return [record.snapshot() for record in self._similarity_repo.all()]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

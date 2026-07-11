@@ -1075,15 +1075,42 @@ class NarrationPhrasing:
 class SelfReportPolicy:
     """How the being reports its own experience (S1, ADR 0032), from the
     `narrator:`/`report:` blocks of `config/language.yaml`. `narrator_kind`
-    selects the voice behind the shared `LanguageModelPort` — ``"deterministic"``
-    (the offline template narrator, the default) or ``"model"`` (a real LLM, S2);
-    `recent_count` is how many of the most-recent memories a "what have you done
-    recently?" report covers; `salience_emphasis_threshold` is the priority at or
-    above which a memory's felt affect is emphasized. Absent config yields the
-    safe defaults (deterministic, 5, 1.0), so retuning what the being says — and
-    how far back it looks — is a config change only.
+    selects the PROVIDER behind the shared `LanguageModelPort` — ``"deterministic"``
+    (the offline template narrator, the default), ``"fake"`` (the in-memory test
+    model), ``"claude"`` (the env-gated Claude adapter; ``"model"`` is a back-compat
+    alias), or ``"local"`` (an Ollama-style local endpoint, S2). `recent_count` is
+    how many of the most-recent memories a "what have you done recently?" report
+    covers; `salience_emphasis_threshold` is the priority at or above which a
+    memory's felt affect is emphasized. `fallback_to_template` (default ``True``)
+    is the fallback-safe rule (mirroring `PredictionBlendPolicy`'s
+    `fallback_to_rules_on_error`): when a selected model raises or is unavailable,
+    the narrator degrades to the deterministic template — which sees the SAME
+    structured-experience prompt, so the report stays grounded. Absent config
+    yields the safe defaults (deterministic, 5, 1.0, fallback on), so retuning what
+    the being says — and how it fails safe — is a config change only.
     """
 
     narrator_kind: str = "deterministic"
     recent_count: int = 5
     salience_emphasis_threshold: float = 1.0
+    fallback_to_template: bool = True
+
+
+@dataclass(frozen=True)
+class LocalModelPolicy:
+    """How the being's `local` narrator provider reaches a LOCALLY-served language
+    model (S2, extends ADR 0022/0032) — the CLIENT config for an Ollama-style HTTP
+    endpoint, from the `narrator.local:` block of `config/language.yaml`. `base_url`
+    is the endpoint the client POSTs to (`{base_url}/api/generate`) and `model` the
+    served model name; `base_url_env` names the environment variable that OVERRIDES
+    `base_url` at deploy time (like `DATABASE_URL` — a deploy detail, not authored
+    config), and `timeout_seconds` bounds the request. The model is not served here
+    (that is reading R1/R2); this policy only wires the client, so with no endpoint
+    the adapter refuses rather than blind-calls. Retuning where the being's local
+    voice lives is a config/env change only.
+    """
+
+    base_url: str = ""
+    model: str = ""
+    base_url_env: str = "OLLAMA_BASE_URL"
+    timeout_seconds: float = 30.0

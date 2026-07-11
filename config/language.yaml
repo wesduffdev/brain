@@ -6,11 +6,31 @@
 # it renders with. Retuning the voice is a change HERE, never in Python (the
 # config-driven-tuning rule). Only ConfigService reads this file.
 
-# Which voice sits behind the LanguageModelPort seam.
+# Which PROVIDER sits behind the one LanguageModelPort seam (S2). The same
+# grounded self-report can be phrased by any of these — they only change where the
+# words come from, never what the being is allowed to say (it only ever sees the
+# structured experience, so it cannot invent).
 #   deterministic -> the offline template narrator (fully offline, no key); default
-#   model         -> a real LLM (Claude), env-gated on ANTHROPIC_API_KEY (S2)
+#   fake          -> the in-memory test model (suite only)
+#   claude        -> the Claude adapter, env-gated on ANTHROPIC_API_KEY ("model" is
+#                    the S1 back-compat alias)
+#   local         -> a locally-served, Ollama-style model (activates once reading
+#                    R1/R2 serve one on the endpoint below)
 narrator:
   kind: deterministic
+  # Fallback-safe (mirrors the predictor ensemble's rule fallback): when a selected
+  # model raises or is unavailable, degrade to the deterministic template — which
+  # sees the SAME prompt, so the report stays grounded. Turn off to let a model
+  # error surface instead.
+  fallback_to_template: true
+  # The `local` provider's endpoint. base_url + model are authored here; the base
+  # URL is overridden at deploy time by the env var named in base_url_env (a deploy
+  # detail, like DATABASE_URL). Inert until `kind: local` and R1/R2 serve a model.
+  local:
+    base_url: http://localhost:11434
+    model: qwen2.5:3b-instruct
+    base_url_env: OLLAMA_BASE_URL
+    timeout_seconds: 30.0
 
 report:
   # How many of the most-recent memories a "what have you done recently?" report

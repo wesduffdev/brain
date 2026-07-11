@@ -49,16 +49,22 @@ from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
 from app.ml.inference import load_predictor
 from app.ports.predictor import PredictorPort
 from app.ports.repositories import (
+    BeliefRepository,
+    ConceptRepository,
     InteractionEventRepository,
     MemoryRepository,
     PredictionRecordRepository,
+    SimilarityRepository,
     TrainingExampleRepository,
     UnitOfWork,
 )
 from app.repositories import (
+    PostgresBeliefRepository,
+    PostgresConceptRepository,
     PostgresInteractionEventRepository,
     PostgresMemoryRepository,
     PostgresPredictionRecordRepository,
+    PostgresSimilarityRepository,
     PostgresTrainingExampleRepository,
 )
 from app.simulation import Simulation
@@ -112,6 +118,9 @@ def build_simulation(
     training_repo: Optional[TrainingExampleRepository] = None,
     prediction_repository: Optional[PredictionRecordRepository] = None,
     memory_repository: Optional[MemoryRepository] = None,
+    concept_repository: Optional[ConceptRepository] = None,
+    belief_repository: Optional[BeliefRepository] = None,
+    similarity_repository: Optional[SimilarityRepository] = None,
     predictor: Optional[PredictorPort] = None,
 ) -> BuiltSimulation:
     """Build a runtime `Simulation`, wiring persistence when configured.
@@ -135,6 +144,9 @@ def build_simulation(
         or training_repo is not None
         or prediction_repository is not None
         or memory_repository is not None
+        or concept_repository is not None
+        or belief_repository is not None
+        or similarity_repository is not None
     )
 
     close: Callable[[], None] = _noop
@@ -147,6 +159,9 @@ def build_simulation(
         training_repo = PostgresTrainingExampleRepository(session)
         prediction_repository = PostgresPredictionRecordRepository(session)
         memory_repository = PostgresMemoryRepository(session)
+        concept_repository = PostgresConceptRepository(session)
+        belief_repository = PostgresBeliefRepository(session)
+        similarity_repository = PostgresSimilarityRepository(session)
         if predictor is None:
             predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
@@ -159,6 +174,9 @@ def build_simulation(
         predictor=predictor,
         prediction_repository=prediction_repository,
         memory_repository=memory_repository,
+        concept_repository=concept_repository,
+        belief_repository=belief_repository,
+        similarity_repository=similarity_repository,
         unit_of_work=unit_of_work,
     )
     return BuiltSimulation(simulation, close)

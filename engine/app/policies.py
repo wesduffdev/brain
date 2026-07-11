@@ -305,6 +305,35 @@ class MemoryPriorityPolicy:
 
 
 @dataclass(frozen=True)
+class ConceptLearningPolicy:
+    """How a CONCEPT SCHEMA's confidence forms and strengthens (card v2). A
+    concept starts at `seed_confidence` the first time the being sees it, and each
+    later confirming interaction moves its confidence a fraction `reinforce_rate`
+    of the way toward full certainty (1.0):
+
+        confidence_next = confidence + reinforce_rate * (1 - confidence)
+
+    So confidence rises monotonically with repetition and asymptotes at 1.0 — the
+    more often "round things roll" is confirmed, the more sure the being is, with
+    diminishing returns. Both numbers live in `config/learning_rates.yaml`, so
+    retuning how fast the being generalizes — how boldly it commits to a pattern —
+    is a config change, never a code one. The default (seed 0.3, rate 0.2) forms
+    concepts even with no learning-rates file.
+    """
+
+    seed_confidence: float = 0.3
+    reinforce_rate: float = 0.2
+
+    def reinforce(self, current: "float | None") -> float:
+        """The confidence of a concept after one more confirming interaction.
+        ``None`` is the first sighting (returns the seed); otherwise the current
+        confidence is nudged toward 1.0 by `reinforce_rate`."""
+        if current is None:
+            return float(self.seed_confidence)
+        return float(current) + float(self.reinforce_rate) * (1.0 - float(current))
+
+
+@dataclass(frozen=True)
 class RenderHintsPolicy:
     """Resolved presentation hints for the render frame (ADR 0004): the neutral
     `intensity` to report until the emotion model carries one, the fallback

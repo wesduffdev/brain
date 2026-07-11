@@ -16,6 +16,7 @@ from app.domain.room import Room
 from app.policies import (
     ActionPolicy,
     CommandSpec,
+    ConceptLearningPolicy,
     EmotionRule,
     EnvironmentPolicy,
     MemoryPriorityPolicy,
@@ -433,6 +434,20 @@ class ConfigService:
                 str(emotion): float(value)
                 for emotion, value in (priority.get("emotion_intensity", {}) or {}).items()
             },
+        )
+
+    def concept_learning_policy(self) -> ConceptLearningPolicy:
+        """How the being forms and strengthens CONCEPT SCHEMAS (card v2), from the
+        `concept.learning` block of `learning_rates.yaml`. `seed_confidence` is the
+        confidence a concept takes on its first sighting; `reinforce_rate` is how
+        far each confirming interaction moves it toward full certainty. Absent
+        config yields the neutral default (seed 0.3, rate 0.2), so a sim with no
+        learning-rates file still generalizes. Retuning how fast the being commits
+        to a pattern is a config change only."""
+        learning = (self._learning_rates.get("concept", {}) or {}).get("learning", {}) or {}
+        return ConceptLearningPolicy(
+            seed_confidence=float(learning.get("seed_confidence", 0.3)),
+            reinforce_rate=float(learning.get("reinforce_rate", 0.2)),
         )
 
     # --- render / commands ------------------------------------------------

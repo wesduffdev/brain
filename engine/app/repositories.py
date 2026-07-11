@@ -27,10 +27,13 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.db.models import Being
 from app.domain.being_state import BeingState
+from app.domain.belief import Belief
+from app.domain.concept import ConceptEvidence, ConceptSchema
 from app.domain.interaction_event import InteractionEvent
 from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
+from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
 
 
@@ -295,6 +298,185 @@ class PostgresMemoryRepository:
                 emotion_after=row.emotion_after,
                 prediction_error=row.prediction_error or 0.0,
                 priority=row.priority or 0.0,
+            )
+            for row in rows
+        ]
+
+
+def _concept_from_row(row) -> ConceptSchema:
+    return ConceptSchema(
+        being_id=row.being_id,
+        feature=row.feature,
+        action=row.action,
+        outcome=row.outcome,
+        confidence=row.confidence or 0.0,
+        evidence_count=row.evidence_count or 0,
+    )
+
+
+class InMemoryConceptRepository:
+    """A concept store held in a dict keyed by ``concept_id`` — the seam the
+    behavior suite drives, no database required. Concepts are immutable value
+    objects that upsert in place (``save`` replaces by id); evidence is kept in an
+    append-only list."""
+
+    def __init__(self) -> None:
+        self._concepts: Dict[str, ConceptSchema] = {}
+        self._evidence: List[ConceptEvidence] = []
+
+    def get(self, concept_id: str) -> Optional[ConceptSchema]:
+        return self._concepts.get(concept_id)
+
+    def save(self, concept: ConceptSchema) -> None:
+        self._concepts[concept.concept_id] = concept
+
+    def add_evidence(self, evidence: ConceptEvidence) -> None:
+        self._evidence.append(evidence)
+
+    def all(self) -> List[ConceptSchema]:
+        return list(self._concepts.values())
+
+
+class PostgresConceptRepository:
+    """A concept store backed by Postgres via a SQLAlchemy ``Session``. A concept
+    is upserted by ``concept_id`` (``merge``) so its confidence accumulates in
+    place across interactions; evidence is appended. Staged only — the caller's
+    unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, concept_id: str) -> Optional[ConceptSchema]:
+        row = self._session.get(models.ConceptSchema, concept_id)
+        return _concept_from_row(row) if row is not None else None
+
+    def save(self, concept: ConceptSchema) -> None:
+        self._session.merge(  # insert-or-update by concept_id, so a concept strengthens in place
+            models.ConceptSchema(
+                concept_id=concept.concept_id,
+                being_id=concept.being_id,
+                feature=concept.feature,
+                action=concept.action,
+                outcome=concept.outcome,
+                name=concept.name,
+                confidence=concept.confidence,
+                evidence_count=concept.evidence_count,
+            )
+        )
+
+    def add_evidence(self, evidence: ConceptEvidence) -> None:
+        self._session.add(
+            models.ConceptEvidence(
+                concept_id=evidence.concept_id,
+                event_id=evidence.event_id,
+                being_id=evidence.being_id,
+                tick=evidence.tick,
+                feature=evidence.feature,
+                action=evidence.action,
+                outcome=evidence.outcome,
+            )
+        )
+
+    def all(self) -> List[ConceptSchema]:
+        rows = self._session.query(models.ConceptSchema).order_by(models.ConceptSchema.concept_id).all()
+        return [_concept_from_row(row) for row in rows]
+
+
+class InMemoryBeliefRepository:
+    """An append-only belief store in a list — the test seam, no database.
+    Beliefs are immutable value objects, stored and returned directly."""
+
+    def __init__(self) -> None:
+        self._beliefs: List[Belief] = []
+
+    def add(self, belief: Belief) -> None:
+        self._beliefs.append(belief)
+
+    def all(self) -> List[Belief]:
+        return list(self._beliefs)
+
+
+class PostgresBeliefRepository:
+    """A belief store backed by Postgres via a SQLAlchemy ``Session``. Append-only:
+    each prediction stages one row on the `beliefs` table. Staged only — the
+    caller's unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, belief: Belief) -> None:
+        self._session.add(
+            models.Belief(
+                being_id=belief.being_id,
+                tick=belief.tick,
+                object_id=belief.object_id,
+                action=belief.action,
+                outcome=belief.outcome,
+                confidence=belief.confidence,
+            )
+        )
+
+    def all(self) -> List[Belief]:
+        rows = self._session.query(models.Belief).order_by(models.Belief.id).all()
+        return [
+            Belief(
+                being_id=row.being_id,
+                tick=row.tick,
+                object_id=row.object_id,
+                action=row.action,
+                outcome=row.outcome,
+                confidence=row.confidence or 0.0,
+            )
+            for row in rows
+        ]
+
+
+class InMemorySimilarityRepository:
+    """An append-only object-similarity store in a list — the test seam, no
+    database. Records are immutable value objects, stored and returned directly."""
+
+    def __init__(self) -> None:
+        self._records: List[ObjectSimilarityRecord] = []
+
+    def add(self, record: ObjectSimilarityRecord) -> None:
+        self._records.append(record)
+
+    def all(self) -> List[ObjectSimilarityRecord]:
+        return list(self._records)
+
+
+class PostgresSimilarityRepository:
+    """An object-similarity store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only: each comparison stages one row on the `object_similarity_records`
+    table. Staged only — the caller's unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, record: ObjectSimilarityRecord) -> None:
+        self._session.add(
+            models.ObjectSimilarityRecord(
+                being_id=record.being_id,
+                tick=record.tick,
+                object_id=record.object_id,
+                other_object_id=record.other_object_id,
+                similarity=record.similarity,
+            )
+        )
+
+    def all(self) -> List[ObjectSimilarityRecord]:
+        rows = (
+            self._session.query(models.ObjectSimilarityRecord)
+            .order_by(models.ObjectSimilarityRecord.id)
+            .all()
+        )
+        return [
+            ObjectSimilarityRecord(
+                being_id=row.being_id,
+                tick=row.tick,
+                object_id=row.object_id,
+                other_object_id=row.other_object_id,
+                similarity=row.similarity or 0.0,
             )
             for row in rows
         ]

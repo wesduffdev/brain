@@ -34,6 +34,7 @@ from app.policies import (
     MotionPolicy,
     NarrationPhrasing,
     NeedTickPolicy,
+    OllamaServePolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
     PreferencePolicy,
@@ -795,6 +796,33 @@ class ConfigService:
             seed=int(lora.get("seed", defaults.seed)),
             sample_prompt=str(sample.get("prompt", defaults.sample_prompt)),
             sample_max_tokens=int(sample.get("max_tokens", defaults.sample_max_tokens)),
+        )
+
+    def serve_policy(self) -> OllamaServePolicy:
+        """How OUR fine-tuned model is SERVED locally and reached behind the
+        `LanguageModelPort` (reading R2, ADR 0037), from the `serve:` block of
+        ``config/language.yaml``: the Ollama `model_name` created (which must match
+        `narrator.local.model`, so the `local` narrator calls our model), the
+        `fused_path`/`gguf_file` artifact locations, the serve `port`, and the
+        config-driven Modelfile `params`/`system`. `base_model` and `adapter_path`
+        are REUSED from the `finetune:` block — one source of truth for R1's
+        artifacts, never re-declared. Absent config yields the READING_VOICEBOX §6
+        defaults, so retuning how the being's voice is served is a config change
+        only — never a code one."""
+        finetune = self._language.get("finetune", {}) or {}
+        serve = self._language.get("serve", {}) or {}
+        defaults = OllamaServePolicy()
+        return OllamaServePolicy(
+            model_name=str(serve.get("model_name", defaults.model_name)),
+            base_model=str(finetune.get("base_model", defaults.base_model)),
+            adapter_path=str(finetune.get("adapter_path", defaults.adapter_path)),
+            fused_path=str(serve.get("fused_path", defaults.fused_path)),
+            gguf_file=str(serve.get("gguf_file", defaults.gguf_file)),
+            port=int(serve.get("port", defaults.port)),
+            params={
+                str(k): v for k, v in (serve.get("params", {}) or {}).items()
+            },
+            system=str(serve.get("system", "")),
         )
 
     def voice_policy(self) -> VoicePolicy:

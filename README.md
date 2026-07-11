@@ -126,6 +126,7 @@ flowchart TB
         Ingest["Reading ingest: read → clean → chunk into training-ready text (reading R1)"]
         Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
         Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
+        Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
         VBuild["build_voice: config engine selection (S4 = reading R8)"]
         VPort["VoicePort seam: synthesize self-report → speech"]
@@ -211,7 +212,8 @@ flowchart TB
     Doc --> Ingest
     Ingest -->|training-ready chunks| Finetune
     Finetune -.->|host-native LoRA fine-tune| Adapter
-    Adapter -.->|served behind the port (reading R2)| Local
+    Adapter -.->|fuse → GGUF → ollama create| Serve
+    Serve -.->|Ollama :11434 (host.docker.internal)| Local
     LCmd --> LMPort
     API -->|"/ask"| Self
     Self -->|self-report| API

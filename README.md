@@ -183,6 +183,7 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Secrets never committed (env + scan) | Keep secrets out of git | `.env`/`*.pem`/`*.key` gitignored (only `.env.example` committed); the `pre-commit` hook blocks a staged `.env`, key file, or PEM/AWS-key literal |
 | Worktrees + wave PRs | Parallel work without clobbering | Each slice runs in its own worktree/branch; a wave rolls up into a single PR |
 | Orchestrator vs sub-agents | Clear ownership | Orchestrator owns git + the board; sub-agents own code, commit in their worktree, and report |
+| Orchestrator delegates by default | Fast parallelism; small orchestrator context | Orchestrator does only non-delegable acts inline (worktree/branch/merge/PR/branch-delete, board writes) and delegates implementation, verification, reconciliation, authoring, and investigation to sub-agents; it consumes verdicts, not raw output |
 | Sub-agent → workflow escalation | Scale to large slices | A sub-agent may spawn a workflow/helper agents, staying within its worktree contract |
 | Self-diagnosing / self-healing | Keep the open PR pristine | Defects become bug tickets → `hotfix/<ticket>` → verify → merge back; nothing merges red |
 | Closing a wave | Clean, verified finish | After the PR merges: pull, verify, self-heal if needed, delete branches/worktrees, cards → done, report |

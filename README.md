@@ -127,6 +127,7 @@ flowchart TB
         Embed["Embedder: passage → vector (deterministic hashing offline default; sentence-transformers gated) (reading R3)"]
         Store["RetrievalPort / KnowledgeStore: growing, persistent, cumulative knowledge store; top-k cosine, cites source (reading R3; pgvector-ready)"]
         ReadingQA["ReadingQAService: RetrievalPort top-k -> grounded prompt (only retrieved passages + question) -> LanguageModelPort -> cited answer; unread declined honestly + labelled base knowledge (reading R4)"]
+        Convo["ConversationService: multi-turn grounded conversation over ReadingQA + conversation-turn history; folds prior turns so a follow-up resolves to the earlier subject; a new unread topic still declined honestly (reading R6)"]
         Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
         Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
         Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
@@ -137,7 +138,7 @@ flowchart TB
         FakeV["FakeVoice: in-memory (tests)"]
     end
 
-    PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct + knowledge_chunks tables")]
+    PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct + knowledge_chunks + conversation_turns tables")]
 
     %% ---- Client / transport ----
     subgraph client["Client / transport"]
@@ -221,6 +222,11 @@ flowchart TB
     ReadingQA -->|grounded prompt| LMPort
     API -->|"/ask/reading"| ReadingQA
     ReadingQA -->|grounded, cited answer| API
+    ReadingQA -->|grounded, cited answer per turn| Convo
+    Convo -->|folded query per follow-up| ReadingQA
+    Convo -->|persist conversation turns| PG
+    API -->|"/chat"| Convo
+    Convo -->|grounded, cited multi-turn answer| API
     Finetune -.->|host-native LoRA fine-tune| Adapter
     Adapter -.->|fuse → GGUF → ollama create| Serve
     Serve -.->|Ollama :11434 (host.docker.internal)| Local

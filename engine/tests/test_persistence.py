@@ -151,6 +151,8 @@ def test_the_migration_defines_the_schema_tables():
         "instinct_training_examples",
         # the growing knowledge store the reading faculty adds (R3, ADR 0038)
         "knowledge_chunks",
+        # multi-turn conversation turns the reading faculty adds (R6, ADR 0039)
+        "conversation_turns",
     }
 
 

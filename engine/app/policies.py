@@ -6,6 +6,7 @@ one without any risk of mutating shared config.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import ClassVar, Dict, Mapping, Optional, Tuple
 
@@ -1309,3 +1310,44 @@ class ReadingQAPolicy:
     base_label: str = "From what I already knew"
     cite_template: str = "(source: {sources})"
     topic_markers: Tuple[str, ...] = ("about",)
+
+
+@dataclass(frozen=True)
+class ConversationPolicy:
+    """How the being holds a MULTI-TURN conversation about what it has READ (reading
+    R6, extends ADR 0039), from the `conversation:` block of ``config/language.yaml``.
+    A conversation is built on single-turn reading QA; this policy tunes only what R6
+    adds on top — HISTORY-AWARE grounding:
+
+    - `followup_cues` are the referential words that mark a FOLLOW-UP — a message that
+      refers back ("tell me more about *that*", "what *else*?") but names no subject of
+      its own. Such a message has the recent turns' questions folded into its retrieval
+      query, so it resolves to the subject established earlier and stays grounded +
+      cited. A message with NONE of these cues stands alone, so a NEW topic — even one
+      the being has not read about — is judged on its own words and declined honestly,
+      never dragged onto a prior topic.
+    - `history_window` bounds how many recent turns fold into a follow-up, so an old,
+      unrelated exchange never bleeds into a fresh one.
+
+    Absent config yields safe defaults, so retuning how far back the being looks and
+    what counts as a follow-up is a config change only — never a code one."""
+
+    history_window: int = 6
+    followup_cues: Tuple[str, ...] = (
+        "that", "it", "this", "they", "them", "those", "these",
+        "more", "else", "again", "another",
+    )
+
+    def is_followup(self, message: str) -> bool:
+        """Whether `message` refers BACK to the conversation rather than naming its
+        own subject — true when it contains any referential `followup_cues` word."""
+        tokens = set(re.findall(r"[a-z']+", str(message).lower()))
+        return bool(tokens & {cue.lower() for cue in self.followup_cues})
+
+    def recent(self, history: "Sequence") -> list:
+        """The most recent turns to fold into a follow-up's query — the last
+        `history_window` of them (all of them when the window is <= 0)."""
+        turns = list(history)
+        if self.history_window <= 0:
+            return turns
+        return turns[-self.history_window:]

@@ -22,6 +22,7 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``instinct_reactions``         — the reaction triggered/suppressed per stimulus.
 - ``instinct_training_examples`` — model-ready instinct rows for training.
 - ``knowledge_chunks``    — embedded passages of the growing knowledge store (R3).
+- ``conversation_turns``  — turns of multi-turn conversations about read docs (R6).
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -450,4 +451,28 @@ class KnowledgeChunk(Base):
     source = Column(String, nullable=False, index=True)
     text = Column(String, nullable=False)
     embedding = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- reading: multi-turn conversation turns (reading R6, extends ADR 0039) ------
+#
+# One row per conversational exchange — the `user_message` and the being's grounded
+# `answer` — tagged with the `conversation_id` it belongs to (a plain indexed string,
+# not a DB foreign key: a turn is a self-contained, replayable record, the same FK
+# discipline as knowledge_chunks and the event backbone). Append-only: a turn, once
+# lived, is never edited; insertion order (the autoincrement id) is the turn order.
+
+
+class ConversationTurn(Base):
+    """One turn of a multi-turn conversation about what the being has READ (reading
+    R6, extends ADR 0039): the `conversation_id` it belongs to, the `user_message`,
+    and the being's grounded `answer`. Append-only + cumulative — turns accumulate so
+    later turns can resolve references to earlier ones; ordered oldest-first by id."""
+
+    __tablename__ = "conversation_turns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String, nullable=False, index=True)
+    user_message = Column(String, nullable=False)
+    answer = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

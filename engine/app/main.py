@@ -42,8 +42,12 @@ from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.ports.voice import VoicePort
 from app.policies import VoicePolicy
-from app.repositories import InMemoryKnowledgeChunkRepository
+from app.repositories import (
+    InMemoryConversationTurnRepository,
+    InMemoryKnowledgeChunkRepository,
+)
 from app.services.command_service import CommandError, CommandService
+from app.services.conversation_service import ConversationService
 from app.services.memory_summary_service import MemorySummaryService
 from app.services.narration_service import NarrationService
 from app.services.render_state_service import RenderStateService
@@ -67,6 +71,7 @@ def create_app(
     command_service: Optional[CommandService] = None,
     self_report_service: Optional[SelfReportService] = None,
     reading_qa_service: Optional[ReadingQAService] = None,
+    conversation_service: Optional[ConversationService] = None,
     voice: Optional[VoicePort] = None,
 ) -> FastAPI:
     """Build the app around a being, a clock, and the render/command services.
@@ -90,6 +95,7 @@ def create_app(
         or command_service is None
         or self_report_service is None
         or reading_qa_service is None
+        or conversation_service is None
         or voice is None
     ):
         config = ConfigService.from_files(
@@ -119,6 +125,12 @@ def create_app(
             # answers from the being's growing knowledge store. A fresh store is
             # empty, so a being that has read nothing declines honestly.
             reading_qa_service = _build_reading_qa(config)
+        if conversation_service is None:
+            # The multi-turn conversation surface (reading R6): a
+            # ConversationService over the SAME grounded reading QA, adding
+            # history so follow-ups resolve to earlier turns. A fresh turn
+            # store is empty, so the first turn has no history to lean on.
+            conversation_service = _build_conversation(config)
         if voice is None:
             # The voicebox (S4, ADR 0035): the VoicePort engine is selected from
             # config, and the espeak-ng adapter degrades to a no-op on a host with
@@ -195,6 +207,19 @@ def create_app(
         query = str(payload.get("query", ""))
         answer = reading_qa_service.answer(query)
         return {"query": query, "answer": answer}
+
+    @app.post("/chat", dependencies=[Depends(guard)])
+    async def post_chat(payload: dict = Body(...)):
+        # Hold a MULTI-TURN grounded conversation about what the being has READ
+        # (reading R6): each turn stays grounded in the retrieved passages and CITES
+        # its source (reusing reading QA), and a follow-up ("tell me more about that")
+        # resolves to earlier turns; a new unread topic is still declined honestly.
+        # Read-only: touches the knowledge + turn stores, never the being (ADR 0022),
+        # behind the same always-on JWT guard as /state (ADR 0005).
+        conversation_id = str(payload.get("conversationId", "default"))
+        message = str(payload.get("message", ""))
+        answer = conversation_service.reply(conversation_id, message)
+        return {"conversationId": conversation_id, "message": message, "answer": answer}
 
     @app.post("/speak", dependencies=[Depends(guard)])
     async def post_speak(payload: dict = Body(...)):
@@ -291,6 +316,22 @@ def _build_reading_qa(config: ConfigService) -> ReadingQAService:
     kind = config.self_report_policy().narrator_kind
     model = None if kind in ("deterministic", "template") else build_narrator(config)
     return ReadingQAService(store, model=model, policy=config.reading_qa_policy())
+
+
+def _build_conversation(config: ConfigService) -> ConversationService:
+    """Wire the multi-turn conversation surface from config (reading R6, extends ADR
+    0039). It reuses `_build_reading_qa` for the grounded, cited single-turn answer
+    (so citation + unread-honesty carry over unchanged) and adds an in-memory
+    conversation-turn store plus the `conversation_policy` tuning (history window +
+    follow-up cues). A served engine with a DB would hand it the Postgres turn
+    repository + a real unit of work instead (ADR 0017); the default here is the
+    offline in-memory store, so a fresh being converses with no database. Read-only
+    throughout (ADR 0022)."""
+    return ConversationService(
+        _build_reading_qa(config),
+        InMemoryConversationTurnRepository(),
+        policy=config.conversation_policy(),
+    )
 
 
 def _readback(simulation, name: str):

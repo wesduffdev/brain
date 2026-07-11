@@ -141,6 +141,14 @@ def test_the_migration_defines_the_schema_tables():
         "object_similarity_records",
         "graph_nodes",
         "graph_edges",
+        # the event backbone + instinct substrate the persistence wave adds
+        # (EVT-PERSIST, ADR 0028): the transactional outbox and its event-log
+        # projection, and the instinct prediction/reaction/training tables.
+        "event_outbox",
+        "event_log",
+        "instinct_predictions",
+        "instinct_reactions",
+        "instinct_training_examples",
     }
 
 

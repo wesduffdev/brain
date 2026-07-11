@@ -27,3 +27,19 @@ memory:
       hungry: 0.5
       frustrated: 0.7
       scared: 1.0
+
+# Concept learning (card v2).
+#
+# Repeated interactions form CONCEPT SCHEMAS — generalizations keyed on an
+# object's PERCEIVED properties ("round things roll when pushed"). A concept's
+# CONFIDENCE rises the more it is confirmed. This is the single place that tuning
+# lives: retuning how fast the being generalizes is a change here, never in
+# service code (ConfigService.concept_learning_policy).
+concept:
+  learning:
+    # A concept's confidence on its first sighting.
+    seed_confidence: 0.3
+    # How far each confirming interaction moves confidence toward full certainty:
+    #   confidence_next = confidence + reinforce_rate * (1 - confidence)
+    # Higher = the being commits to a pattern faster (with diminishing returns).
+    reinforce_rate: 0.2

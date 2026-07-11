@@ -123,7 +123,9 @@ def test_a_fetched_being_does_not_alias_the_store(being_repo):
 
 def test_the_migration_defines_the_schema_tables():
     # The schema seam declares exactly the v0 tables from BRIEF §15, plus the
-    # `memories` table the cognitive loop adds (card v1).
+    # `memories` table the cognitive loop adds (card v1) and the concept-learning
+    # tables card v2 adds (concept_schemas, concept_evidence, beliefs,
+    # object_similarity_records).
     assert set(Base.metadata.tables) == {
         "beings",
         "objects",
@@ -132,6 +134,10 @@ def test_the_migration_defines_the_schema_tables():
         "prediction_records",
         "model_runs",
         "memories",
+        "concept_schemas",
+        "concept_evidence",
+        "beliefs",
+        "object_similarity_records",
     }
 
 
@@ -154,4 +160,8 @@ def test_the_migration_creates_the_v0_tables_in_a_database():
         "prediction_records",
         "model_runs",
         "memories",
+        "concept_schemas",
+        "concept_evidence",
+        "beliefs",
+        "object_similarity_records",
     } <= tables

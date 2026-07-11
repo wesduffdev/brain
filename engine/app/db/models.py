@@ -10,6 +10,10 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``prediction_records``  — model predictions, for comparison against actuals.
 - ``model_runs``          — training-run metadata.
 - ``memories``            — durable per-interaction memories with a salience.
+- ``concept_schemas``     — learned generalizations keyed on a perceived property.
+- ``concept_evidence``    — append-only interactions that reinforced a concept.
+- ``beliefs``             — per-object predictions inherited from concepts.
+- ``object_similarity_records`` — perceived-property similarity between objects.
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -160,4 +164,89 @@ class Memory(Base):
     emotion_after = Column(String, nullable=True)
     prediction_error = Column(Float, nullable=True)
     priority = Column(Float, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConceptSchema(Base):
+    """A learned generalization (card v2): the being perceives ``feature`` (a
+    property, never a developer_label — ADR 0002), takes ``action``, and observes
+    ``outcome``, with a ``confidence`` that rises as ``evidence_count`` interactions
+    confirm it. ``concept_id`` (``being|feature|action|outcome``) is the primary
+    key, so a concept is upserted in place as it strengthens rather than appended.
+    Keyed on perception alone — there is deliberately no developer_label column."""
+
+    __tablename__ = "concept_schemas"
+
+    concept_id = Column(String, primary_key=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    feature = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+    evidence_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ConceptEvidence(Base):
+    """One interaction's contribution to a concept (card v2), append-only. Links
+    the ``interaction_events`` row it was formed from (``being:tick``) — the
+    enforced cross-aggregate FK — to the concept it reinforced, so a concept is
+    always reconcilable to the lived experiences behind it. Written inside the
+    interaction's unit of work, so it commits atomically with the event it
+    references (ADR 0017).
+
+    ``concept_id`` is a plain indexed logical link to ``concept_schemas`` (its own
+    aggregate), deliberately *not* a DB foreign key: the concept and its evidence
+    are staged together in one unit and a natural-key FK between them only forces a
+    brittle intra-unit insert ordering without adding integrity the unit does not
+    already guarantee."""
+
+    __tablename__ = "concept_evidence"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    concept_id = Column(String, nullable=False, index=True)
+    event_id = Column(String, ForeignKey("interaction_events.event_id"), nullable=True, index=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    feature = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Belief(Base):
+    """A per-object prediction inherited from concepts (card v2), append-only: the
+    being expects ``action`` on ``object_id`` to produce ``outcome`` with
+    ``confidence``, formed purely from the object's PERCEIVED properties so a
+    never-seen object inherits an expectation. ``object_id`` is perception-scoped
+    (no FK): a belief may concern any perceived object, catalogued or not."""
+
+    __tablename__ = "beliefs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    object_id = Column(String, nullable=True, index=True)
+    action = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ObjectSimilarityRecord(Base):
+    """How similar the being finds two objects by their PERCEIVED properties (card
+    v2), append-only. ``similarity`` is in ``[0, 1]``. Object ids are
+    perception-scoped (no FK) — the record is a signal about what the being
+    senses, not a catalog relationship."""
+
+    __tablename__ = "object_similarity_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    object_id = Column(String, nullable=True, index=True)
+    other_object_id = Column(String, nullable=True, index=True)
+    similarity = Column(Float, nullable=False, default=0.0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

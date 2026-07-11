@@ -246,6 +246,28 @@ derived from the being's interactions; until those are recorded, a synthetic see
 set is derived from the config vocabulary.
 _Avoid_: sample, data point, record, row.
 
+**Concept schema**:
+A learned generalization keyed on one perceived property + an action + an
+observed outcome ("round things roll when pushed"), carrying a confidence that
+rises as interactions confirm it.
+_Avoid_: rule, category, class, prototype.
+
+**Belief**:
+A concept applied to one perceived object — an expected outcome of an action on
+it, at the supporting concept's confidence; lets a never-seen object be
+anticipated.
+_Avoid_: prediction, guess, opinion.
+
+**Concept confidence**:
+How strongly the being holds a concept schema, 0..1, rising with confirming
+repetition (diminishing returns).
+_Avoid_: weight, probability, score, certainty.
+
+**Object similarity**:
+How alike two objects are by the overlap of their perceived properties (0 =
+nothing shared, 1 = perceived identically).
+_Avoid_: distance, closeness, match.
+
 **Shadow mode**:
 Running the outcome predictor alongside the being's rule layer so its predictions
 are recorded and compared, but do **not** control what the being does. The model

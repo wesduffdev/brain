@@ -21,10 +21,13 @@ from __future__ import annotations
 from typing import ContextManager, List, Optional, Protocol
 
 from app.domain.being_state import BeingState
+from app.domain.belief import Belief
+from app.domain.concept import ConceptEvidence, ConceptSchema
 from app.domain.interaction_event import InteractionEvent
 from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
+from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
 
 
@@ -125,4 +128,60 @@ class MemoryRepository(Protocol):
 
     def all(self) -> List[Memory]:
         """Every stored memory, oldest first."""
+        ...
+
+
+class ConceptRepository(Protocol):
+    """Stores the being's CONCEPT SCHEMAS and their evidence (card v2).
+
+    Unlike the append-only learned-fact ports, a concept is *upserted*: it is
+    looked up by ``concept_id``, strengthened, and saved back in place as more
+    interactions confirm it, so its confidence accumulates rather than duplicating.
+    ``add_evidence`` records the append-only trace of the interactions behind a
+    concept. Both writes go through the interaction's unit of work (ADR 0017). The
+    in-memory fake (`app.repositories`) is the seam the behavior suite drives; a
+    Postgres-backed adapter follows for the runtime."""
+
+    def get(self, concept_id: str) -> Optional[ConceptSchema]:
+        """The stored concept with ``concept_id``, or ``None`` if there is none."""
+        ...
+
+    def save(self, concept: ConceptSchema) -> None:
+        """Persist ``concept``, replacing any existing one with the same id."""
+        ...
+
+    def add_evidence(self, evidence: ConceptEvidence) -> None:
+        """Append one piece of evidence for a concept (append-only)."""
+        ...
+
+    def all(self) -> List[ConceptSchema]:
+        """Every stored concept."""
+        ...
+
+
+class BeliefRepository(Protocol):
+    """Stores the being's per-object BELIEFS (append-only, card v2). Each is a
+    prediction inherited from concepts about a perceived object; one is added per
+    prediction, inside the interaction's unit of work."""
+
+    def add(self, belief: Belief) -> None:
+        """Append ``belief`` to the store."""
+        ...
+
+    def all(self) -> List[Belief]:
+        """Every stored belief, oldest first."""
+        ...
+
+
+class SimilarityRepository(Protocol):
+    """Stores object-similarity records (append-only, card v2): how alike the
+    being finds two objects by their perceived properties, laid down as it
+    perceives its world."""
+
+    def add(self, record: ObjectSimilarityRecord) -> None:
+        """Append ``record`` to the store."""
+        ...
+
+    def all(self) -> List[ObjectSimilarityRecord]:
+        """Every stored similarity record, oldest first."""
         ...

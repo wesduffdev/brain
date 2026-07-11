@@ -103,7 +103,7 @@ reaction:
   #   allow_interrupt : step 2 — a reaction at/above `interrupt.intensity_threshold`
   #                     may CANCEL an interruptible current action, but only when the
   #                     floor permits the protective response; otherwise SUPPRESSED.
-  visual_only: false
+  visual_only: true
   allow_interrupt: false
   # The TRANSIENT affect a triggered reaction feeds into emotion derivation, per
   # label (`need: delta`). A flinch drops the felt safety used for derivation below

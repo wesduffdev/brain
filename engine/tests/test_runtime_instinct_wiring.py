@@ -21,6 +21,8 @@ no database.
 """
 from __future__ import annotations
 
+import os
+
 from typing import List
 
 from app.adapters.in_memory_event_bus import InMemoryEventBus
@@ -33,6 +35,9 @@ from app.policies import MOTION_FEATURE_NAMES
 from app.ports.instinct import InstinctPrediction as PortPrediction
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
 from app.simulation import Simulation
+
+
+_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
 
 def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -205,3 +210,42 @@ def test_runtime_instinct_is_enabled_by_default_and_config_can_disable_it():
         instinct={"feature_order": list(MOTION_FEATURE_NAMES), "labels": list(REACTION_LABELS)},
     )
     assert cfg.instinct_runtime_enabled() is True
+
+
+# --- the SHIPPED config, end to end: a legible flinch, action unchanged --------
+
+
+def test_shipped_config_visual_only_surfaces_a_flinch_on_the_ball_without_changing_the_action():
+    # The slice outcome on the SHIPPED config + shipped world motion: the red ball
+    # is a fast, body-bound approach; with visual_only shipped ON and an instinct
+    # predictor wired, the being SURFACES a flinch and its DERIVED emotion shifts to
+    # `scared` -- while the action it decides is identical, tick for tick, to the
+    # same being with no instinct chain (no interruption -- allow_interrupt is off).
+    # Torch-free (a fake predictor stands in for models/instinct.pt), so this holds
+    # in the artifact-free canonical suite too.
+    config = ConfigService.from_files(_CONFIG_ROOT).with_room_contents(["obj_red_ball"])
+
+    bus = InMemoryEventBus()
+    interrupts = _recorder(bus, "being.action.events")
+    baseline = Simulation(config)  # no predictor -> instinct chain inert
+    with build_simulation(
+        config,
+        env={},
+        event_publisher=bus,
+        event_consumer=bus,
+        instinct_predictor=FakeInstinctPredictor(),
+    ) as wired:
+        reacted = False
+        for _ in range(4):
+            a = wired.tick()
+            b = baseline.tick()
+            # visual-only never touches the decision; allow_interrupt is off -> the
+            # decided action is byte-identical to the no-chain being every tick.
+            assert a.get("currentAction") == b.get("currentAction")
+            if a.get("reaction") is not None:
+                reacted = True
+                assert a["reaction"]["type"] == "flinch"
+                assert a["emotion"] == "scared"
+
+    assert reacted, "the fast body-bound ball should have surfaced a flinch"
+    assert interrupts == []  # allow_interrupt off -> nothing is ever interrupted

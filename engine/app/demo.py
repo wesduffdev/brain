@@ -33,7 +33,9 @@ from app.bootstrap import build_simulation
 from app.config_service import ConfigService
 from app.domain.event import DomainEvent
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
+from app.services.reaction_response_service import ACTION_EVENTS_TOPIC
 from app.services.stimulus_service import PERCEPTION_TOPIC
+from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
@@ -68,16 +70,84 @@ def _default_object_id(config: ConfigService) -> str:
 def _print_action(state: Dict) -> None:
     action = state.get("currentAction")
     line = f"tick={state['tick']:>4}  [{state['emotion']:>8}]  "
+    # VISUAL-ON: when the being visibly reacts, show the surfaced reaction alongside
+    # the action it still decided (visual-only surfaces + colours emotion; it never
+    # interrupts). Absent when the instinct flags are off or nothing is reacting.
+    reaction = state.get("reaction")
+    suffix = (
+        f"   <-- reacts: {reaction['type']} ({reaction['intensity']:.2f})"
+        if reaction is not None
+        else ""
+    )
     if action is None:
-        print(line + "(resting — nothing to do)")
+        print(line + "(resting — nothing to do)" + suffix)
     else:
-        print(line + f"{action['type']:>8} -> {action['targetId']:<16} | {action['reason']}")
+        print(line + f"{action['type']:>8} -> {action['targetId']:<16} | {action['reason']}" + suffix)
+
+
+def _react_demo(config_root: str, ticks: int = 6) -> None:
+    """VISUAL-ON demonstration: the RUNNING being VISIBLY REACTS to a fast,
+    body-bound approach (the red ball) — it surfaces `state().reaction` and its
+    DERIVED emotion shifts to `scared` — while the action it decides stays identical,
+    tick for tick, to the SAME being with no instinct chain. Visual-only never
+    interrupts (allow_interrupt is off), so the two beings act in lockstep; only the
+    felt/expressed layer differs. The bootstrap loads the trained instinct predictor
+    from `models/instinct.pt`; with no torch or no artifact the chain is inert and the
+    run says so (train it with `python -m app.ml.train_instinct_model`)."""
+    config = ConfigService.from_files(config_root).with_room_contents(["obj_red_ball"])
+    label = config.object_catalog()["obj_red_ball"].developer_label or "obj_red_ball"
+    print(f"the being sits alone; then a fast, body-bound {label} rushes straight at it.\n")
+
+    baseline = Simulation(config)  # no instinct chain -> the decided-action reference
+    bus = InMemoryEventBus()
+    interrupted: List[DomainEvent] = []
+    bus.subscribe(ACTION_EVENTS_TOPIC, interrupted.append)
+
+    reacted = 0
+    actions_matched = True
+    print(f"--- wired being (visual_only ON) beside a no-instinct baseline, {ticks} ticks ---")
+    with build_simulation(config, event_publisher=bus, event_consumer=bus) as sim:
+        for _ in range(ticks):
+            a = sim.tick()
+            b = baseline.tick()
+            if a.get("currentAction") != b.get("currentAction"):
+                actions_matched = False
+            if a.get("reaction") is not None:
+                reacted += 1
+            _print_action(a)
+
+    print()
+    if reacted:
+        print(
+            f"the being VISIBLY REACTED on {reacted} tick(s): `state().reaction` surfaced "
+            f"and its derived emotion read `scared` on the approach."
+        )
+    else:
+        print(
+            "the instinct chain was inert — no trained model loaded. Run "
+            "`PYTHONPATH=. python -m app.ml.train_instinct_model` to produce "
+            "models/instinct.pt, then retry."
+        )
+    verdict = "IDENTICAL" if actions_matched else "DIFFERENT"
+    print(
+        f"the decided ACTION was {verdict} to the no-instinct baseline every tick — "
+        f"{len(interrupted)} action(s) interrupted (allow_interrupt stays off)."
+    )
 
 
 def main(argv: Optional[List[str]] = None) -> None:
     argv = argv if argv is not None else sys.argv[1:]
-    ticks, selector = _parse_argv(argv)
     config_root = os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
+    # VISUAL-ON: `demo react [ticks]` runs the reaction demonstration (the being
+    # visibly reacts to a body-bound approach, action unchanged) instead of the
+    # single-object walk.
+    if any(token.strip().lstrip("-").lower() == "react" for token in argv):
+        react_ticks = next(
+            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 6
+        )
+        _react_demo(config_root, ticks=react_ticks)
+        return
+    ticks, selector = _parse_argv(argv)
 
     config = ConfigService.from_files(config_root)
     object_id = config.resolve_object(selector) if selector else _default_object_id(config)

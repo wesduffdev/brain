@@ -104,3 +104,18 @@ def test_the_demo_defaults_to_the_hot_lamp_and_the_being_can_be_hurt_by_it(capsy
     assert "Hot Lamp" in out
     assert "harmful contact" in out
     assert "causes_pain" in out
+
+
+# --- the VISUAL-ON reaction demonstration (`demo react`) ----------------------
+
+def test_the_react_demo_shows_the_being_reacting_while_its_action_is_unchanged(capsys):
+    # `demo react` runs the wired being beside a no-instinct baseline. Regardless of
+    # whether a trained artifact is present (torch-free here -> chain inert), the
+    # decided ACTION must match the baseline every tick and nothing is interrupted
+    # (allow_interrupt stays off this slice) -- the invariant the slice guarantees.
+    demo.main(["react", "5"])
+
+    out = capsys.readouterr().out
+    assert "Red Ball" in out
+    assert "decided ACTION was IDENTICAL" in out
+    assert "allow_interrupt stays off" in out

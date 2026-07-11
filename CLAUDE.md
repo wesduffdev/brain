@@ -98,6 +98,20 @@ Drift rates, thresholds, timings, and vocabularies live in `config/*.yaml`, not
 in service code. `ConfigService` is the only code that knows config exists; it
 hands services typed policies. Retuning must be a config change only.
 
+### Transactional persistence (atomic unit of work)
+
+Persistence is transactional by unit of work. A single logical operation
+persists atomically or not at all: repositories STAGE writes (add/merge) and
+never call commit themselves; the caller opens one transaction per unit of work
+(`with session.begin(): …`) so an interaction's rows — its interaction_event,
+the derived training_example, the prediction_record — commit together, and a
+failure mid-unit rolls the whole unit back (no orphaned child rows). Postgres
+runs at READ COMMITTED (sufficient for the single-writer sim; raise the
+isolation level only with a reason stated in an ADR). The repository port stays
+the seam; the ORM never leaks above it. A deviation — e.g. an append-only
+single-row write that self-commits — is allowed only with a stated reason (in
+the code and on its card).
+
 ### Documentation
 
 - `docs/adr/NNNN-slug.md` for every architecturally significant decision
@@ -169,6 +183,10 @@ git worktree** so agents never share a working tree:
   or serialize); the slice still lands as commits on its `slice/<ticket>` branch;
   and the sub-agent still returns one completion report. Keep the fan-out
   proportional — a small slice needs no workflow.
+
+### Orchestrator delegates to sub-agents by default
+
+The orchestrator keeps its own context minimal and pushes every delegable unit of work to sub-agents — maximizing parallel throughput and keeping the long-lived orchestrator session small. Inline (orchestrator-only) acts are just those a sub-agent is forbidden or unsuited to do: create worktrees/branches, merge a slice into its wave branch, open and roll up PRs, delete merged branches, and all board/Trello writes. Everything else is delegated: implementation; verification runs (a fresh sub-agent — never the implementer — runs the suite/demo/integration and returns a pass/fail verdict, so "Done means verified" still holds); shared-file reconciliation at roll-up (CONTEXT.md, the ADR index); doc and plan authoring; and code investigation (an Explore agent returns the conclusion, not file dumps). The orchestrator reads sub-agents' verdicts and reports — not raw file or test output.
 
 ### Bugs found during a wave — ticket, hotfix, merge back into the PR
 

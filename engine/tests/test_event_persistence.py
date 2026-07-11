@@ -27,6 +27,7 @@ from app.config_service import ConfigService
 from app.db.migrate import create_all, drop_all
 from app.db import models
 from app.db.session import create_db_engine, session_factory
+from app.db.unit_of_work import SessionUnitOfWork
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
 from app.ml.encode_features import FeatureEncoder
@@ -217,9 +218,17 @@ def test_events_and_examples_persist_to_a_reachable_postgres():
             )
         session.commit()
 
+        # Writes go through one unit of work per interaction (ADR 0017), so the
+        # adapters (which now only stage) actually persist each event + its
+        # derived example together.
         events = PostgresInteractionEventRepository(session)
         examples = PostgresTrainingExampleRepository(session)
-        sim = Simulation(config, event_repo=events, training_repo=examples)
+        sim = Simulation(
+            config,
+            event_repo=events,
+            training_repo=examples,
+            unit_of_work=SessionUnitOfWork(session),
+        )
         for _ in range(80):
             sim.tick()
 

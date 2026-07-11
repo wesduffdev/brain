@@ -235,6 +235,7 @@ def run_training(
     output_path: str,
     training_repo=None,
     model_run_repo=None,
+    unit_of_work=None,
     timestamp: datetime,
     metrics_path: Optional[str] = None,
     epochs: int = 300,
@@ -249,8 +250,13 @@ def run_training(
     otherwise the config-derived synthetic seed set, so a run needs no database.
     Trains, saves the artifact (+ optional metrics sidecar), and — when a
     `model_run_repo` is present — records one `ModelRun` (artifact path, metrics,
-    and the injected `timestamp`; no wall clock here). Returns the metrics with an
+    and the injected `timestamp`; no wall clock here) in one unit of work (ADR
+    0017), so the run row commits atomically; `unit_of_work` defaults to the no-op
+    in-memory unit for the standalone/no-DB path. Returns the metrics with an
     added `source` key ("training_examples" or "synthetic")."""
+    from app.db.unit_of_work import NullUnitOfWork
+
+    unit_of_work = unit_of_work or NullUnitOfWork()
     encoder = FeatureEncoder.from_config(config)
 
     stored = list(training_repo.all()) if training_repo is not None else []
@@ -279,9 +285,10 @@ def run_training(
     _save_artifact(model, encoder, metrics, output_path, metrics_path)
 
     if model_run_repo is not None:
-        model_run_repo.add(
-            ModelRun(artifact_path=output_path, finished_at=timestamp, metrics=dict(metrics))
-        )
+        with unit_of_work.begin():
+            model_run_repo.add(
+                ModelRun(artifact_path=output_path, finished_at=timestamp, metrics=dict(metrics))
+            )
 
     return metrics
 
@@ -322,12 +329,18 @@ def main() -> None:
     params = config.outcome_training_params()
 
     training_repo, model_run_repo, session = _open_repositories()
+    unit_of_work = None
+    if session is not None:
+        from app.db.unit_of_work import SessionUnitOfWork
+
+        unit_of_work = SessionUnitOfWork(session)
     try:
         metrics = run_training(
             config=config,
             output_path=output_path,
             training_repo=training_repo,
             model_run_repo=model_run_repo,
+            unit_of_work=unit_of_work,
             timestamp=datetime.now(timezone.utc),
             metrics_path=output_path + ".metrics.json",
             epochs=params["epochs"],

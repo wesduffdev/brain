@@ -31,31 +31,54 @@ _DEFAULT_TRAINING = {"epochs": 300, "hidden_size": 16, "learning_rate": 0.05, "s
 
 
 class ConfigService:
-    def __init__(
-        self,
-        tick_rates: Mapping,
-        emotions: Mapping,
-        rooms: Optional[Mapping] = None,
-        objects: Optional[Mapping] = None,
-        environment: Optional[Mapping] = None,
-        render_hints: Optional[Mapping] = None,
-        commands: Optional[Mapping] = None,
-        outcome: Optional[Mapping] = None,
-        actions: Optional[Mapping] = None,
-        safety: Optional[Mapping] = None,
-        outcome_effects: Optional[Mapping] = None,
-    ):
-        self._tick_rates = tick_rates
-        self._emotions = emotions
-        self._rooms = rooms or {}
-        self._objects = objects or {}
-        self._environment = environment or {}
-        self._render_hints = render_hints or {}
-        self._commands = commands or {}
-        self._outcome = outcome or {}
-        self._actions = actions or {}
-        self._safety = safety or {}
-        self._outcome_effects = outcome_effects or {}
+    # The authored config sections, declared in ONE place. `tick_rates` and
+    # `emotions` are required; every other section defaults to empty when absent.
+    # Adding a section is a one-line change here: construction stores it and the
+    # copy `with_room_contents` makes carries it through — neither has to name the
+    # section individually, so a section can never be silently dropped (the
+    # demo-caught V0-SAFE regression that motivated this shape).
+    _REQUIRED_SECTIONS: Tuple[str, ...] = ("tick_rates", "emotions")
+    _OPTIONAL_SECTIONS: Tuple[str, ...] = (
+        "rooms",
+        "objects",
+        "environment",
+        "render_hints",
+        "commands",
+        "outcome",
+        "actions",
+        "safety",
+        "outcome_effects",
+    )
+    _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
+
+    def __init__(self, **sections: Optional[Mapping]):
+        """Build from the declared config sections, passed by name. Internal:
+        callers construct via `from_dict` / `from_files` (public) or the `_with`
+        copy — the public construction API stays those, so a new section threads
+        through this one storage loop rather than a positional argument list."""
+        unknown = set(sections) - set(self._SECTIONS)
+        if unknown:
+            raise ValueError(
+                f"ConfigService: unknown config section(s) {sorted(unknown)}; "
+                f"known sections are {list(self._SECTIONS)}"
+            )
+        missing = [name for name in self._REQUIRED_SECTIONS if sections.get(name) is None]
+        if missing:
+            raise ValueError(f"ConfigService: missing required config section(s) {missing}")
+        # One representation, keyed by the declared section names. Absent optional
+        # sections become empty so accessors need no per-call None-guards.
+        for name in self._SECTIONS:
+            value = sections.get(name)
+            setattr(self, f"_{name}", value if value is not None else {})
+
+    def _with(self, **overrides: Mapping) -> "ConfigService":
+        """Return a copy of this config with the named sections replaced and
+        every OTHER section carried through unchanged. The single place a copy is
+        built: it enumerates the declared section set, so a copy can never
+        silently drop a section."""
+        sections = {name: getattr(self, f"_{name}") for name in self._SECTIONS}
+        sections.update(overrides)
+        return ConfigService(**sections)
 
     # --- construction -----------------------------------------------------
 
@@ -77,17 +100,17 @@ class ConfigService:
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
         return cls(
-            tick_rates,
-            emotions,
-            rooms,
-            objects,
-            environment,
-            render_hints,
-            commands,
-            outcome,
-            actions,
-            safety,
-            outcome_effects,
+            tick_rates=tick_rates,
+            emotions=emotions,
+            rooms=rooms,
+            objects=objects,
+            environment=environment,
+            render_hints=render_hints,
+            commands=commands,
+            outcome=outcome,
+            actions=actions,
+            safety=safety,
+            outcome_effects=outcome_effects,
         )
 
     @classmethod
@@ -97,30 +120,27 @@ class ConfigService:
         import yaml  # noqa: PLC0415 — kept out of module import path on purpose
 
         root = Path(config_root)
-        tick_rates = yaml.safe_load((root / "tick_rates.yaml").read_text())
-        emotions = yaml.safe_load((root / "emotions.yaml").read_text())
-        rooms = yaml.safe_load((root / "rooms.yaml").read_text())
-        objects = yaml.safe_load((root / "object_properties.yaml").read_text())
-        environment = yaml.safe_load((root / "environment.yaml").read_text())
-        render_hints = yaml.safe_load((root / "render_hints.yaml").read_text())
-        commands = yaml.safe_load((root / "commands.yaml").read_text())
-        outcome = yaml.safe_load((root / "outcome_labels.yaml").read_text())
-        actions = yaml.safe_load((root / "actions.yaml").read_text())
-        safety = yaml.safe_load((root / "safety_rules.yaml").read_text())
-        outcome_effects = yaml.safe_load((root / "outcome_effects.yaml").read_text())
-        return cls(
-            tick_rates,
-            emotions,
-            rooms,
-            objects,
-            environment,
-            render_hints,
-            commands,
-            outcome,
-            actions,
-            safety,
-            outcome_effects,
-        )
+        # Section name -> the YAML file it is authored in. One entry per declared
+        # section; adding a section adds its filename here (its only file-facing
+        # site) and the loader threads it through unchanged.
+        files = {
+            "tick_rates": "tick_rates.yaml",
+            "emotions": "emotions.yaml",
+            "rooms": "rooms.yaml",
+            "objects": "object_properties.yaml",
+            "environment": "environment.yaml",
+            "render_hints": "render_hints.yaml",
+            "commands": "commands.yaml",
+            "outcome": "outcome_labels.yaml",
+            "actions": "actions.yaml",
+            "safety": "safety_rules.yaml",
+            "outcome_effects": "outcome_effects.yaml",
+        }
+        sections = {
+            name: yaml.safe_load((root / filename).read_text())
+            for name, filename in files.items()
+        }
+        return cls(**sections)
 
     # --- ticks / needs ----------------------------------------------------
 
@@ -281,19 +301,9 @@ class ConfigService:
         room = dict(rooms.get("room") or {})
         room["contains"] = ids
         rooms["room"] = room
-        return ConfigService(
-            self._tick_rates,
-            self._emotions,
-            rooms,
-            self._objects,
-            self._environment,
-            self._render_hints,
-            self._commands,
-            self._outcome,
-            self._actions,
-            self._safety,
-            self._outcome_effects,
-        )
+        # Replace ONLY the rooms section; `_with` carries every other section
+        # through unchanged, so none can be silently dropped here.
+        return self._with(rooms=rooms)
 
     # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
 

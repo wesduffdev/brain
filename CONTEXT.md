@@ -22,6 +22,13 @@ A need with no drift of its own; only the world (environment / perception) moves
 it. Safety and warmth are contextual.
 _Avoid_: passive need, external need.
 
+**Need band**:
+The [floor, ceiling] range a need may sit within (its min/max, from
+tick_rates.yaml). Every force that moves a need — drift, environmental push,
+felt-consequence effect — is clamped to the need's band, so a need's limits have
+one home.
+_Avoid_: clamp, min/max, cap, bounds.
+
 **Emotion**:
 The single dominant felt state, always *derived* from the being's needs and
 never set directly (e.g. calm, curious, scared).
@@ -144,6 +151,16 @@ The being-in-its-world advanced through ticks — the single public surface over
 the whole model.
 _Avoid_: engine, game. (`World`, meaning global laws, is a future concept, not
 this term.)
+
+**Unit of work**:
+One logical operation whose repository writes commit atomically together, or roll
+back together, inside a single caller-owned transaction.
+_Avoid_: transaction (too low-level), batch.
+
+**Stage (a write)**:
+A repository records a write on the session without committing; the enclosing
+unit of work commits it.
+_Avoid_: save, persist (those imply an immediate commit).
 
 **Interaction event**:
 A meaningful thing that happened — the being took an action on an object, with an

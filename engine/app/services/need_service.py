@@ -18,11 +18,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, Mapping, Optional
 
-from app.policies import CONTEXTUAL, INCREASE, NeedTickPolicy, OutcomeEffectPolicy
-
-
-def _clamp(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
+from app.policies import CONTEXTUAL, INCREASE, NeedBands, NeedTickPolicy, OutcomeEffectPolicy
 
 
 class NeedService:
@@ -33,6 +29,8 @@ class NeedService:
     ):
         self._policies = dict(policies)
         self._effects = effects or OutcomeEffectPolicy()
+        # A need's floor/ceiling knowledge lives in one place, not inline here.
+        self._bands = NeedBands.from_policies(self._policies)
 
     def apply(self, needs: Mapping[str, int], tick: int) -> Dict[str, int]:
         """Return the needs after this tick's drift. Pure: it copies rather
@@ -51,9 +49,7 @@ class NeedService:
             if policy.every_ticks <= 0 or tick % policy.every_ticks != 0:
                 continue
             step = policy.amount if policy.direction == INCREASE else -policy.amount
-            updated[name] = _clamp(
-                updated[name] + step, policy.min_value, policy.max_value
-            )
+            updated[name] = self._bands.clamp(name, updated[name] + step)
         return updated
 
     def apply_outcomes(self, needs: Mapping[str, int], outcomes: Iterable[str]) -> Dict[str, int]:
@@ -66,9 +62,5 @@ class NeedService:
         for name, delta in self._effects.deltas_for(outcomes).items():
             if name not in updated or delta == 0:
                 continue
-            policy = self._policies.get(name)
-            moved = updated[name] + delta
-            updated[name] = (
-                _clamp(moved, policy.min_value, policy.max_value) if policy else moved
-            )
+            updated[name] = self._bands.clamp(name, updated[name] + delta)
         return updated

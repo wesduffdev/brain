@@ -176,12 +176,14 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Deep-module review gate | Catch design drift early | `/legacy-deep-module-review` runs after each slice, before it is called done |
 | Domain-model gate | Keep the ubiquitous language current | After each slice, update root `CONTEXT.md` (via the `domain-modeling` skill) with new/changed terms; an ADR only per its 3-part test |
 | Config-driven tuning | Retune without touching code | Rates/thresholds/vocab live in `config/*.yaml`; only `ConfigService` reads them |
+| Transactional persistence (unit of work) | Atomic writes; no partial/orphan rows | Repos stage; the caller commits one transaction per logical op (event + example + prediction together); READ COMMITTED; deviations only with a stated reason (ADR 0017) |
 | ADRs | Durable decision record | One `docs/adr/NNNN` per significant decision; never rewritten, only superseded |
 | No commits on `main` (hook) | Keep `main` reviewed and clean | `.githooks/pre-commit` rejects commits on `main`; all work is a worktree branch → PR |
 | API auth (always-on JWT) | Close the state surface by default | Every protected route runs `require_auth` (HS256, sig+exp+iss+aud); `/health` public; always in the code path, gated only by `AUTH_REQUIRED` — no loopback bypass ([ADR 0005](docs/adr/0005-api-authentication.md)) |
 | Secrets never committed (env + scan) | Keep secrets out of git | `.env`/`*.pem`/`*.key` gitignored (only `.env.example` committed); the `pre-commit` hook blocks a staged `.env`, key file, or PEM/AWS-key literal |
 | Worktrees + wave PRs | Parallel work without clobbering | Each slice runs in its own worktree/branch; a wave rolls up into a single PR |
 | Orchestrator vs sub-agents | Clear ownership | Orchestrator owns git + the board; sub-agents own code, commit in their worktree, and report |
+| Orchestrator delegates by default | Fast parallelism; small orchestrator context | Orchestrator does only non-delegable acts inline (worktree/branch/merge/PR/branch-delete, board writes) and delegates implementation, verification, reconciliation, authoring, and investigation to sub-agents; it consumes verdicts, not raw output |
 | Sub-agent → workflow escalation | Scale to large slices | A sub-agent may spawn a workflow/helper agents, staying within its worktree contract |
 | Self-diagnosing / self-healing | Keep the open PR pristine | Defects become bug tickets → `hotfix/<ticket>` → verify → merge back; nothing merges red |
 | Closing a wave | Clean, verified finish | After the PR merges: pull, verify, self-heal if needed, delete branches/worktrees, cards → done, report |

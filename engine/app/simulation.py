@@ -19,10 +19,12 @@ from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
 from app.ml.encode_features import Example, FeatureEncoder
 from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredictor
+from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
     InteractionEventRepository,
     PredictionRecordRepository,
     TrainingExampleRepository,
+    UnitOfWork,
 )
 from app.repositories import InMemoryPredictionRecordRepository
 from app.services.decision_service import DecisionService
@@ -45,6 +47,7 @@ class Simulation:
         training_repo: Optional[TrainingExampleRepository] = None,
         predictor: Optional[PredictorPort] = None,
         prediction_repository: Optional[PredictionRecordRepository] = None,
+        unit_of_work: Optional[UnitOfWork] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
         # these ports as it happens, and a training example is derived per event.
@@ -53,6 +56,11 @@ class Simulation:
         # training examples are actually derived.
         self._event_repo = event_repo
         self._training_repo = training_repo
+        # Transaction boundary (ADR 0017): one interaction's writes — its event,
+        # the derived training example, the shadow prediction — commit together as
+        # one unit. Defaults to the no-op in-memory unit, so a sim with no database
+        # runs unchanged; the Postgres path injects a session-backed unit.
+        self._uow = unit_of_work or NullUnitOfWork()
         self._encoder = (
             FeatureEncoder.from_config(config) if training_repo is not None else None
         )
@@ -178,21 +186,23 @@ class Simulation:
             emotion_after=emotion_after,
         )
         self._events.append(event)
-        self._record(event, true_props, policy)
+        # One unit of work per interaction (ADR 0017): the event, its derived
+        # training example, and the shadow prediction record all persist together
+        # or not at all. Shadow-mode recording is inside the unit but stays purely
+        # observational — nothing here reads the prediction back into the being.
+        with self._uow.begin():
+            self._record(event, true_props, policy)
+            # The model's action vocabulary is object affordances, so an action is
+            # encoded by its affordance (`observe` -> `look`); a free action has
+            # none.
+            if self._prediction is not None:
+                self._prediction.record(
+                    event, properties=perceived_props, action=policy.affordance or ""
+                )
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
         )
         self._current_action = decision.as_current_action()
-
-        # Shadow mode: record what the learned model would have predicted for
-        # this same interaction, from what the being perceived. The model's
-        # action vocabulary is object affordances, so an action is encoded by its
-        # affordance (`observe` -> `look`); a free action has none. Purely
-        # observational — nothing above this line reads the prediction.
-        if self._prediction is not None:
-            self._prediction.record(
-                event, properties=perceived_props, action=policy.affordance or ""
-            )
 
     def _record(self, event: InteractionEvent, true_props, policy) -> None:
         """Persist the event through its port (when one is injected) and derive a

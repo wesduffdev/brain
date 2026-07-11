@@ -19,8 +19,11 @@ When `DATABASE_URL` is set it opens a live session, ensures the schema, seeds th
 being + object parent rows the interaction/object foreign keys require, and wires
 the Postgres event / training-example / prediction-record adapters (ADR
 0007/0011/0012) — plus the shadow-mode outcome predictor when a trained artifact
-is present (graceful `None` otherwise, ADR 0011). A running engine then writes
-`interaction_events`, `training_examples`, and `prediction_records` as it acts.
+is present (graceful `None` otherwise, ADR 0011). It also builds the unit of work
+that owns the transaction boundary (ADR 0017): a session-backed unit on the DB
+path, the no-op unit in memory. The seed is one unit; then a running engine
+writes `interaction_events`, `training_examples`, and `prediction_records` a unit
+per interaction, so an interaction's rows commit together or not at all.
 
 When `DATABASE_URL` is unset (and nothing is injected) it returns a plain
 in-memory `Simulation` — no database, no shadow mode, behavior unchanged. There
@@ -41,12 +44,14 @@ from app.config_service import ConfigService
 from app.db import models
 from app.db.migrate import create_all
 from app.db.session import create_db_engine, session_factory
+from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
 from app.ml.inference import load_predictor
 from app.ports.predictor import PredictorPort
 from app.ports.repositories import (
     InteractionEventRepository,
     PredictionRecordRepository,
     TrainingExampleRepository,
+    UnitOfWork,
 )
 from app.repositories import (
     PostgresInteractionEventRepository,
@@ -128,9 +133,11 @@ def build_simulation(
     )
 
     close: Callable[[], None] = _noop
+    unit_of_work: UnitOfWork = NullUnitOfWork()
     if url and not persistence_injected:
         session, engine = _open_session(url)
-        _seed_parents(session, config, being_id)
+        unit_of_work = SessionUnitOfWork(session)
+        _seed_parents(session, unit_of_work, config, being_id)
         event_repo = PostgresInteractionEventRepository(session)
         training_repo = PostgresTrainingExampleRepository(session)
         prediction_repository = PostgresPredictionRecordRepository(session)
@@ -145,6 +152,7 @@ def build_simulation(
         training_repo=training_repo,
         predictor=predictor,
         prediction_repository=prediction_repository,
+        unit_of_work=unit_of_work,
     )
     return BuiltSimulation(simulation, close)
 
@@ -169,22 +177,26 @@ def _teardown(session, engine) -> Callable[[], None]:
     return close
 
 
-def _seed_parents(session, config: ConfigService, being_id: str) -> None:
+def _seed_parents(
+    session, unit_of_work: UnitOfWork, config: ConfigService, being_id: str
+) -> None:
     """Insert the being + object rows the `interaction_events` / `objects` foreign
-    keys depend on. Idempotent (``merge`` by primary key), so restarting an
-    already-seeded engine is a no-op rather than a duplicate-key error. This is the
-    runtime bootstrap seed that used to live inline in the integration tests."""
-    session.merge(models.Being(being_id=being_id, needs={}, emotion=config.default_emotion()))
-    for entity in config.object_catalog().values():
-        session.merge(
-            models.ObjectRecord(
-                object_id=entity.object_id,
-                developer_label=entity.developer_label,
-                properties=list(entity.properties),
-                affordances=list(entity.affordances),
+    keys depend on, as one unit of work (ADR 0017) — the seed commits atomically
+    before any interaction row is written. Idempotent (``merge`` by primary key),
+    so restarting an already-seeded engine is a no-op rather than a duplicate-key
+    error. This is the runtime bootstrap seed that used to live inline in the
+    integration tests."""
+    with unit_of_work.begin():
+        session.merge(models.Being(being_id=being_id, needs={}, emotion=config.default_emotion()))
+        for entity in config.object_catalog().values():
+            session.merge(
+                models.ObjectRecord(
+                    object_id=entity.object_id,
+                    developer_label=entity.developer_label,
+                    properties=list(entity.properties),
+                    affordances=list(entity.affordances),
+                )
             )
-        )
-    session.commit()
 
 
 def _load_predictor(config: ConfigService, env: Mapping[str, str]) -> Optional[PredictorPort]:

@@ -303,7 +303,9 @@ _Avoid_: rule, category, class, prototype.
 **Belief**:
 A concept applied to one perceived object — an expected outcome of an action on
 it, at the supporting concept's confidence; lets a never-seen object be
-anticipated.
+anticipated. A belief now also *feeds the decision*: it raises an action's
+anticipated-discomfort cost (never bypassing the safety floor), not only sitting
+stored.
 _Avoid_: prediction, guess, opinion.
 
 **Concept confidence**:
@@ -315,6 +317,33 @@ _Avoid_: weight, probability, score, certainty.
 How alike two objects are by the overlap of their perceived properties (0 =
 nothing shared, 1 = perceived identically).
 _Avoid_: distance, closeness, match.
+
+**Concept graph**:
+The being's learned knowledge as a walkable network — object/property/outcome
+nodes joined by typed, confidence-bearing edges — projected from its concepts,
+beliefs, and similarities.
+_Avoid_: knowledge base, ontology, semantic net, database.
+
+**Graph node**:
+One object, perceived property, or observed outcome in the concept graph, keyed
+on a perceived token (never a developer label).
+_Avoid_: vertex, entity, record.
+
+**Graph edge**:
+A typed, directed link between two nodes (HAS_PROPERTY, PREDICTS, PRODUCED,
+SIMILAR_TO) carrying an edge confidence, an evidence count, and the memories
+behind it.
+_Avoid_: relation, link, connection, arc.
+
+**Explanation path**:
+The object → property → outcome walk through the graph that justifies a
+prediction — the reason the being expects an outcome.
+_Avoid_: trace, proof, chain, reasoning.
+
+**Edge confidence**:
+How strongly the being holds a graph edge, 0..1, rising with confirming evidence
+on the same saturating curve as concept confidence but tuned independently.
+_Avoid_: weight, probability, similarity, score.
 
 **Shadow mode**:
 Running the outcome predictor alongside the being's rule layer so its predictions
@@ -346,6 +375,17 @@ How much a predicted set of outcomes is expected to erode the being's needs,
 subtracted from an action's utility when active prediction is on, so the being
 avoids harm it foresees rather than only harm it has already suffered.
 _Avoid_: risk score, penalty, expected loss.
+
+**One-shot aversion**:
+A single high-salience aversive interaction lifting a concept's confidence toward
+certainty in one evidence (trauma-like), versus the slow curve of low-salience
+repetition.
+_Avoid_: instant learning, trauma flag.
+
+**Anticipated discomfort**:
+The being's expected aversive cost of an action, derived from a belief (or the
+predictor), that lowers the action's decision score without a hard block.
+_Avoid_: fear penalty, predicted pain.
 
 **Curiosity**:
 The being's config-weighted drive to explore an object it cannot yet predict —
@@ -391,6 +431,26 @@ _Avoid_: threshold (generic), assertion.
 **Scenario result**:
 The verdict of one run — before/after/delta/threshold and whether it passed.
 _Avoid_: report, outcome.
+
+**Milestone**:
+A named developmental capability the being grows into, read via one learning
+metric and defined as an ordered ladder of stages.
+_Avoid_: level, achievement, badge.
+
+**Milestone stage**:
+One rung of a milestone, gated by a metric floor; the being sits on the highest
+stage its metric has reached.
+_Avoid_: tier, rank.
+
+**Developmental progression**:
+A run moving the being up at least one milestone stage — the observable "it grew
+up a little".
+_Avoid_: level-up, XP.
+
+**Regression scenario**:
+A scenario run judged pass/fail against its metric floor + expected milestone
+stages; passes on learning, FAILS when it is absent.
+_Avoid_: unit test, assertion.
 
 ## Not in the language
 

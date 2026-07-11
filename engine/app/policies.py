@@ -316,26 +316,107 @@ class MemoryPriorityPolicy:
 
 @dataclass(frozen=True)
 class ConceptLearningPolicy:
-    """How a CONCEPT SCHEMA's confidence forms and strengthens (card v2). A
-    concept starts at `seed_confidence` the first time the being sees it, and each
-    later confirming interaction moves its confidence a fraction `reinforce_rate`
-    of the way toward full certainty (1.0):
+    """How a CONCEPT SCHEMA's confidence forms and strengthens (card v2, extended
+    by card AVERSIVE-LEARN). Every confirming interaction reinforces the concept a
+    fraction of the way toward full certainty (1.0) from where it stood before
+    (0.0 before any evidence):
+
+        confidence_next = prior + effective_rate * (1 - prior)
+
+    where `prior` is the concept's current confidence (0.0 on the first sighting),
+    the base rate is `seed_confidence` on the first sighting and `reinforce_rate`
+    thereafter, and
+
+        effective_rate = min(1.0, base_rate * (1 + intensity_gain * intensity)).
+
+    So confidence rises monotonically and asymptotes at 1.0 with diminishing
+    returns — but how big each step is now depends on how INTENSELY the being felt
+    that interaction. `intensity` is the interaction's salience (its emotional
+    intensity / prediction error — the same signal that scores a memory's
+    priority): a high-intensity aversive experience is learned in (nearly) one shot
+    — ONE emotionally-searing burn lifts `hot -> causes_pain` toward high
+    confidence — while an ordinary, low-salience interaction lands only the usual
+    small step. With `intensity_gain` 0 (or `intensity` 0) the curve is exactly the
+    pre-slice one: first sighting == seed, each repeat a `reinforce_rate` step.
+
+    All three numbers live in `config/learning_rates.yaml`, so retuning how boldly
+    the being commits to a pattern — and how much trauma accelerates it — is a
+    config change, never a code one. The default (seed 0.3, rate 0.2, gain 0.0)
+    forms concepts, intensity-blind, even with no learning-rates file.
+    """
+
+    seed_confidence: float = 0.3
+    reinforce_rate: float = 0.2
+    intensity_gain: float = 0.0
+
+    def reinforce(self, current: "float | None", *, intensity: float = 0.0) -> float:
+        """The confidence of a concept after one more confirming interaction felt
+        at `intensity`. ``None`` is the first sighting (reinforces from 0.0 at the
+        seed rate); otherwise the current confidence is the prior. A higher
+        `intensity` amplifies the step, so one intense experience teaches more than
+        one flat one; `intensity` 0 reproduces the pre-slice curve exactly."""
+        prior = 0.0 if current is None else float(current)
+        base_rate = self.seed_confidence if current is None else self.reinforce_rate
+        boost = 1.0 + float(self.intensity_gain) * max(0.0, float(intensity))
+        effective_rate = min(1.0, float(base_rate) * boost)
+        return prior + effective_rate * (1.0 - prior)
+
+
+@dataclass(frozen=True)
+class BeliefDecisionPolicy:
+    """How strongly a concept-derived BELIEF steers the being's decision (card
+    AVERSIVE-LEARN). When the being believes an action on an object will produce an
+    aversive outcome (it expects `touch` on a `hot` thing to `cause_pain`), that
+    expectation raises the action's ANTICIPATED-DISCOMFORT cost in the decision —
+    even with the neural predictor off — so the being avoids a never-seen hot
+    object COGNITIVELY, from what it already understands, before it is ever burned
+    again.
+
+    The belief's anticipated cost is valued exactly as the predictor's is
+    (`OutcomeEffectPolicy.anticipated_cost`, the belief's confidence standing in for
+    a predicted probability); `discomfort_weight` scales that cost into a negative
+    score bias the decision adds to the *safe* candidates alongside the v6
+    remembered-preference bias — the two compose (add), and, like every learned
+    signal, the bias only ever reshapes candidates the safety floor has already
+    cleared, so it can never buy a blocked action past a guardrail (BRIEF §12).
+    `discomfort_weight` defaults to 0.0 — beliefs form and persist but do not steer
+    the decision (the pre-slice baseline); only a config that opts in turns the
+    cognitive avoidance on. Retuning it is a `config/learning_rates.yaml` change.
+    """
+
+    discomfort_weight: float = 0.0
+
+    def bias(self, anticipated_cost: float) -> float:
+        """The (non-positive) score bias for an action whose believed outcomes carry
+        this anticipated aversive `cost` (always ``>= 0`` from the outcome-effect
+        table). 0.0 when the being believes nothing aversive, or when the weight is
+        off."""
+        return -float(self.discomfort_weight) * max(0.0, float(anticipated_cost))
+
+
+@dataclass(frozen=True)
+class GraphEdgePolicy:
+    """How a CONCEPT-GRAPH EDGE's confidence forms and strengthens (card v7). An
+    edge starts at `seed_confidence` the first time the being lays it down, and
+    each later confirming interaction moves its confidence a fraction
+    `reinforce_rate` of the way toward full certainty (1.0):
 
         confidence_next = confidence + reinforce_rate * (1 - confidence)
 
-    So confidence rises monotonically with repetition and asymptotes at 1.0 — the
-    more often "round things roll" is confirmed, the more sure the being is, with
-    diminishing returns. Both numbers live in `config/learning_rates.yaml`, so
-    retuning how fast the being generalizes — how boldly it commits to a pattern —
-    is a config change, never a code one. The default (seed 0.3, rate 0.2) forms
-    concepts even with no learning-rates file.
-    """
+    So an edge's confidence rises monotonically with the evidence behind it and
+    asymptotes at 1.0 — the more often the being sees ``round → rolls``, the surer
+    that edge is, with diminishing returns. Both numbers live in
+    `config/learning_rates.yaml` (`graph.edge`), so retuning how boldly the graph
+    commits to a relationship is a config change, never a code one. The default
+    (seed 0.3, rate 0.2) strengthens edges even with no learning-rates file. It
+    mirrors `ConceptLearningPolicy`'s curve but is a distinct seam so graph tuning
+    moves independently of concept tuning."""
 
     seed_confidence: float = 0.3
     reinforce_rate: float = 0.2
 
     def reinforce(self, current: "float | None") -> float:
-        """The confidence of a concept after one more confirming interaction.
+        """The confidence of an edge after one more confirming interaction.
         ``None`` is the first sighting (returns the seed); otherwise the current
         confidence is nudged toward 1.0 by `reinforce_rate`."""
         if current is None:

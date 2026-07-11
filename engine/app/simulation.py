@@ -23,6 +23,7 @@ from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
     BeliefRepository,
     ConceptRepository,
+    GraphRepository,
     InteractionEventRepository,
     MemoryRepository,
     PredictionRecordRepository,
@@ -32,8 +33,11 @@ from app.ports.repositories import (
 )
 from app.repositories import InMemoryPredictionRecordRepository, InMemorySimilarityRepository
 from app.services.belief_service import BeliefService
+from app.services.concept_path_service import ConceptPathService
 from app.services.concept_service import ConceptService
 from app.services.curiosity_service import CuriosityService
+from app.services.knowledge_graph_service import KnowledgeGraphService
+from app.services.prediction_explanation_service import PredictionExplanationService
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
@@ -51,6 +55,22 @@ from app.services.tick_service import TickService
 from app.services.trait_service import TraitService
 
 
+def _sum_biases(*maps: Optional[Dict]) -> Optional[Dict]:
+    """Combine several per-(object, action) score-bias maps into one by ADDING the
+    biases that land on the same candidate — the being's distinct learned pulls
+    compose rather than overwrite. ``None`` maps (a pathway the being lacks) are
+    skipped; the result is ``None`` when every map is absent, so the decision falls
+    back to pure utility."""
+    present = [m for m in maps if m is not None]
+    if not present:
+        return None
+    combined: Dict = {}
+    for m in present:
+        for key, value in m.items():
+            combined[key] = combined.get(key, 0.0) + value
+    return combined
+
+
 class Simulation:
     def __init__(
         self,
@@ -65,6 +85,7 @@ class Simulation:
         concept_repository: Optional[ConceptRepository] = None,
         belief_repository: Optional[BeliefRepository] = None,
         similarity_repository: Optional[SimilarityRepository] = None,
+        graph_repository: Optional[GraphRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
@@ -79,8 +100,15 @@ class Simulation:
         # prediction error, scored with a config-driven salience. Staged inside
         # the interaction's unit of work below, so it commits with the event.
         self._memory_repo = memory_repository
+        # The salience (priority) of an interaction — how strongly the being FELT it
+        # (emotional intensity / prediction error). It scores each memory's priority
+        # and now also weights how much a concept learns from the interaction, so one
+        # emotionally-searing burn is learned in nearly one shot (card AVERSIVE-LEARN,
+        # ADR 0019). Always available (config default), independent of whether a
+        # memory store is injected — concept learning consults it either way.
+        self._priority_policy = config.memory_priority_policy()
         self._memory = (
-            MemoryService(memory_repository, config.memory_priority_policy())
+            MemoryService(memory_repository, self._priority_policy)
             if memory_repository is not None
             else None
         )
@@ -131,9 +159,34 @@ class Simulation:
             if belief_repository is not None and self._concepts is not None
             else None
         )
+        # Belief -> decision feed (card AVERSIVE-LEARN): the concept-derived belief
+        # that an action will hurt raises that action's anticipated-discomfort cost
+        # in the decision, so a never-seen hot object is avoided COGNITIVELY even
+        # with the neural predictor off. Config-gated (`belief.decision`); the
+        # default 0 weight leaves the decision on pure utility as before.
+        self._belief_decision = config.belief_decision_policy()
         self._similarity = (
             SimilarityService(similarity_repository)
             if similarity_repository is not None
+            else None
+        )
+        # Graph seam (card v7, ADR 0021): when a graph port is injected, every
+        # interaction PROJECTS the concepts it formed, the object it perceived, the
+        # outcomes it observed, and its similarities into a CONCEPT GRAPH — object/
+        # property/outcome nodes joined by typed edges whose confidence strengthens
+        # with evidence. The projection stages inside the interaction's unit of work
+        # below (side effect of living, never read into this tick's decision). The
+        # payoff is read-only: `explanations()` walks the graph for each prediction's
+        # object -> property -> outcome path.
+        self._graph_repo = graph_repository
+        self._graph = (
+            KnowledgeGraphService(graph_repository, config.graph_edge_policy())
+            if graph_repository is not None
+            else None
+        )
+        self._explanations = (
+            PredictionExplanationService(ConceptPathService(graph_repository))
+            if graph_repository is not None
             else None
         )
         # Transaction boundary (ADR 0017): one interaction's writes — its event,
@@ -255,7 +308,7 @@ class Simulation:
             perceived=perceived,
             on_cooldown=on_cooldown,
             curiosity=self._curiosity_view,
-            score_bias=self._preference_bias(perceived),
+            score_bias=self._score_bias(perceived),
         )
         if decision is None:
             self._current_action = None
@@ -312,10 +365,19 @@ class Simulation:
                 self._memory.remember(
                     event, perceived_properties=perceived_props, prediction=prediction
                 )
+            # How intensely the being felt this interaction — its salience (emotional
+            # intensity + prediction error). The same scalar that scores a memory's
+            # priority now weights how much its concepts learn: a high-salience burn
+            # is learned in nearly one shot (card AVERSIVE-LEARN).
+            salience = self._priority_policy.priority_for(
+                prediction_error=(prediction.prediction_error if prediction is not None else 0.0),
+                emotion_before=emotion_before,
+                emotion_after=emotion_after,
+            )
             # Concept learning (card v2): distil the interaction into concept
             # schemas keyed on perceived properties, form beliefs about the object
             # from them, and record its similarity to the other perceived objects.
-            if self._concepts is not None:
+            concepts_formed = (
                 self._concepts.observe(
                     being_id=self.being.being_id,
                     tick=tick,
@@ -323,7 +385,11 @@ class Simulation:
                     action=decision.action,
                     perceived_properties=perceived_props,
                     observed_outcomes=observed_outcome,
+                    intensity=salience,
                 )
+                if self._concepts is not None
+                else []
+            )
             if self._beliefs is not None:
                 self._beliefs.believe(
                     being_id=self.being.being_id,
@@ -332,7 +398,7 @@ class Simulation:
                     perceived_properties=perceived_props,
                     action=decision.action,
                 )
-            if self._similarity is not None:
+            similarities_recorded = (
                 self._similarity.record(
                     being_id=self.being.being_id,
                     tick=tick,
@@ -343,6 +409,23 @@ class Simulation:
                         for obj in perceived
                         if obj["objectId"] != decision.target_id
                     ],
+                )
+                if self._similarity is not None
+                else []
+            )
+            # Concept graph (card v7): project this interaction's concepts, the
+            # object, its observed outcomes, and its similarities into the graph,
+            # linking each edge back to the interaction's memory (being:tick).
+            if self._graph is not None:
+                self._graph.witness(
+                    being_id=self.being.being_id,
+                    tick=tick,
+                    object_id=decision.target_id,
+                    perceived_properties=perceived_props,
+                    observed_outcomes=observed_outcome,
+                    concepts=concepts_formed,
+                    similarities=similarities_recorded,
+                    source_memory_ids=(event.event_id,),
                 )
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
@@ -369,12 +452,23 @@ class Simulation:
             outcome_effects=self._outcome_effects,
         )
 
+    def _score_bias(self, perceived):
+        """The composed score bias for this tick's decision — per (object, action),
+        the sum of the being's two learned pulls on each SAFE candidate: the v6
+        REMEMBERED preference (recalled episodic memories, reshaped by temperament)
+        and the concept-derived BELIEF that an action will hurt (semantic knowledge,
+        card AVERSIVE-LEARN). The two are distinct cognitive pathways and COMPOSE by
+        addition — a burn the being both remembers AND has generalized into a concept
+        discourages a similar object through both — never one masking the other.
+        ``None`` when the being has neither pathway, so the decision falls back to
+        pure utility. Both are applied by the decision only to unblocked candidates,
+        so neither can bend the safety floor."""
+        return _sum_biases(self._preference_bias(perceived), self._belief_bias(perceived))
+
     def _preference_bias(self, perceived):
-        """The remembered-preference score bias for this tick's decision — per
-        (object, action), how the being's recalled memories (reshaped by its current
-        temperament) push each SAFE candidate. ``None`` when the being has no memory
-        store, so the decision falls back to pure utility. The decision applies it
-        only to unblocked candidates, so it never bends the safety floor."""
+        """The remembered-preference score bias — per (object, action), how the
+        being's recalled memories (reshaped by its current temperament) push each
+        SAFE candidate. ``None`` when the being has no memory store."""
         if self._preference is None:
             return None
         raw = self._preference.biases(
@@ -383,6 +477,35 @@ class Simulation:
             memories=self._memory_repo.all(),
         )
         return self._traits.modulate(raw)
+
+    def _belief_bias(self, perceived):
+        """The belief-derived anticipated-discomfort bias — per (object, action), a
+        non-positive push off actions the being EXPECTS to hurt, inherited from its
+        concepts (a `hot` thing believed to `cause_pain` when `touch`ed). Each is
+        the belief's anticipated aversive cost — valued exactly as the predictor's
+        is (`OutcomeEffectPolicy.anticipated_cost`, the belief's confidence standing
+        in for a predicted probability) — scaled by the config discomfort weight.
+        ``None`` when the being forms no beliefs or the weight is off, so the
+        decision is unchanged. This makes a never-seen hot object avoidable from
+        cognition alone, even with the neural predictor off (card AVERSIVE-LEARN)."""
+        if self._beliefs is None or self._belief_decision.discomfort_weight == 0.0:
+            return None
+        result = {}
+        for obj in perceived:
+            object_id = obj["objectId"]
+            properties = obj.get("properties", [])
+            for action in self._actions:
+                anticipated = self._beliefs.anticipated(
+                    being_id=self.being.being_id,
+                    perceived_properties=properties,
+                    action=action,
+                )
+                bias = self._belief_decision.bias(
+                    self._outcome_effects.anticipated_cost(anticipated)
+                )
+                if bias != 0.0:
+                    result[(object_id, action)] = bias
+        return result
 
     def _record(self, event: InteractionEvent, true_props, policy) -> None:
         """Persist the event through its port (when one is injected) and derive a
@@ -484,6 +607,20 @@ class Simulation:
         if self._similarity_repo is None:
             return []
         return [record.snapshot() for record in self._similarity_repo.all()]
+
+    def explanations(self) -> List[Dict]:
+        """The being's predictions with the EXPLANATION PATH that justifies each
+        (card v7), drawn from the concept graph — one per (object, outcome) the
+        graph supports, kept at the strongest supporting property. Each names the
+        object, the perceived property that bridges it to a predicted outcome, the
+        ordered path (``object → property → outcome``), and the path's aggregate
+        confidence. Empty when no graph port is injected."""
+        if self._explanations is None:
+            return []
+        return [
+            explanation.snapshot()
+            for explanation in self._explanations.explanations(being_id=self.being.being_id)
+        ]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

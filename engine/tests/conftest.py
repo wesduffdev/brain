@@ -6,6 +6,13 @@ authored YAML — so `_auth_env` pins a known secret and issuer/audience for the
 whole suite and turns auth on. `mint` signs tokens with that same secret through
 one door, with overrides so a test can forge an expired, wrong-issuer,
 wrong-audience, or bad-signature token.
+
+`_hermetic_database_url` closes a subtler hole in the same seam: `build_simulation`
+wires Postgres whenever `DATABASE_URL` is set, so an ambient one (exported by CI or
+a Docker shell) would silently route a behavior test through persistence and recall
+state from earlier runs. It strips `DATABASE_URL` for every non-`@integration`
+test so behavior tests always build a fresh in-memory being — while `@integration`
+tests keep it, since a live-Postgres round-trip is the whole point.
 """
 from __future__ import annotations
 
@@ -29,6 +36,22 @@ def _auth_env(monkeypatch):
     monkeypatch.setenv("JWT_ISSUER", TEST_ISSUER)
     monkeypatch.setenv("JWT_AUDIENCE", TEST_AUDIENCE)
     monkeypatch.setenv("JWT_TTL_SECONDS", "3600")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_database_url(request, monkeypatch):
+    """Isolate non-`@integration` tests from an ambient `DATABASE_URL`.
+
+    `build_simulation` opens Postgres whenever `DATABASE_URL` is set in the
+    environment (the demo/runtime convenience). Without this guard, an ambient
+    `DATABASE_URL` — exported in CI or a Docker shell — would silently route a
+    plain behavior test through persistence and recall state persisted by earlier
+    runs (the class of bug where v6 memory-avoidance broke the demo test, BUG
+    rAPBdcaM). Strip it for every test WITHOUT the `integration` marker so behavior
+    tests build a fresh in-memory being regardless of the ambient environment;
+    `@integration` tests keep it, since exercising a live Postgres is their point."""
+    if request.node.get_closest_marker("integration") is None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 @pytest.fixture

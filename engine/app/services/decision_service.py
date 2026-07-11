@@ -101,10 +101,13 @@ class DecisionService:
                     continue
                 if name in on_cooldown:
                     continue
-                # Prediction, exploration, and remembered preference/traits touch
-                # only the SAFE candidates — all apply after the block check, so
-                # neither a learned cost, a curiosity bonus, nor a memory-driven bias
-                # can rescue a blocked action past the safety floor (BRIEF §12).
+                # Prediction, exploration, and the caller's `score_bias` — the
+                # being's learned pulls (v6 remembered preference + the concept-
+                # derived belief that an action will hurt, card AVERSIVE-LEARN,
+                # already summed) — touch only the SAFE candidates: all apply after
+                # the block check, so neither a learned cost, a curiosity bonus, nor
+                # a belief/memory bias can rescue a blocked action past the safety
+                # floor (BRIEF §12).
                 score -= self._anticipated_cost(policy, properties)
                 score += self._exploration_bonus(name, object_id, curiosity)
                 if score_bias is not None:
@@ -143,10 +146,11 @@ class DecisionService:
         self, action: str, object_id: str, curiosity: Optional[Mapping[str, float]]
     ) -> float:
         """The curiosity bonus for taking `action` on `object_id` — 0.0 when
-        exploration is off or no curiosity signal was supplied. The anticipated-
-        discomfort push stays 0 in the decision path for now; belief-anticipated
-        discomfort is a follow-up that will feed it (the v3 predictor already
-        penalizes anticipated harm here)."""
+        exploration is off or no curiosity signal was supplied. Exploration's
+        anticipated-discomfort push stays 0 here: belief-anticipated discomfort
+        reaches the decision through the caller's `score_bias` instead (card
+        AVERSIVE-LEARN), the same channel as the v6 memory bias, so all learned
+        aversion composes in one place and stays behind the safety floor."""
         if self._exploration is None or curiosity is None:
             return 0.0
         return self._exploration.adjustment(action=action, curiosity=curiosity.get(object_id, 0.0))

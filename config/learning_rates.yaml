@@ -37,9 +37,52 @@ memory:
 # service code (ConfigService.concept_learning_policy).
 concept:
   learning:
-    # A concept's confidence on its first sighting.
+    # A concept's confidence on its first sighting (at zero felt intensity).
     seed_confidence: 0.3
     # How far each confirming interaction moves confidence toward full certainty:
-    #   confidence_next = confidence + reinforce_rate * (1 - confidence)
+    #   confidence_next = prior + effective_rate * (1 - prior)
     # Higher = the being commits to a pattern faster (with diminishing returns).
+    reinforce_rate: 0.2
+    # How much the INTENSITY the being felt an interaction with (its salience —
+    # emotional intensity + prediction error, the same signal that scores a
+    # memory's priority) amplifies that step:
+    #   effective_rate = min(1, base_rate * (1 + intensity_gain * intensity))
+    # This is TRAUMA-LIKE ONE-SHOT LEARNING: at gain 2.0 a single scared-level burn
+    # (salience ~1.0) lifts hot -> causes_pain from the 0.30 seed to ~0.90 in one
+    # evidence, while calm, low-salience repetition keeps its ordinary slow curve.
+    # 0.0 = intensity-blind (the pre-slice behaviour).
+    intensity_gain: 2.0
+
+# Belief -> decision feed (card AVERSIVE-LEARN).
+#
+# The being's concept-derived BELIEFS (e.g. "touching a hot thing causes pain")
+# feed the DEFAULT decision path — even with the neural predictor off. A believed
+# aversive outcome raises that action's anticipated-discomfort cost, so a
+# never-seen hot object is avoided COGNITIVELY, from what the being already
+# understands. The cost is valued from config/outcome_effects.yaml (the belief's
+# confidence standing in for a predicted probability); this weight scales it into
+# the decision, alongside the v6 remembered-preference bias, and — like every
+# learned signal — only ever reshapes candidates the safety floor has cleared.
+belief:
+  decision:
+    # 0.0 = beliefs form but do not steer the decision (the pre-slice baseline).
+    # At 0.05, a confident hot -> causes_pain belief (~0.9) discourages a touch by
+    # ~2.7 utility, enough to turn the being away without swamping every choice.
+    discomfort_weight: 0.05
+
+# Concept-graph edge confidence (card v7).
+#
+# The being's concepts, beliefs, and similarities are projected into a GRAPH of
+# object/property/outcome nodes joined by typed EDGES (HAS_PROPERTY, PREDICTS,
+# PRODUCED, SIMILAR_TO). Each EDGE carries a CONFIDENCE that strengthens the more
+# evidence confirms it, on the same saturating curve concept confidence uses but
+# tuned independently. This is the single place that tuning lives: retuning how
+# boldly the graph commits to a relationship is a change here, never in service
+# code (ConfigService.graph_edge_policy).
+graph:
+  edge:
+    # An edge's confidence the first time the being lays it down.
+    seed_confidence: 0.3
+    # How far each confirming interaction moves an edge's confidence toward full
+    # certainty (1.0):  confidence_next = confidence + reinforce_rate*(1 - confidence)
     reinforce_rate: 0.2

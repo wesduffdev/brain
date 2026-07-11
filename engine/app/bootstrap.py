@@ -51,6 +51,7 @@ from app.ports.predictor import PredictorPort
 from app.ports.repositories import (
     BeliefRepository,
     ConceptRepository,
+    GraphRepository,
     InteractionEventRepository,
     MemoryRepository,
     PredictionRecordRepository,
@@ -61,6 +62,7 @@ from app.ports.repositories import (
 from app.repositories import (
     PostgresBeliefRepository,
     PostgresConceptRepository,
+    PostgresGraphRepository,
     PostgresInteractionEventRepository,
     PostgresMemoryRepository,
     PostgresPredictionRecordRepository,
@@ -121,6 +123,7 @@ def build_simulation(
     concept_repository: Optional[ConceptRepository] = None,
     belief_repository: Optional[BeliefRepository] = None,
     similarity_repository: Optional[SimilarityRepository] = None,
+    graph_repository: Optional[GraphRepository] = None,
     predictor: Optional[PredictorPort] = None,
 ) -> BuiltSimulation:
     """Build a runtime `Simulation`, wiring persistence when configured.
@@ -147,6 +150,7 @@ def build_simulation(
         or concept_repository is not None
         or belief_repository is not None
         or similarity_repository is not None
+        or graph_repository is not None
     )
 
     close: Callable[[], None] = _noop
@@ -162,6 +166,7 @@ def build_simulation(
         concept_repository = PostgresConceptRepository(session)
         belief_repository = PostgresBeliefRepository(session)
         similarity_repository = PostgresSimilarityRepository(session)
+        graph_repository = PostgresGraphRepository(session)
         if predictor is None:
             predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
@@ -177,6 +182,7 @@ def build_simulation(
         concept_repository=concept_repository,
         belief_repository=belief_repository,
         similarity_repository=similarity_repository,
+        graph_repository=graph_repository,
         unit_of_work=unit_of_work,
     )
     return BuiltSimulation(simulation, close)

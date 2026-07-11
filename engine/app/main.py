@@ -36,6 +36,7 @@ from app.auth import AuthConfig, require_auth
 from app.adapters.narrator import build_narrator
 from app.language.embedding import build_embedder
 from app.language.knowledge_store import KnowledgeStore
+from app.language.ingest import ingest_text
 from app.adapters.voice import build_voice
 from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
@@ -59,6 +60,15 @@ from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
+# Reading a document aloud falls back to this utterance size when no VoicePolicy is
+# wired (an injected voice with no policy); the served app uses config/voice.yaml.
+_DEFAULT_READ_ALOUD_MAX_CHARS = 2000
+# The graceful no-op message when a host has no TTS engine — the being still
+# answers in text (voice is an upgrade, not a dependency; S4, ADR 0035).
+_NO_VOICE_DETAIL = (
+    "voice synthesis unavailable (no TTS engine on this host); returning text only"
+)
+
 
 def create_app(
     *,
@@ -73,6 +83,7 @@ def create_app(
     reading_qa_service: Optional[ReadingQAService] = None,
     conversation_service: Optional[ConversationService] = None,
     voice: Optional[VoicePort] = None,
+    voice_policy: Optional[VoicePolicy] = None,
 ) -> FastAPI:
     """Build the app around a being, a clock, and the render/command services.
 
@@ -87,7 +98,6 @@ def create_app(
     # so the lifespan can close it on shutdown. An injected simulation owns its
     # own lifecycle, so there is nothing here to tear down.
     built: Optional[BuiltSimulation] = None
-    voice_policy: Optional[VoicePolicy] = None
     if (
         simulation is None
         or tick_interval_seconds is None
@@ -136,6 +146,7 @@ def create_app(
             # config, and the espeak-ng adapter degrades to a no-op on a host with
             # no binary (voice is an upgrade, not a dependency).
             voice = build_voice(config)
+        if voice_policy is None:
             voice_policy = config.voice_policy()
 
     clock = clock if clock is not None else WallClock()
@@ -206,6 +217,22 @@ def create_app(
         # Behind the same always-on JWT guard as /state (ADR 0005).
         query = str(payload.get("query", ""))
         answer = reading_qa_service.answer(query)
+        if payload.get("speak"):
+            # Speak the grounded reading answer ALOUD through the SAME VoicePort
+            # (reading R8): typed question -> text + spoken answer. Without `speak`
+            # the text response is byte-for-byte unchanged.
+            return _voice_or_body(
+                voice,
+                voice_policy,
+                text=answer,
+                emotion=str(simulation.state().get("emotion", "")),
+                silent_body={
+                    "spoken": False,
+                    "query": query,
+                    "answer": answer,
+                    "detail": _NO_VOICE_DETAIL,
+                },
+            )
         return {"query": query, "answer": answer}
 
     @app.post("/chat", dependencies=[Depends(guard)])
@@ -219,6 +246,22 @@ def create_app(
         conversation_id = str(payload.get("conversationId", "default"))
         message = str(payload.get("message", ""))
         answer = conversation_service.reply(conversation_id, message)
+        if payload.get("speak"):
+            # Speak the grounded conversational answer ALOUD through the SAME
+            # VoicePort (reading R8); without `speak` the text response is unchanged.
+            return _voice_or_body(
+                voice,
+                voice_policy,
+                text=answer,
+                emotion=str(simulation.state().get("emotion", "")),
+                silent_body={
+                    "spoken": False,
+                    "conversationId": conversation_id,
+                    "message": message,
+                    "answer": answer,
+                    "detail": _NO_VOICE_DETAIL,
+                },
+            )
         return {"conversationId": conversation_id, "message": message, "answer": answer}
 
     @app.post("/speak", dependencies=[Depends(guard)])
@@ -234,21 +277,36 @@ def create_app(
         report = self_report_service.report(
             query, memories=simulation.memories(), state=state
         )
-        params = (
-            voice_policy.params_for(str(state.get("emotion", "")))
-            if voice_policy is not None
-            else None
-        )
-        audio = voice.synthesize(report, params)
-        if audio is None:
-            return {
+        return _voice_or_body(
+            voice,
+            voice_policy,
+            text=report,
+            emotion=str(state.get("emotion", "")),
+            silent_body={
                 "spoken": False,
                 "query": query,
                 "report": report,
-                "detail": "voice synthesis unavailable (no TTS engine on this host); "
-                "returning text only",
-            }
-        return Response(content=audio, media_type="audio/wav")
+                "detail": _NO_VOICE_DETAIL,
+            },
+        )
+
+    @app.post("/read", dependencies=[Depends(guard)])
+    async def post_read(payload: dict = Body(...)):
+        # Voice a PROVIDED document ALOUD (reading R8, reuses S4's VoicePort, ADR
+        # 0035): the text is cleaned + chunked into sensible utterances (reusing the
+        # R1 ingest) and each is rendered to audio by the same VoicePort /speak uses,
+        # in the being's current emotion's voice. Read-only (ADR 0022): reading aloud
+        # never advances or mutates the being. Behind the always-on JWT guard (ADR
+        # 0005). No TTS engine on this host -> 200 with the text, so the document is
+        # never left unread (voice is an upgrade, not a dependency).
+        text = str(payload.get("text", ""))
+        if not text.strip():
+            raise HTTPException(status_code=422, detail="no document text to read aloud")
+        source = str(payload.get("source") or "document")
+        emotion = str(simulation.state().get("emotion", ""))
+        return _voice_document(
+            voice, voice_policy, text=text, source=source, emotion=emotion
+        )
 
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):
@@ -274,6 +332,48 @@ def create_app(
             return
 
     return app
+
+
+def _voice_or_body(voice, voice_policy, *, text, emotion, silent_body):
+    """Render `text` through the being's VoicePort in its current `emotion`'s voice
+    and return the WAV audio — the mechanism S4's /speak established, reused here by
+    /read and the spoken-answer surfaces. When no TTS engine is on this host the
+    voice is a graceful no-op: return `silent_body` (200, text only) so the being is
+    never left mute (voice is an upgrade, not a dependency; ADR 0035)."""
+    params = voice_policy.params_for(emotion) if voice_policy is not None else None
+    audio = voice.synthesize(text, params)
+    if audio is None:
+        return silent_body
+    return Response(content=audio, media_type="audio/wav")
+
+
+def _voice_document(voice, voice_policy, *, text, source, emotion):
+    """Read a whole document aloud (reading R8): clean + chunk it into utterances
+    (reusing R1's `ingest` at the config-driven read-aloud size, no overlap so no
+    words repeat) and voice each through the SAME VoicePort, concatenating the audio.
+    With no TTS engine every utterance is a no-op, so return the cleaned text (200)
+    and the utterance count — the document is never left unread."""
+    max_chars = (
+        voice_policy.read_aloud_max_chars
+        if voice_policy is not None
+        else _DEFAULT_READ_ALOUD_MAX_CHARS
+    )
+    document = ingest_text(text, source=source, max_chars=max_chars, overlap=0)
+    params = voice_policy.params_for(emotion) if voice_policy is not None else None
+    audio = b"".join(
+        part
+        for part in (voice.synthesize(chunk, params) for chunk in document.chunks)
+        if part
+    )
+    if not audio:
+        return {
+            "spoken": False,
+            "source": document.source,
+            "text": document.text,
+            "utterances": len(document.chunks),
+            "detail": _NO_VOICE_DETAIL,
+        }
+    return Response(content=audio, media_type="audio/wav")
 
 
 def _build_self_report(config: ConfigService) -> SelfReportService:

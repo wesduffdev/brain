@@ -34,3 +34,11 @@ emotion:
   calm:       { rate: 150, pitch: 45 }
   frustrated: { rate: 190, pitch: 40 }
   sleepy:     { rate: 120, pitch: 35 }
+
+# Reading a whole DOCUMENT aloud (reading R8): a long document handed to POST /read
+# is cleaned and chunked (reusing the R1 ingest) into utterances no longer than
+# `max_chars` before it is voiced, so a big file is read in sensible pieces rather
+# than one enormous synthesis call. Retuning the read-aloud utterance size is a
+# change HERE, never in Python (the config-driven-tuning rule).
+read_aloud:
+  max_chars: 2000

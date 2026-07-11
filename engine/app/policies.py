@@ -927,6 +927,25 @@ class InstinctRuntimePolicy:
 
 
 @dataclass(frozen=True)
+class InstinctConsumePolicy:
+    """How the DEPLOYED runtime PULLS pending events off a broker-backed EventBus
+    each tick (KAFKA-RUNTIME-LOOP). On the in-memory default `publish` delivers
+    synchronously, so nothing is pulled and this policy is inert; on the Kafka
+    runtime `publish` only produces and handlers fire on `consume()`, which the tick
+    loop must drive. Each tick the runtime polls a BOUNDED batch on the tick thread
+    (never a background consumer that would race the single writer):
+    `max_messages` caps how many events one tick pulls, and `poll_timeout_seconds`
+    is how long each poll waits for a message before giving up — kept small so an
+    idle tick is not stalled, since the chain self-heals over ticks (offsets committed
+    only after handling, `earliest` reset). Both live in the `runtime.consume:` block
+    of `config/instinct.yaml`, so tuning the runtime's poll cadence is a config change,
+    never a code one."""
+
+    max_messages: int = 16
+    poll_timeout_seconds: float = 0.2
+
+
+@dataclass(frozen=True)
 class ReactionTemperamentPolicy:
     """How the being's EFFECTIVE instinct thresholds DRIFT with experience — the slow
     PERSONALIZATION of the reaction GATING owned by `InstinctRuntimePolicy` (adaptive

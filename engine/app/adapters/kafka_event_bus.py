@@ -149,7 +149,9 @@ class KafkaEventBus:
         does not mandate (a live runtime loops it; a test calls it once). Each
         message is deduped on `event_id` (a redelivery is dropped) and, if it
         cannot be deserialized or its handler raises, routed to the topic's DLQ so
-        consumption is never wedged by one bad event."""
+        consumption is never wedged by one bad event. Its offset is committed only
+        AFTER it is resolved (handled, deduped, or dead-lettered), so the runtime that
+        drives this loop each tick has at-least-once delivery."""
         consumer = self._get_consumer()
         dispatched = 0
         while dispatched < max_messages:
@@ -164,7 +166,14 @@ class KafkaEventBus:
                 if message.error().code() == KafkaError._PARTITION_EOF:
                     continue
                 raise RuntimeError(f"kafka consume error: {message.error()}")
-            if self._handle(message):
+            handled = self._handle(message)
+            # Commit the offset only AFTER the message is fully resolved — dispatched,
+            # deduped, or dead-lettered. A handler failure never reaches here
+            # unresolved: `_handle` routes it to the DLQ and returns. So a crash before
+            # this commit reprocesses the event rather than skipping it (at-least-once);
+            # the `event_id` dedupe drops any resulting redelivery.
+            consumer.commit(message=message, asynchronous=False)
+            if handled:
                 dispatched += 1
         return dispatched
 
@@ -227,7 +236,10 @@ class KafkaEventBus:
                     # after a publish still sees the event (the single-being sim
                     # is not a high-throughput live tail).
                     "auto.offset.reset": "earliest",
-                    "enable.auto.commit": True,
+                    # Commit offsets MANUALLY, only after a message is handled (see
+                    # `consume`) — not on a timer — so the runtime loop is at-least-once:
+                    # a crash mid-handling reprocesses rather than skips.
+                    "enable.auto.commit": False,
                 }
             )
         return self._consumer

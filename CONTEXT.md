@@ -757,6 +757,20 @@ simulation like narration and voice: it adds to what the being knows, it does no
 drive its needs, emotion, or decisions.
 _Avoid_: parsing, loading, importing, scanning.
 
+**Reading-as-perception**:
+How reading CHANGES the being's cognition — the doctrine that a read document
+forms memories and concepts (and moves curiosity) ONLY through the same validated
+perception/cognition door a lived interaction uses, never by letting the language
+model write state. Each section of a document is perceived as its salient content
+tokens (deterministic, model-free), validated as a reading action on a perceived
+thing, and handed to the SAME memory/concept/curiosity machinery an interaction
+feeds. The tokens are what the being perceives — never the document's title or
+file name (a developer label). Distinct from Reading QA and Conversation, which
+read the knowledge store and only speak; reading-as-perception is the write path,
+and the language model is absent from it.
+_Avoid_: learning from text, the model remembering, importing knowledge, indexing
+(the knowledge store), text-to-memory.
+
 **Ingest**:
 To turn a document the being reads into training-ready text — reading it,
 cleaning it (uniform whitespace and line endings), and chunking it into ordered

@@ -108,14 +108,17 @@ def test_the_demo_defaults_to_the_hot_lamp_and_the_being_can_be_hurt_by_it(capsy
 
 # --- the VISUAL-ON reaction demonstration (`demo react`) ----------------------
 
-def test_the_react_demo_shows_the_being_reacting_while_its_action_is_unchanged(capsys):
-    # `demo react` runs the wired being beside a no-instinct baseline. Regardless of
-    # whether a trained artifact is present (torch-free here -> chain inert), the
-    # decided ACTION must match the baseline every tick and nothing is interrupted
-    # (allow_interrupt stays off this slice) -- the invariant the slice guarantees.
+def test_the_react_demo_runs_both_the_interrupt_and_suppression_scenarios(capsys):
+    # `demo react` runs the wired being beside a no-instinct baseline in TWO scenarios:
+    # [1] the shipped (empty) floor, where a strong flinch may cancel a safe action, and
+    # [2] a floor forbidding the protective `withdraw`, where the interruption is
+    # SUPPRESSED. Structural output holds whether or not a trained artifact is present
+    # (artifact-free here -> the chain is inert and the run says so); the behaviour
+    # itself is pinned by the reaction/wiring tests.
     demo.main(["react", "5"])
 
     out = capsys.readouterr().out
     assert "Red Ball" in out
-    assert "decided ACTION was IDENTICAL" in out
-    assert "allow_interrupt stays off" in out
+    assert "allow_interrupt is ON" in out          # INTERRUPT-ON is active in the shipped config
+    assert "SUPPRESSION" in out                     # the floor-suppression scenario ran
+    assert "shipped floor" in out                   # the interruption scenario ran

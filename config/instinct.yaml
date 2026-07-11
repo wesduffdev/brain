@@ -103,8 +103,10 @@ reaction:
   #   allow_interrupt : step 2 — a reaction at/above `interrupt.intensity_threshold`
   #                     may CANCEL an interruptible current action, but only when the
   #                     floor permits the protective response; otherwise SUPPRESSED.
-  visual_only: true
-  allow_interrupt: false
+  visual_only: true       # VISUAL-ON: surface + bias emotion (active)
+  allow_interrupt: true   # INTERRUPT-ON: a strong reaction may CANCEL a safe,
+                          # interruptible action (the first behaviour change);
+                          # the SafetyService floor still disposes, never bypassed.
   # The TRANSIENT affect a triggered reaction feeds into emotion derivation, per
   # label (`need: delta`). A flinch drops the felt safety used for derivation below
   # the `scared` threshold, so the being reads as afraid — the stored needs are left

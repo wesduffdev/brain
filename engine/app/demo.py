@@ -33,7 +33,7 @@ from app.bootstrap import build_simulation
 from app.config_service import ConfigService
 from app.domain.event import DomainEvent
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
-from app.services.reaction_response_service import ACTION_EVENTS_TOPIC
+from app.services.reaction_response_service import ACTION_EVENTS_TOPIC, ACTION_INTERRUPTED
 from app.services.stimulus_service import PERCEPTION_TOPIC
 from app.simulation import Simulation
 
@@ -85,65 +85,105 @@ def _print_action(state: Dict) -> None:
         print(line + f"{action['type']:>8} -> {action['targetId']:<16} | {action['reason']}" + suffix)
 
 
-def _react_demo(config_root: str, ticks: int = 6) -> None:
-    """VISUAL-ON demonstration: the RUNNING being VISIBLY REACTS to a fast,
-    body-bound approach (the red ball) — it surfaces `state().reaction` and its
-    DERIVED emotion shifts to `scared` — while the action it decides stays identical,
-    tick for tick, to the SAME being with no instinct chain. Visual-only never
-    interrupts (allow_interrupt is off), so the two beings act in lockstep; only the
-    felt/expressed layer differs. The bootstrap loads the trained instinct predictor
-    from `models/instinct.pt`; with no torch or no artifact the chain is inert and the
-    run says so (train it with `python -m app.ml.train_instinct_model`)."""
-    config = ConfigService.from_files(config_root).with_room_contents(["obj_red_ball"])
-    label = config.object_catalog()["obj_red_ball"].developer_label or "obj_red_ball"
-    print(f"the being sits alone; then a fast, body-bound {label} rushes straight at it.\n")
-
+def _run_react(config, *, bus, ticks):
+    """Run the wired being (loads models/instinct.pt via the bootstrap) beside a
+    no-instinct baseline, printing each tick, and return
+    (reacted, interrupted_events, wired_actions, baseline_actions)."""
     baseline = Simulation(config)  # no instinct chain -> the decided-action reference
-    bus = InMemoryEventBus()
     interrupted: List[DomainEvent] = []
     bus.subscribe(ACTION_EVENTS_TOPIC, interrupted.append)
-
     reacted = 0
-    actions_matched = True
-    print(f"--- wired being (visual_only ON) beside a no-instinct baseline, {ticks} ticks ---")
     with build_simulation(config, event_publisher=bus, event_consumer=bus) as sim:
         for _ in range(ticks):
             a = sim.tick()
-            b = baseline.tick()
-            if a.get("currentAction") != b.get("currentAction"):
-                actions_matched = False
+            baseline.tick()
             if a.get("reaction") is not None:
                 reacted += 1
+            broke_off = a.get("reaction") is not None and a.get("currentAction") is None
             _print_action(a)
+            if broke_off:
+                print("           ^^^ action BROKEN OFF — the flinch cancelled it (outcome never landed)")
+        wired_actions = len(sim.interactions())
+    interrupts = [e for e in interrupted if e.event_type == ACTION_INTERRUPTED]
+    return reacted, interrupts, wired_actions, len(baseline.interactions())
 
+
+def _react_demo(config_root: str, ticks: int = 8) -> None:
+    """INTERRUPT-ON demonstration: the RUNNING being VISIBLY REACTS to a fast,
+    body-bound approach (the red ball) AND now BREAKS OFF its action when the flinch
+    is strong enough — the first time instinct changes what the being DOES. Two runs
+    beside a no-instinct baseline show the safety-gated cancellation:
+
+      1. shipped floor (empty) — the flinch CANCELS the being's action: its outcome
+         never lands and an `ActionInterrupted` is emitted on the durable action topic;
+      2. a floor that FORBIDS the protective `withdraw` on the ball — the interruption
+         is SUPPRESSED, so the being completes its action. The floor is never bypassed.
+
+    allow_interrupt is ON in the shipped config; the SafetyService floor is the sole
+    arbiter. The bootstrap loads the trained instinct predictor from
+    `models/instinct.pt`; with no torch or no artifact the chain is inert and the run
+    says so (train it with `python -m app.ml.train_instinct_model`)."""
+    base = ConfigService.from_files(config_root).with_room_contents(["obj_red_ball"])
+    label = base.object_catalog()["obj_red_ball"].developer_label or "obj_red_ball"
+    print(f"the being sits alone; then a fast, body-bound {label} rushes straight at it.")
+    print("instinct: visual_only ON, allow_interrupt is ON — a strong flinch may break off a SAFE action.\n")
+
+    # 1) shipped floor (empty): the flinch may cancel the being's action.
+    print(f"--- [1] shipped floor: wired being (allow_interrupt ON) beside a baseline, {ticks} ticks ---")
+    reacted, interrupts, wired_acts, base_acts = _run_react(
+        base, bus=InMemoryEventBus(), ticks=ticks
+    )
     print()
     if reacted:
-        print(
-            f"the being VISIBLY REACTED on {reacted} tick(s): `state().reaction` surfaced "
-            f"and its derived emotion read `scared` on the approach."
-        )
+        print(f"the being VISIBLY REACTED on {reacted} tick(s) (`state().reaction` surfaced, emotion read `scared`).")
+        if interrupts:
+            first = interrupts[0].payload
+            print(
+                f"INTERRUPTED: {len(interrupts)} action(s) broken off by a flinch — "
+                f"first at tick {first['tick']} ({first['action']}). The wired being took "
+                f"{wired_acts} action(s) vs {base_acts} for the no-instinct baseline: the "
+                f"cancelled action's outcome never landed."
+            )
+        else:
+            print("no interruption fired — the flinch never cleared the intensity threshold this run.")
     else:
         print(
             "the instinct chain was inert — no trained model loaded. Run "
             "`PYTHONPATH=. python -m app.ml.train_instinct_model` to produce "
             "models/instinct.pt, then retry."
         )
-    verdict = "IDENTICAL" if actions_matched else "DIFFERENT"
-    print(
-        f"the decided ACTION was {verdict} to the no-instinct baseline every tick — "
-        f"{len(interrupted)} action(s) interrupted (allow_interrupt stays off)."
+
+    # 2) a floor that forbids the protective withdraw on the ball: SUPPRESSION.
+    print()
+    print(f"--- [2] SUPPRESSION: the floor FORBIDS `withdraw` on the ball, {ticks} ticks ---")
+    guarded = base.with_safety_rules(
+        [{"action": "withdraw", "blocked_property": "round", "reason": "breaking off here is invalid"}]
     )
+    reacted2, interrupts2, wired2, base2 = _run_react(
+        guarded, bus=InMemoryEventBus(), ticks=ticks
+    )
+    print()
+    if reacted2 and not interrupts2:
+        print(
+            f"the being still FELT the flinch ({reacted2} tick(s)) but the floor SUPPRESSED "
+            f"the interruption: {wired2} action(s) taken, same as the baseline's {base2} — "
+            f"the being completed its action and the safety floor was never bypassed."
+        )
+    elif interrupts2:
+        print("UNEXPECTED: an interruption fired despite the floor forbidding the protective response.")
+    else:
+        print("the instinct chain was inert — train models/instinct.pt to see suppression.")
 
 
 def main(argv: Optional[List[str]] = None) -> None:
     argv = argv if argv is not None else sys.argv[1:]
     config_root = os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
-    # VISUAL-ON: `demo react [ticks]` runs the reaction demonstration (the being
-    # visibly reacts to a body-bound approach, action unchanged) instead of the
-    # single-object walk.
+    # INTERRUPT-ON: `demo react [ticks]` runs the reaction demonstration — the being
+    # visibly reacts to a body-bound approach AND breaks off a safe action when the
+    # flinch is strong enough (safety-gated), instead of the single-object walk.
     if any(token.strip().lstrip("-").lower() == "react" for token in argv):
         react_ticks = next(
-            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 6
+            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 8
         )
         _react_demo(config_root, ticks=react_ticks)
         return

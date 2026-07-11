@@ -1,0 +1,12 @@
+# Host-native fine-tune dependencies for the reading faculty (reading R1, ADR 0036).
+#
+# The LoRA fine-tune of our own base model is Apple-Silicon Metal GPU work, so it
+# runs HOST-NATIVE via MLX-LM — never inside the Linux/Docker container (no Metal
+# passthrough, READING_VOICEBOX §5). `mlx-lm` is macOS/arm64-only, so it is pinned
+# behind a platform marker: on any other host pip installs nothing and the runner
+# refuses loudly with what's needed. Kept OUT of requirements.txt (runtime stays
+# lean) and separate from requirements-train.txt (torch); the fine-tune needs
+# neither torch nor a GPU container.
+-r requirements.txt
+
+mlx-lm>=0.19; sys_platform == "darwin" and platform_machine == "arm64"

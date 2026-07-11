@@ -123,6 +123,9 @@ flowchart TB
         Fake["FakeLanguageModel: in-memory (tests)"]
         Claude["ClaudeLanguageModel: fluent narrator (env-gated)"]
         Local["LocalLanguageModel: local model (S2 = reading R2; Ollama, client-only)"]
+        Ingest["Reading ingest: read → clean → chunk into training-ready text (reading R1)"]
+        Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
+        Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
         VBuild["build_voice: config engine selection (S4 = reading R8)"]
         VPort["VoicePort seam: synthesize self-report → speech"]
@@ -139,6 +142,7 @@ flowchart TB
     end
 
     Trainer["ml-trainer sidecar: trains outcome + instinct models (.pt)"]
+    Doc(["Document you hand the being (reading R1)"])
 
     %% ---- Sensing flow ----
     Room --> Perc
@@ -204,6 +208,10 @@ flowchart TB
     Sel -.-> Local
     Claude -.->|on error| Templ
     Local -.->|on error / unavailable| Templ
+    Doc --> Ingest
+    Ingest -->|training-ready chunks| Finetune
+    Finetune -.->|host-native LoRA fine-tune| Adapter
+    Adapter -.->|served behind the port (reading R2)| Local
     LCmd --> LMPort
     API -->|"/ask"| Self
     Self -->|self-report| API

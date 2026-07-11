@@ -630,6 +630,19 @@ The structured per-hop log line carrying `correlation_id`/`causation_id` that
 lets one stimulus→prediction→reaction chain be followed end to end.
 _Avoid_: audit log, request log.
 
+**Sound spike**:
+A sudden transition into a loud/unknown sound category the being hears but
+cannot see — raises a `being.perception.sound_spike` stimulus with high
+`sound_spike_intensity`/`unexpectedness` and low visibility_confidence, which the
+instinct model reads as **freeze**.
+_Avoid_: loud room (that is the slow contextual-need push on safety), noise.
+
+**Contact (touch stimulus)**:
+An approaching object crossing into the being's body (distance ≤ the configured
+contact distance) — raises a `being.perception.object_contacted` stimulus with a
+real `touch_intensity`, which the instinct model reads as **withdraw**.
+_Avoid_: collision, approach (approach is closing on the body; contact is touching it).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

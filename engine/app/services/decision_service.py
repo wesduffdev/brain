@@ -1,4 +1,5 @@
-"""DecisionService — chooses the being's one action each tick (ADR 0009).
+"""DecisionService — chooses the being's one action each tick (ADR 0009, ADR
+0011 extended by card v3).
 
 Given the being's needs, its dominant emotion, the objects it currently
 perceives, and which actions are resting on cooldown, it scores every valid
@@ -6,12 +7,20 @@ perceives, and which actions are resting on cooldown, it scores every valid
 (`action`, `targetId`, `emotion`, `reason`), or `None` when there is nothing to
 do (no perceived object, or every candidate blocked or on cooldown).
 
+When an outcome **predictor** is injected (prediction is *active* — card v3), the
+being also anticipates each safe action's outcomes: the predictor gives a blended
+neural+rule probability per outcome, and the anticipated aversive cost of those
+outcomes (`OutcomeEffectPolicy.anticipated_cost`) is subtracted from the action's
+utility — so the being can learn to avoid an action it predicts will hurt. With
+no predictor, the being decides on raw utility exactly as before (shadow).
+
 Safety is not something this service weighs; it *obeys* it. It asks the injected
 SafetyService about each candidate and drops any that is blocked before ranking,
-so a high score can never bypass a guardrail (BRIEF §12: "learned predictions
-never bypass safety"). When a would-be top choice was blocked, the chosen action
-says so in its reason. All the numbers live in `config/actions.yaml`; this
-service holds none — retuning what the being tends to do is a config change.
+so neither a high utility nor a confident learned prediction can bypass a
+guardrail (BRIEF §12: "learned predictions never bypass safety") — the prediction
+only ever reshuffles the *safe* candidates. When a would-be top choice was
+blocked, the chosen action says so in its reason. All the numbers live in
+`config/*.yaml`; this service holds none.
 """
 from __future__ import annotations
 
@@ -19,7 +28,9 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence, Set
 
 from app.domain.decision import Decision
-from app.policies import ActionPolicy
+from app.ml.encode_features import Example
+from app.policies import ActionPolicy, OutcomeEffectPolicy
+from app.ports.predictor import PredictorPort
 from app.services.safety_service import SafetyService
 
 
@@ -33,11 +44,21 @@ class _Candidate:
 
 
 class DecisionService:
-    def __init__(self, actions: Mapping[str, ActionPolicy], safety: SafetyService):
+    def __init__(
+        self,
+        actions: Mapping[str, ActionPolicy],
+        safety: SafetyService,
+        *,
+        predictor: Optional[PredictorPort] = None,
+        outcome_effects: Optional[OutcomeEffectPolicy] = None,
+    ):
         # Preserve authored order so ties break deterministically by config order.
         self._actions = dict(actions)
         self._order = {name: i for i, name in enumerate(self._actions)}
         self._safety = safety
+        # Active prediction (card v3): both are present together or neither is.
+        self._predictor = predictor
+        self._outcome_effects = outcome_effects or OutcomeEffectPolicy()
 
     def decide(
         self,
@@ -66,6 +87,9 @@ class DecisionService:
                     continue
                 if name in on_cooldown:
                     continue
+                # Prediction is active only for the SAFE candidates — it can never
+                # rescue a blocked one, so a learned score cannot bypass safety.
+                score -= self._anticipated_cost(policy, properties)
                 selectable.append(_Candidate(score, self._order[name], object_id, name, policy.reason))
 
         if not selectable:
@@ -82,3 +106,16 @@ class DecisionService:
             )
 
         return Decision(action=chosen.action, target_id=chosen.object_id, emotion=emotion, reason=reason)
+
+    def _anticipated_cost(self, policy: ActionPolicy, properties: Sequence[str]) -> float:
+        """The anticipated aversive cost of taking `policy` on an object with
+        `properties`, from the blended prediction — 0.0 when prediction is off."""
+        if self._predictor is None:
+            return 0.0
+        example = Example(
+            properties=tuple(properties),
+            action=policy.affordance or "",
+            context=(),
+        )
+        probabilities = self._predictor.predict_outcomes(example)
+        return self._outcome_effects.anticipated_cost(probabilities)

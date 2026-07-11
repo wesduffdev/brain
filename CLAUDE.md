@@ -92,6 +92,18 @@ test holds (hard to reverse · surprising without context · a real trade-off). 
 a term genuinely needs the director's judgment, surface it in the completion
 report rather than block; sub-agents note the domain-model outcome there.
 
+### Architecture-diagram update after every slice
+
+After each slice reaches green — alongside the deep-module and domain-model
+gates — keep the root `README.md` **Architecture** Mermaid diagram current. It
+is the one visual map of the whole being, so update it to reflect any
+architectural change the slice introduced — a new or changed module, seam,
+service, event topic, or data flow — keeping it a true map of what the code
+actually does, never a wish-list. A slice that introduces no architectural
+change says so explicitly. Sub-agents include the diagram-update outcome in
+their vertical-slice completion report; the orchestrator does not treat a card
+as review-ready until it has run.
+
 ### Config-driven tuning
 
 Drift rates, thresholds, timings, and vocabularies live in `config/*.yaml`, not

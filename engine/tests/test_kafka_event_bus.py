@@ -237,3 +237,36 @@ def test_a_handler_failure_routes_the_event_to_the_topic_dlq(live_topics):
     finally:
         consumer_bus.close()
         dlq_bus.close()
+
+
+@pytest.mark.kafka
+def test_consume_commits_the_offset_after_handling_so_a_restart_does_not_reprocess(live_topics):
+    # Offsets advance only AFTER a message is fully resolved (dispatched, deduped, or
+    # dead-lettered), so a runtime that pulls + handles each tick has at-least-once
+    # delivery: a fresh consumer in the SAME group resumes past the committed offset
+    # and does not reprocess an already-handled event. The resumed bus has an empty
+    # dedupe set, so a redelivery WOULD be handled — proving the 0 is a committed
+    # offset, not in-memory dedupe.
+    servers, policy = live_topics
+    topic = policy.names[0]
+    group = f"commit-{uuid.uuid4().hex[:8]}"
+
+    first = KafkaEventBus(bootstrap_servers=servers, topics=policy, group_id=group)
+    handled: List[DomainEvent] = []
+    first.subscribe(topic, handled.append)
+    try:
+        event = _object_approached()
+        first.publish(topic, event)
+        assert first.consume(max_messages=1, timeout=15.0) == 1
+        assert len(handled) == 1
+    finally:
+        first.close()
+
+    resumed = KafkaEventBus(bootstrap_servers=servers, topics=policy, group_id=group)
+    seen_again: List[DomainEvent] = []
+    resumed.subscribe(topic, seen_again.append)
+    try:
+        assert resumed.consume(max_messages=1, timeout=10.0) == 0
+        assert seen_again == []
+    finally:
+        resumed.close()

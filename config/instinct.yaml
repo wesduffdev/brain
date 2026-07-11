@@ -65,6 +65,17 @@ training:
 # the runtime entirely. Retuning is a config change only.
 runtime:
   enabled: true
+  # How the DEPLOYED runtime PULLS pending events off the bus each tick when it is
+  # broker-backed (Kafka). Inert on the in-memory default (delivery is synchronous
+  # on publish). Each tick the runtime polls a BOUNDED batch on the tick thread — a
+  # background consumer would race the single writer — so the perception -> instinct
+  # -> reaction chain advances within the tick, mirroring in-memory (KAFKA-RUNTIME-LOOP,
+  # ADR 0024). Kept small so an idle tick is not stalled; the chain self-heals over
+  # ticks (offsets committed only after handling, `earliest` reset). Retuning the poll
+  # cadence is a config change only.
+  consume:
+    max_messages: 16          # events one tick may pull at most
+    poll_timeout_seconds: 0.2 # how long each poll waits for a message
 
 # Reaction SELECTION — the instinct CONSUMER's concern (INS-RT, extends ADR 0011),
 # read into a typed InstinctRuntimePolicy. The model only predicts; it never
@@ -116,6 +127,26 @@ reaction:
     freeze:   { safety: -40 }
     withdraw: { safety: -50 }
     orient:   { safety: -20 }
+  # ADAPTIVE temperament (INS-TEMPERAMENT, ADR 0031): the being's EFFECTIVE reaction
+  # thresholds DRIFT from experience, so identical stimuli provoke different reactions
+  # as it learns — the fast-layer sibling of the v6 slow trait drift (config/traits.yaml).
+  #   habituate_rate : per HARMLESS startle (the being's `pain` did not rise), how far
+  #                    that label's threshold rises toward `ceiling` — a repeated harmless
+  #                    startle gradually STOPS firing (less reactive). Slow, like caution.
+  #   sensitize_rate : per HARMFUL outcome (the being's `pain` spiked), how far EVERY
+  #                    threshold falls toward `floor` — the being gets jumpier, a
+  #                    previously sub-threshold stimulus may now fire (more reactive).
+  #   floor/ceiling  : the bounds of the effective threshold in PROBABILITY space. These
+  #                    are NOT the SafetyService invariant floor — temperament only ever
+  #                    reshapes which REACTION fires, never whether an action is allowed.
+  # Both rates 0 => no drift => the static thresholds above (byte-identical). Harm both
+  # sensitizes here AND lifts the caution trait (config/traits.yaml): the two reinforce
+  # across layers (reaction gating vs. decision bias) without double-counting.
+  temperament:
+    habituate_rate: 0.04
+    sensitize_rate: 0.15
+    floor: 0.05
+    ceiling: 0.98
   interrupt:
     intensity_threshold: 0.7          # a reaction must be this intense to interrupt
     interruptible_actions: [observe, approach, touch, grab, push]

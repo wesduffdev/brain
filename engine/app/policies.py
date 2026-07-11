@@ -755,8 +755,13 @@ class MotionPolicy:
     size-change): a value at its max reads as 1.0. `min_closing_speed` is the gate
     on what counts as an *approach* — an object closing on the body faster than this
     raises a stimulus; anything slower, static, or receding raises none.
-    `sensory_defaults` fills the features the world has no source for yet (0.0
-    unless overridden). Retuning any of it — or moving an object — is a config
+    `sensory_defaults` fills the features the world still has no source for (the
+    being's internal state, 0.0 unless overridden). SENSORY-STIM adds two real
+    sources this policy also owns: `sound_features` turns a sudden loud/unknown
+    sound category into a `sound_spike_intensity` startle vector, and
+    `contact_features` turns an object reaching the body (`is_contact`) into a
+    `touch_intensity` vector — both config-driven (`sound:` / `contact:` in
+    `config/motion.yaml`). Retuning any of it — or moving an object — is a config
     change only.
     """
 
@@ -769,6 +774,17 @@ class MotionPolicy:
     min_closing_speed: float = 0.0
     sensory_defaults: Mapping[str, float] = field(default_factory=dict)
     motions: Mapping[str, Motion] = field(default_factory=dict)
+    # SENSORY-STIM sourcing (extends ADR 0027): a sudden SOUND category becomes a
+    # real `sound_spike_intensity` (+ the low-visibility / high-unexpectedness that
+    # make it a startle), and an object reaching the body becomes a real
+    # `touch_intensity`. `sound_spikes` maps a spike category -> its sensory
+    # feature values; `contact_distance` is the body radius a crossing counts as a
+    # touch (0 = contact sensing off); `contact_min_touch` floors how hard any real
+    # contact feels; `contact_unexpectedness` is how startling an unforeseen touch is.
+    sound_spikes: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    contact_distance: float = 0.0
+    contact_min_touch: float = 0.0
+    contact_unexpectedness: float = 0.0
 
     FEATURE_NAMES: ClassVar[Tuple[str, ...]] = MOTION_FEATURE_NAMES
 
@@ -820,6 +836,57 @@ class MotionPolicy:
             "prior_prediction_error": self._default("prior_prediction_error"),
         }
 
+    def sound_features(self, category: Optional[str]) -> Optional[Dict[str, float]]:
+        """The full 14-feature vector for a SUDDEN sound in `category` — a startle
+        the being HEARS but cannot see. Every motion feature is null (distance and
+        time-to-contact at their "nothing here" 1.0, the rest 0.0) and
+        `sound_spike_intensity` / `unexpectedness` / `visibility_confidence` come
+        from config — a loud/unknown sound reads as intense, unexpected, and
+        unseen, exactly the shape the instinct model learned to FREEZE at (ADR
+        0026). ``None`` when `category` names no configured spike, so an ordinary
+        sound raises no stimulus. The internal-state features stay at their
+        defaults (folded in later)."""
+        spike = self.sound_spikes.get(category or "")
+        if not spike:
+            return None
+        features = {name: self._default(name) for name in self.FEATURE_NAMES}
+        features["distance"] = 1.0
+        features["time_to_contact"] = 1.0
+        features["sound_spike_intensity"] = _clamp(
+            float(spike.get("sound_spike_intensity", 0.0)), 0.0, 1.0
+        )
+        features["unexpectedness"] = _clamp(float(spike.get("unexpectedness", 0.0)), 0.0, 1.0)
+        features["visibility_confidence"] = _clamp(
+            float(spike.get("visibility_confidence", 0.0)), 0.0, 1.0
+        )
+        return features
+
+    def is_contact(self, prior_distance: float, distance: float) -> bool:
+        """Whether an object CROSSED into contact this step — its distance fell from
+        beyond the contact radius to at/within it. A crossing, not a steady state,
+        so an object resting at the body is not a fresh contact every tick, and a
+        being born already touching something is not startled by it. Contact sensing
+        is off (never true) when `contact_distance` is 0."""
+        if self.contact_distance <= 0.0:
+            return False
+        return prior_distance > self.contact_distance >= distance
+
+    def contact_features(
+        self, base: Mapping[str, float], *, impact_speed: float
+    ) -> Dict[str, float]:
+        """`base` (the object's normalized motion vector) with the CONTACT sensory
+        signals layered on: a `touch_intensity` scaled by the impact speed
+        (`impact_speed / max_speed`) but floored at `contact_min_touch` so any real
+        contact is felt, and the config `contact_unexpectedness` that makes an
+        unforeseen touch a startle — the shape the instinct model learned to
+        WITHDRAW from (ADR 0026). The object's perceived visibility and kinematics
+        are left exactly as `base` measured them."""
+        features = dict(base)
+        scaled = _clamp(float(impact_speed) / self.max_speed, 0.0, 1.0) if self.max_speed else 0.0
+        features["touch_intensity"] = _clamp(max(self.contact_min_touch, scaled), 0.0, 1.0)
+        features["unexpectedness"] = _clamp(self.contact_unexpectedness, 0.0, 1.0)
+        return features
+
 
 @dataclass(frozen=True)
 class InstinctRuntimePolicy:
@@ -857,6 +924,74 @@ class InstinctRuntimePolicy:
     def cooldown(self, label: str) -> int:
         """How many ticks must elapse between firings of `label` (0 = no cooldown)."""
         return int(self.cooldowns.get(label, 0))
+
+
+@dataclass(frozen=True)
+class InstinctConsumePolicy:
+    """How the DEPLOYED runtime PULLS pending events off a broker-backed EventBus
+    each tick (KAFKA-RUNTIME-LOOP). On the in-memory default `publish` delivers
+    synchronously, so nothing is pulled and this policy is inert; on the Kafka
+    runtime `publish` only produces and handlers fire on `consume()`, which the tick
+    loop must drive. Each tick the runtime polls a BOUNDED batch on the tick thread
+    (never a background consumer that would race the single writer):
+    `max_messages` caps how many events one tick pulls, and `poll_timeout_seconds`
+    is how long each poll waits for a message before giving up — kept small so an
+    idle tick is not stalled, since the chain self-heals over ticks (offsets committed
+    only after handling, `earliest` reset). Both live in the `runtime.consume:` block
+    of `config/instinct.yaml`, so tuning the runtime's poll cadence is a config change,
+    never a code one."""
+
+    max_messages: int = 16
+    poll_timeout_seconds: float = 0.2
+
+
+@dataclass(frozen=True)
+class ReactionTemperamentPolicy:
+    """How the being's EFFECTIVE instinct thresholds DRIFT with experience — the slow
+    PERSONALIZATION of the reaction GATING owned by `InstinctRuntimePolicy` (adaptive
+    temperament, INS-TEMPERAMENT, ADR 0031). Two harm-driven forces move a per-label
+    threshold on the same saturating curve the v6 trait / ADR 0020 familiarity signals
+    use, so sensitivity shifts fast at first and then settles:
+
+    - HABITUATION: a startle that FIRES and proves HARMLESS (the being's `pain` did not
+      rise that tick) nudges that label's threshold a `habituate_rate` fraction toward
+      the `ceiling`, so a repeated harmless startle gradually STOPS firing (less
+      reactive).
+    - SENSITIZATION: a HARMFUL outcome (the being's `pain` spiked) nudges EVERY
+      threshold a `sensitize_rate` fraction toward the `floor`, so the being is jumpier
+      next time — a previously sub-threshold stimulus may now fire (more reactive).
+
+        habituated = t + habituate_rate * (ceiling - t)
+        sensitized = t - sensitize_rate * (t - floor)
+
+    Both rates default 0.0 — no drift, so the effective threshold stays exactly the
+    static `InstinctRuntimePolicy` one (byte-identical to the pre-slice consumer). Slow
+    by construction, like the v6 traits. `floor`/`ceiling` bound the threshold in
+    PROBABILITY space; they are NOT the SafetyService invariant floor — temperament only
+    ever reshapes which REACTION fires, never whether an action is allowed (ADR
+    0026/0029). Every number lives in the `reaction.temperament:` block of
+    `config/instinct.yaml`, so retuning how fast a being habituates or sensitizes is a
+    config change, never a code one.
+    """
+
+    habituate_rate: float = 0.0
+    sensitize_rate: float = 0.0
+    floor: float = 0.0
+    ceiling: float = 1.0
+
+    def habituate(self, threshold: float) -> float:
+        """`threshold` after one harmless startle — nudged a `habituate_rate` fraction
+        toward the ceiling (less reactive), clamped to ``[floor, ceiling]``. Rate 0
+        returns it unchanged."""
+        moved = float(threshold) + self.habituate_rate * (self.ceiling - float(threshold))
+        return max(self.floor, min(self.ceiling, moved))
+
+    def sensitize(self, threshold: float) -> float:
+        """`threshold` after one harmful outcome — nudged a `sensitize_rate` fraction
+        toward the floor (more reactive), clamped to ``[floor, ceiling]``. Rate 0
+        returns it unchanged."""
+        moved = float(threshold) - self.sensitize_rate * (float(threshold) - self.floor)
+        return max(self.floor, min(self.ceiling, moved))
 
 
 @dataclass(frozen=True)

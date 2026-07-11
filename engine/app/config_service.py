@@ -26,6 +26,7 @@ from app.policies import (
     ExplorationPolicy,
     GraphEdgePolicy,
     InstinctModelPolicy,
+    InstinctConsumePolicy,
     InstinctRuntimePolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
@@ -34,6 +35,7 @@ from app.policies import (
     PredictionBlendPolicy,
     PreferencePolicy,
     ReactionResponsePolicy,
+    ReactionTemperamentPolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -304,6 +306,15 @@ class ConfigService:
             str(name): float(value)
             for name, value in (motion.get("sensory_defaults", {}) or {}).items()
         }
+        # SENSORY-STIM: the sudden-sound spike map (category -> sensory features)
+        # and the contact tuning, both config-driven so retuning what startles the
+        # being is a `config/motion.yaml` change only.
+        sound = motion.get("sound", {}) or {}
+        sound_spikes = {
+            str(category): {str(k): float(v) for k, v in (spec or {}).items()}
+            for category, spec in (sound.get("spike", {}) or {}).items()
+        }
+        contact = motion.get("contact", {}) or {}
         catalog = self.object_catalog()
         motions: Dict[str, Motion] = {}
         for object_id, spec in (motion.get("objects", {}) or {}).items():
@@ -332,6 +343,10 @@ class ConfigService:
             min_closing_speed=float(approach.get("min_closing_speed", 0.0)),
             sensory_defaults=defaults,
             motions=motions,
+            sound_spikes=sound_spikes,
+            contact_distance=float(contact.get("contact_distance", 0.0)),
+            contact_min_touch=float(contact.get("min_touch_intensity", 0.0)),
+            contact_unexpectedness=float(contact.get("unexpectedness", 0.0)),
         )
 
     def resolve_object(self, selector: str) -> str:
@@ -769,6 +784,21 @@ class ConfigService:
         runtime = self._instinct.get("runtime", {}) or {}
         return bool(runtime.get("enabled", True))
 
+    def instinct_consume_policy(self) -> InstinctConsumePolicy:
+        """How the DEPLOYED runtime PULLS pending events off a broker-backed EventBus
+        each tick (KAFKA-RUNTIME-LOOP), from the `runtime.consume:` block of
+        `config/instinct.yaml`: `max_messages` (the bounded batch one tick pulls) and
+        `poll_timeout_seconds` (how long each poll waits). Inert on the in-memory
+        default (delivery is synchronous on publish); it governs only the Kafka
+        runtime's per-tick poll cadence. Absent config yields the safe defaults
+        (16 / 0.2s). Retuning the poll cadence is a config change only."""
+        runtime = self._instinct.get("runtime", {}) or {}
+        consume = runtime.get("consume", {}) or {}
+        return InstinctConsumePolicy(
+            max_messages=int(consume.get("max_messages", 16)),
+            poll_timeout_seconds=float(consume.get("poll_timeout_seconds", 0.2)),
+        )
+
     def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
         """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR
         0011), from the `reaction:` block of `config/instinct.yaml`: the per-label
@@ -819,6 +849,26 @@ class ConfigService:
                 str(a) for a in (interrupt.get("interruptible_actions", []) or [])
             ),
             protective_action=str(interrupt.get("protective_action", "withdraw")),
+        )
+
+    def reaction_temperament_policy(self) -> ReactionTemperamentPolicy:
+        """The ADAPTIVE-instinct temperament tuning (INS-TEMPERAMENT, ADR 0031) from the
+        `reaction.temperament:` block of `config/instinct.yaml`: how fast the being's
+        EFFECTIVE reaction thresholds DRIFT from experience — `habituate_rate` (raising a
+        harmless startle's threshold until it stops firing) and `sensitize_rate` (lowering
+        every threshold after a harmful outcome), bounded by `floor`/`ceiling` in
+        probability space. Both rates default 0.0, so absent config the effective
+        thresholds stay exactly the static `instinct_runtime_policy` ones — byte-identical
+        to the pre-slice consumer. `floor`/`ceiling` bound the reaction PROBABILITY gate,
+        not the SafetyService floor. Retuning how fast a being habituates or sensitizes is
+        a config change only."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        temperament = reaction.get("temperament", {}) or {}
+        return ReactionTemperamentPolicy(
+            habituate_rate=float(temperament.get("habituate_rate", 0.0)),
+            sensitize_rate=float(temperament.get("sensitize_rate", 0.0)),
+            floor=float(temperament.get("floor", 0.0)),
+            ceiling=float(temperament.get("ceiling", 1.0)),
         )
 
     def outcome_training_params(self) -> Dict[str, float]:

@@ -31,10 +31,16 @@ from typing import Dict, List, Optional, Tuple
 from app.adapters.in_memory_event_bus import InMemoryEventBus
 from app.bootstrap import build_simulation
 from app.config_service import ConfigService
+from app.domain.instinct import REACTION_LABELS
+from app.policies import MOTION_FEATURE_NAMES
 from app.domain.event import DomainEvent
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
 from app.services.reaction_response_service import ACTION_EVENTS_TOPIC, ACTION_INTERRUPTED
-from app.services.stimulus_service import PERCEPTION_TOPIC
+from app.services.stimulus_service import (
+    OBJECT_CONTACTED,
+    PERCEPTION_TOPIC,
+    SOUND_SPIKE,
+)
 from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -175,17 +181,221 @@ def _react_demo(config_root: str, ticks: int = 8) -> None:
         print("the instinct chain was inert — train models/instinct.pt to see suppression.")
 
 
+def _sensory_demo(config_root: str, ticks: int = 8) -> None:
+    """SENSORY-STIM demonstration: real SOUND and TOUCH signals now drive the
+    instinct chain. The running being (loads `models/instinct.pt` via the
+    bootstrap) is shown beside a no-instinct baseline. A fast ball RUSHES IN and
+    REACHES the body (a CONTACT -> the being WITHDRAWS), and partway through the
+    room fills with a sudden UNKNOWN sound (a spike -> the being FREEZES) —
+    reactions the motion-only stimulus could never produce, because
+    sound_spike_intensity / touch_intensity were stubbed 0.0 until this slice.
+    With no torch or no artifact the chain is inert and the run says so."""
+    base = ConfigService.from_files(config_root).with_room_contents(["obj_red_ball"])
+    print("the being sits alone; a ball rushes in and REACHES it, then a sudden UNKNOWN sound fills the room.")
+    print("SENSORY-STIM: sound_spike_intensity + touch_intensity now populate the frozen 14-feature stimulus.\n")
+
+    bus = InMemoryEventBus()
+    perception: List[DomainEvent] = []
+    reactions: List[DomainEvent] = []
+    bus.subscribe(PERCEPTION_TOPIC, perception.append)
+    bus.subscribe(INSTINCT_REACTIONS_TOPIC, reactions.append)
+    baseline = Simulation(base)  # no instinct chain -> the reference
+
+    sound_at = max(3, ticks - 3)
+    print(f"--- the wired being beside a no-instinct baseline, {ticks} ticks ---")
+    with build_simulation(base, event_publisher=bus, event_consumer=bus) as sim:
+        for t in range(1, ticks + 1):
+            state = sim.tick()
+            baseline.tick()
+            _print_action(state)
+            if t == sound_at:
+                print(f"\ntick={sim.current_tick:>4}  *** a sudden UNKNOWN sound fills the room ***\n")
+                sim.change_environment(sound="unknown_sound")
+
+    spikes = [e for e in perception if e.event_type == SOUND_SPIKE]
+    contacts = [e for e in perception if e.event_type == OBJECT_CONTACTED]
+    triggered = [
+        (e.payload["tick"], e.payload["reaction"], e.payload["intensity"])
+        for e in reactions
+        if e.payload.get("triggered")
+    ]
+    print()
+    if not reactions and not spikes and not contacts:
+        print(
+            "the instinct chain was inert -- no trained model loaded. Run "
+            "`PYTHONPATH=. python -m app.ml.train_instinct_model` to produce "
+            "models/instinct.pt, then retry."
+        )
+        return
+    print(f"sensory stimuli on the bus: {len(spikes)} sound spike(s), {len(contacts)} contact(s).")
+    for label in ("flinch", "withdraw", "freeze"):
+        hits = [t for (t, r, _) in triggered if r == label]
+        if hits:
+            intensity = next(i for (t, r, i) in triggered if r == label)
+            print(f"  the being {label.upper()} on tick(s) {hits} (intensity ~{intensity:.2f}).")
+    fired = sorted({r for (_, r, _) in triggered})
+    baseline_reacted = 0  # baseline has no instinct chain, so it never reacts
+    print(
+        f"reactions triggered: {fired or 'none'} -- the no-instinct baseline reacted on "
+        f"{baseline_reacted} tick(s)."
+    )
+    if "freeze" not in fired:
+        print("NOTE: freeze did not clear its threshold on the trained model's sound features this run.")
+    if "withdraw" not in fired:
+        print("NOTE: withdraw did not clear its threshold on the trained model's contact features this run.")
+
+
+class _FixedInstinctPredictor:
+    """A torch-free `InstinctPredictorPort` for the temperament demo: a CONSTANT flinch
+    probability, so what changes whether the being fires is the DRIFT of its own
+    threshold (habituation / sensitization), not the model. Stands in for
+    models/instinct.pt so the demo runs with no torch and no artifact."""
+
+    def __init__(self, flinch: float) -> None:
+        self._flinch = flinch
+
+    def predict_reactions(self, stimulus):
+        from app.domain.instinct import REACTION_LABELS
+        from app.ports.instinct import InstinctPrediction
+
+        reactions = {label: 0.0 for label in REACTION_LABELS}
+        reactions["flinch"] = self._flinch
+        reactions["ignore"] = 1.0 - self._flinch
+        return InstinctPrediction(reactions=reactions, intensity=self._flinch)
+
+
+def _temperament_config(*, contains, harmful, flinch_threshold=0.5):
+    """A minimal one-object world for the temperament demo. `harmful` decides whether
+    the object hurts on touch (drives the being's `pain` need, the harm cue)."""
+    outcomes = ["pleasant", "causes_pain", "scary"]
+    touch_outcomes = {"hot": ["causes_pain", "scary"]} if harmful else {"soft": ["pleasant"]}
+    props = ["hot"] if harmful else ["soft"]
+    actions = {
+        "actions": {
+            "observe": {"affordance": "look", "utility": {"base": 1.0, "needs": {}, "emotions": {}},
+                        "expected_outcomes": ["pleasant"], "reason": "a careful look"},
+            "touch": {"affordance": "touch", "utility": {"base": 10.0, "needs": {}, "emotions": {}},
+                      "expected_outcomes": ["pleasant"], "property_outcomes": touch_outcomes,
+                      "reason": "reaching out to touch"},
+        }
+    }
+    tick_rates = {"tick": {"duration_ms": 1000},
+                  "needs": {"pain": {"direction": "decrease", "amount": 2, "every_ticks": 6,
+                                     "min": 0, "max": 100, "start": 0},
+                            "safety": {"direction": "contextual", "amount": 0, "every_ticks": 1,
+                                       "min": 0, "max": 100, "start": 80},
+                            "comfort": {"direction": "contextual", "amount": 0, "every_ticks": 1,
+                                        "min": 0, "max": 100, "start": 70}}}
+    return ConfigService.from_dict(
+        tick_rates,
+        {"rules": [], "default": "calm"},
+        rooms={"room": {"id": "room_001", "contains": list(contains)}},
+        objects={"properties": props, "affordances": ["look", "touch"],
+                 "objects": {contains[0]: {"developerLabel": "obj", "properties": props,
+                                           "affordances": ["look", "touch"]}}},
+        actions=actions,
+        safety={"rules": []},
+        outcome={"labels": outcomes, "context_features": []},
+        outcome_effects={"effects": {"causes_pain": {"pain": 7, "safety": -20, "comfort": -10},
+                                     "scary": {"safety": -10}, "pleasant": {"comfort": 3}}},
+        instinct={"feature_order": list(MOTION_FEATURE_NAMES), "labels": list(REACTION_LABELS),
+                  "runtime": {"enabled": True},
+                  "reaction": {"shadow": True, "thresholds": {"flinch": flinch_threshold},
+                               "cooldowns": {"flinch": 0}, "visual_only": True,
+                               "temperament": {"habituate_rate": 0.2, "sensitize_rate": 0.2,
+                                               "floor": 0.05, "ceiling": 0.98}}},
+        motion={"normalization": {"max_distance": 10.0, "max_speed": 5.0, "max_acceleration": 5.0,
+                                  "max_time_to_contact": 10.0, "max_size": 1.0, "max_size_change_rate": 1.0},
+                "approach": {"min_closing_speed": 0.0},
+                "objects": {contains[0]: {"position": [50.0, 0.0], "velocity": [-0.5, 0.0], "size": 0.3}}},
+    )
+
+
+def _temperament_demo(config_root: str, ticks: int = 12) -> None:
+    """INS-TEMPERAMENT demonstration: identical stimuli provoke DIFFERENT reactions as
+    the being accrues experience. Torch-free — a fixed fake predictor stands in for
+    models/instinct.pt, so the DRIFT of the being's own thresholds is what changes.
+
+      1. HABITUATION — a harmless object rushes at the being every tick. It flinches at
+         first, then STOPS as its effective flinch threshold climbs (it learns the
+         approach is nothing to fear).
+      2. SENSITIZATION — the being reaches out and is HURT (its `pain` spikes). A MILD
+         approach that it ignored at first now makes it FLINCH — being hurt made it
+         jumpier."""
+    from app.bootstrap import build_simulation
+
+    def run(config, predictor, label):
+        bus = InMemoryEventBus()
+        reactions: List[DomainEvent] = []
+        bus.subscribe(INSTINCT_REACTIONS_TOPIC, reactions.append)
+        by_tick = {}
+        with build_simulation(config, event_publisher=bus, event_consumer=bus,
+                              instinct_predictor=predictor) as sim:
+            for _ in range(ticks):
+                sim.tick()
+                fired = [r.payload["tick"] for r in reactions if r.payload.get("triggered")]
+                by_tick = {r.payload["tick"]: r.payload.get("triggered", False) for r in reactions}
+                thr = sim.reaction_thresholds().get("flinch")
+                t = sim.current_tick
+                mark = "FLINCH" if by_tick.get(t) else "  --  "
+                pain = sim.state()["needs"].get("pain", 0)
+                print(f"  tick={t:>3}  [{mark}]  flinch-threshold={thr:0.3f}  pain={pain:>3}")
+        fired_ticks = sorted(k for k, v in by_tick.items() if v)
+        return fired_ticks
+
+    print("INS-TEMPERAMENT: the being's instinct becomes ADAPTIVE — reaction thresholds")
+    print("drift from experience. (torch-free: a fixed fake predictor stands in for the model.)\n")
+
+    print(f"--- [1] HABITUATION: a HARMLESS object rushes in every tick, {ticks} ticks ---")
+    print("    fixed flinch probability 0.70; static threshold starts at 0.50\n")
+    habituated = run(_temperament_config(contains=["obj_ball"], harmful=False),
+                     _FixedInstinctPredictor(0.70), "habituation")
+    print()
+    if habituated:
+        print(f"    flinched on ticks {habituated}, then STOPPED — the harmless approach "
+              f"no longer startles it (habituated).")
+    else:
+        print("    (no flinch — check config)")
+
+    print()
+    print(f"--- [2] SENSITIZATION: a MILD approach (prob 0.45 < threshold 0.50) while the ---")
+    print(f"---     being TOUCHES a hot object and is HURT, {ticks} ticks ---\n")
+    sensitized = run(_temperament_config(contains=["obj_stove"], harmful=True),
+                     _FixedInstinctPredictor(0.45), "sensitization")
+    print()
+    if sensitized:
+        print(f"    the mild approach it first IGNORED now triggers a flinch (ticks {sensitized}) — "
+              f"being hurt lowered its thresholds (sensitized).")
+    else:
+        print("    (no flinch triggered — sensitization did not cross the stimulus this run)")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     argv = argv if argv is not None else sys.argv[1:]
     config_root = os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
     # INTERRUPT-ON: `demo react [ticks]` runs the reaction demonstration — the being
     # visibly reacts to a body-bound approach AND breaks off a safe action when the
     # flinch is strong enough (safety-gated), instead of the single-object walk.
+    if any(token.strip().lstrip("-").lower() == "temperament" for token in argv):
+        temperament_ticks = next(
+            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 12
+        )
+        _temperament_demo(config_root, ticks=temperament_ticks)
+        return
     if any(token.strip().lstrip("-").lower() == "react" for token in argv):
         react_ticks = next(
             (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 8
         )
         _react_demo(config_root, ticks=react_ticks)
+        return
+    # SENSORY-STIM: `demo sensory [ticks]` shows the being FREEZE at a sudden
+    # loud/unknown sound and WITHDRAW from a contact — the sound/touch sources this
+    # slice adds — beside a no-instinct baseline.
+    if any(token.strip().lstrip("-").lower() == "sensory" for token in argv):
+        sensory_ticks = next(
+            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 8
+        )
+        _sensory_demo(config_root, ticks=sensory_ticks)
         return
     ticks, selector = _parse_argv(argv)
 

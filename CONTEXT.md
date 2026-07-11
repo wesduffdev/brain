@@ -630,6 +630,46 @@ The structured per-hop log line carrying `correlation_id`/`causation_id` that
 lets one stimulus→prediction→reaction chain be followed end to end.
 _Avoid_: audit log, request log.
 
+**Sound spike**:
+A sudden transition into a loud/unknown sound category the being hears but
+cannot see — raises a `being.perception.sound_spike` stimulus with high
+`sound_spike_intensity`/`unexpectedness` and low visibility_confidence, which the
+instinct model reads as **freeze**.
+_Avoid_: loud room (that is the slow contextual-need push on safety), noise.
+
+**Contact (touch stimulus)**:
+An approaching object crossing into the being's body (distance ≤ the configured
+contact distance) — raises a `being.perception.object_contacted` stimulus with a
+real `touch_intensity`, which the instinct model reads as **withdraw**.
+_Avoid_: collision, approach (approach is closing on the body; contact is touching it).
+
+**Reaction sensitivity**:
+The being's current, per-being reaction thresholds — the config baseline
+reshaped by experience — that gate which instinct reaction fires. Held by the
+TemperamentService and consulted instead of the static threshold. Distinct from
+reaction intensity (how strong a fired reaction is).
+_Avoid_: sensitivity-as-intensity, threshold override, gain.
+
+**Habituation**:
+The slow rise of a reaction's effective threshold when a startle fires and proves
+harmless (the being's pain did not rise), so a repeated harmless stimulus
+gradually stops triggering.
+_Avoid_: fatigue, forgetting, cooldown (the per-firing timing gate).
+
+**Sensitization**:
+The slow fall of every reaction threshold after a harmful outcome (pain spiked),
+so the being is jumpier — a previously sub-threshold stimulus may now fire.
+Distinct from the caution trait (which reshapes the deliberate decision, not the
+reaction threshold).
+_Avoid_: panic, trauma-as-state, sensitivity.
+
+**Instinct temperament**:
+The being's adaptive instinct disposition — the drifting set of effective
+reaction thresholds grown from a life of startles (habituation) and harms
+(sensitization); the fast-layer sibling of the slow personality Trait, transient
+in-process.
+_Avoid_: mood, personality stat, the caution trait.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

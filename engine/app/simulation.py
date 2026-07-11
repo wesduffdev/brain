@@ -68,6 +68,7 @@ from app.services.stimulus_service import StimulusService
 from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
 from app.services.trait_service import TraitService
+from app.services.temperament_service import TemperamentService
 
 
 def _sum_biases(*maps: Optional[Dict]) -> Optional[Dict]:
@@ -265,10 +266,16 @@ class Simulation:
         # no chain is built, so the being is byte-identical to the pre-instinct
         # one and the whole prior suite is untouched.
         self._instinct_publisher = event_publisher
+        # The consumer is kept so the tick loop can PULL pending events off a
+        # broker-backed bus each tick (KAFKA-RUNTIME-LOOP); the in-memory bus
+        # delivers synchronously on publish and is never polled.
+        self._event_consumer = event_consumer
+        self._consume_policy = None
         self._instinct_outbox: Optional[InMemoryOutboxRepository] = None
         self._instinct_event_log: Optional[InMemoryEventLogRepository] = None
         self._instinct: Optional[InstinctService] = None
         self._telemetry: Optional[ModelTelemetryService] = None
+        self._temperament: Optional[TemperamentService] = None
         if (
             instinct_predictor is not None
             and event_publisher is not None
@@ -276,16 +283,34 @@ class Simulation:
         ):
             self._instinct_outbox = InMemoryOutboxRepository()
             self._instinct_event_log = InMemoryEventLogRepository()
+            # How the tick loop pulls pending events off a broker-backed bus
+            # (bounded batch + poll timeout); inert on the in-memory default.
+            self._consume_policy = config.instinct_consume_policy()
+            # ADAPTIVE instinct temperament (INS-TEMPERAMENT, ADR 0031): the being's
+            # per-label reaction thresholds PERSONALIZE from experience — a harmless
+            # startle habituates (raises the threshold, less reactive), a harmful
+            # outcome sensitizes (lowers every threshold, jumpier). Seeded from the
+            # runtime baseline; drifts only where config gives a non-zero rate, so the
+            # default is byte-identical to the static consumer. The InstinctService
+            # gates on it; this Simulation feeds it the harm cue each tick (the being's
+            # own `pain` need — no parallel harm detector). Instinct still never
+            # bypasses the safety floor: temperament shifts only reaction GATING.
+            runtime_policy = config.instinct_runtime_policy()
+            self._temperament = TemperamentService(
+                config.reaction_temperament_policy(),
+                base_thresholds=dict(runtime_policy.thresholds),
+            )
             self._instinct = InstinctService(
                 consumer=event_consumer,
                 publisher=event_publisher,
                 predictor=instinct_predictor,
                 encoder=InstinctFeatureEncoder.from_config(config),
-                policy=config.instinct_runtime_policy(),
+                policy=runtime_policy,
                 being_id=being_id,
                 predictions=InMemoryInstinctPredictionRepository(),
                 reactions=InMemoryInstinctReactionRepository(),
                 outbox=self._instinct_outbox,
+                temperament=self._temperament,
             )
             self._telemetry = ModelTelemetryService(
                 consumer=event_consumer, publisher=event_publisher, being_id=being_id
@@ -366,7 +391,15 @@ class Simulation:
         self.being.needs = self._needs.apply(self.being.needs, tick)
         self.being.needs = self._environment.apply(self.being.needs, self._room, tick)
         self.being.emotion = self._emotion.derive(self.being.needs)
+        pain_before = self.being.needs.get("pain", 0)
         self._act(tick)
+        # INS-TEMPERAMENT (ADR 0031): fold this tick's harm cue into the being's
+        # adaptive instinct temperament — a HARMFUL outcome (the being's `pain` rose
+        # this tick) SENSITIZES every reaction threshold; a HARMLESS tick HABITUATES
+        # whatever startled. The being's EXISTING `pain` need is the cue (ADR 0014); no
+        # parallel harm detector. A no-op when no instinct temperament is wired.
+        if self._temperament is not None:
+            self._temperament.settle(harm=self.being.needs.get("pain", 0) > pain_before)
         # EVT-VALID: publish this tick's staged instinct reactions onto the bus
         # (the in-process outbox relay, ADR 0028), so a reaction produced this
         # tick reaches the ReactionResponseService at the next begin_tick.
@@ -380,15 +413,45 @@ class Simulation:
         return self.state()
 
     def _drain_instinct(self) -> None:
-        """Drain the shadow instinct layer's outbox onto the bus — the
-        in-process equivalent of the ADR 0028 relay (publication happens outside
-        any DB transaction). A no-op when no instinct chain is wired."""
+        """Advance the instinct chain and drain its staged reactions onto the bus —
+        the in-process equivalent of the ADR 0028 relay (publication happens outside
+        any DB transaction). A no-op when no instinct chain is wired.
+
+        On a broker-backed bus (Kafka) `publish` only PRODUCES; handlers fire on
+        `consume()`. So the runtime PULLS pending events here, on the tick thread, so
+        the perception->instinct->reaction chain runs within the single-writer tick
+        exactly as the in-memory bus's synchronous `publish` does (KAFKA-RUNTIME-LOOP):
+        pull this tick's perception stimuli so the instinct consumer stages its
+        reactions, drain those onto the bus, then pull the reactions so the reaction
+        consumer latches them for the next tick — the same one-tick cadence as
+        in-memory. On the in-memory default the consumer exposes no `consume` and
+        delivery already happened on publish, so both pulls are no-ops and the shipped
+        stack is byte-identical."""
         if self._instinct is None:
             return
+        self._pump_consumer()
         drain_outbox(
             outbox=self._instinct_outbox,
             event_log=self._instinct_event_log,
             publisher=self._instinct_publisher,
+        )
+        self._pump_consumer()
+
+    def _pump_consumer(self) -> None:
+        """PULL a bounded batch of pending events off a broker-backed consumer and
+        dispatch them to their handlers, so a Kafka-backed chain advances ON THE TICK
+        THREAD — never a background consumer that would race the single writer and
+        break the invariant READ COMMITTED rests on. The in-memory bus delivers
+        synchronously on publish and exposes no `consume`, so this is a no-op there,
+        keeping the shipped default byte-identical. Offsets commit only after a message
+        is handled, and a poison one dead-letters — both in the adapter's `consume`
+        (EVT-KAFKA)."""
+        consume = getattr(self._event_consumer, "consume", None)
+        if consume is None:
+            return
+        consume(
+            max_messages=self._consume_policy.max_messages,
+            timeout=self._consume_policy.poll_timeout_seconds,
         )
 
     def instinct_lag(self) -> int:
@@ -408,7 +471,7 @@ class Simulation:
         # Advance object motion one tick and raise an approach stimulus for any
         # object now closing on the body — a world/perception side effect that
         # never bends the decision below.
-        self._stimulus.observe(perceived=perceived, tick=tick)
+        self._stimulus.observe(perceived=perceived, tick=tick, sound=self._room.sound)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 
@@ -711,6 +774,16 @@ class Simulation:
         safe exploration lifting curiosity — so a long-lived being grows an individual
         temperament. Always present (unlike the persisted learned facts)."""
         return self._traits.levels()
+
+    def reaction_thresholds(self) -> Dict[str, float]:
+        """The being's CURRENT effective instinct thresholds (INS-TEMPERAMENT, ADR
+        0031), per reaction label — the config baseline reshaped by a life of startles
+        (habituation raising them, so a harmless stimulus eventually stops firing) and
+        harms (sensitization lowering them, so a hurt being is jumpier). Empty when no
+        adaptive instinct temperament is wired (no instinct predictor); the static
+        baseline whenever the drift rates are 0. Observable like `traits()`, but kept
+        off the `state()` snapshot so an un-wired being stays byte-identical."""
+        return self._temperament.thresholds() if self._temperament is not None else {}
 
     def concepts(self) -> List[Dict]:
         """The concept schemas the being has learned (card v2), as plain

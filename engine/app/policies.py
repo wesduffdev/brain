@@ -44,6 +44,35 @@ class NeedTickPolicy:
 
 
 @dataclass(frozen=True)
+class NeedBands:
+    """The single authority on where each need may sit — its ``[floor, ceiling]``
+    band. A need's band lives on its NeedTickPolicy (``min_value``/``max_value``,
+    from ``tick_rates.yaml``); this aggregates those into one place that clamps a
+    need to its band. Every force that moves a need — autonomous drift, the
+    environment's push, a felt-consequence effect — clamps through here, so a
+    need's floor/ceiling has exactly one home rather than being re-derived at each
+    site. A need with no configured band is returned unchanged (never happens for
+    the shipped needs, which all have bands).
+    """
+
+    bands: Mapping[str, Tuple[int, int]] = field(default_factory=dict)
+
+    @classmethod
+    def from_policies(cls, policies: Mapping[str, "NeedTickPolicy"]) -> "NeedBands":
+        """Read each need's band off its tick policy — the single source of truth
+        for a need's floor/ceiling."""
+        return cls({name: (p.min_value, p.max_value) for name, p in policies.items()})
+
+    def clamp(self, need: str, value: int) -> int:
+        """`value` held inside `need`'s band; unchanged if the need has no band."""
+        band = self.bands.get(need)
+        if band is None:
+            return value
+        low, high = band
+        return max(low, min(high, value))
+
+
+@dataclass(frozen=True)
 class EmotionRule:
     """One line of the emotion-derivation table: if `need op value`, the
     dominant emotion is `emotion`. Rules are evaluated in order; first match

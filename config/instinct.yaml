@@ -116,6 +116,26 @@ reaction:
     freeze:   { safety: -40 }
     withdraw: { safety: -50 }
     orient:   { safety: -20 }
+  # ADAPTIVE temperament (INS-TEMPERAMENT, ADR 0031): the being's EFFECTIVE reaction
+  # thresholds DRIFT from experience, so identical stimuli provoke different reactions
+  # as it learns — the fast-layer sibling of the v6 slow trait drift (config/traits.yaml).
+  #   habituate_rate : per HARMLESS startle (the being's `pain` did not rise), how far
+  #                    that label's threshold rises toward `ceiling` — a repeated harmless
+  #                    startle gradually STOPS firing (less reactive). Slow, like caution.
+  #   sensitize_rate : per HARMFUL outcome (the being's `pain` spiked), how far EVERY
+  #                    threshold falls toward `floor` — the being gets jumpier, a
+  #                    previously sub-threshold stimulus may now fire (more reactive).
+  #   floor/ceiling  : the bounds of the effective threshold in PROBABILITY space. These
+  #                    are NOT the SafetyService invariant floor — temperament only ever
+  #                    reshapes which REACTION fires, never whether an action is allowed.
+  # Both rates 0 => no drift => the static thresholds above (byte-identical). Harm both
+  # sensitizes here AND lifts the caution trait (config/traits.yaml): the two reinforce
+  # across layers (reaction gating vs. decision bias) without double-counting.
+  temperament:
+    habituate_rate: 0.04
+    sensitize_rate: 0.15
+    floor: 0.05
+    ceiling: 0.98
   interrupt:
     intensity_threshold: 0.7          # a reaction must be this intense to interrupt
     interruptible_actions: [observe, approach, touch, grab, push]

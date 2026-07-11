@@ -37,8 +37,26 @@ training:
   learning_rate: 0.05
   seed: 0
 
-# Shadow-mode inference tuning (V0-9, ADR 0011). `threshold` is the probability
-# at or above which the model counts an outcome as predicted when comparing
-# against the actual outcome. Retuning shadow-mode sensitivity is a config change.
+# Inference + blend tuning (ADR 0011, extended by card v3).
+#
+# `threshold` is the probability at or above which the model counts an outcome as
+# predicted when comparing against the actual outcome (shadow-mode sensitivity).
+#
+# The rest govern ACTIVE prediction — when the blended prediction shapes the
+# being's decision (BRIEF §12, v2), not just records:
+#   neural_enabled              : the shadow -> active flip. false (default) keeps
+#                                 prediction observational; true lets the blended
+#                                 prediction penalize actions it predicts will
+#                                 hurt (within the safety floor).
+#   neural_weight / rule_weight : how the neural and rule-based predictors' outcome
+#                                 probabilities are blended (a weighted sum).
+#   fallback_to_rules_on_error  : on a neural inference failure, fall back to the
+#                                 rule layer so the sim keeps running (true), or
+#                                 propagate the error (false).
+# Retuning the blend — or turning the model off — is a config change, never code.
 prediction:
   threshold: 0.5
+  neural_enabled: false
+  neural_weight: 0.5
+  rule_weight: 0.5
+  fallback_to_rules_on_error: true

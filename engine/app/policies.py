@@ -199,6 +199,42 @@ class OutcomeEffectPolicy:
                 totals[need_name] = totals.get(need_name, 0) + int(delta)
         return totals
 
+    def anticipated_cost(self, probabilities: Mapping[str, float]) -> float:
+        """The being's anticipated aversive cost of a *predicted* set of outcomes
+        (card v3): each outcome's probability weights how much that outcome is
+        expected to ERODE the being's needs (the sum of its need *drops*, from the
+        same felt-consequence table). Always ``>= 0`` — a predicted harm (felt
+        safety/comfort falling) has a positive cost; a predicted-neutral or
+        pleasant outcome (no need drop) costs nothing. This is what lets the
+        decision layer penalize an action it predicts will hurt without a hard
+        block, and it is config-driven: retuning how aversive an experience is
+        anticipated to be is an `outcome_effects.yaml` change. (A symmetric bonus
+        for anticipated need *gains* is a future extension; v0 penalizes only.)"""
+        total = 0.0
+        for outcome, probability in probabilities.items():
+            drop = sum(-delta for delta in self.effects.get(outcome, {}).values() if delta < 0)
+            total += float(probability) * float(drop)
+        return total
+
+
+@dataclass(frozen=True)
+class PredictionBlendPolicy:
+    """How the decision layer blends the neural predictor with the rule-based one
+    (card v3, extends ADR 0011). `neural_enabled` is the shadow -> active flip:
+    off, prediction stays observational and the being decides on raw utility; on,
+    the blended prediction actively shapes the decision. `neural_weight` /
+    `rule_weight` weight the two predictors' probabilities in the blend;
+    `fallback_to_rules_on_error` makes a neural inference failure degrade to the
+    rule layer (the sim keeps running) rather than propagate. All four live in the
+    `prediction:` block of `outcome_labels.yaml`, so retuning the blend — or
+    turning the model off entirely — is a config change, never a code one.
+    """
+
+    neural_enabled: bool = False
+    neural_weight: float = 0.5
+    rule_weight: float = 0.5
+    fallback_to_rules_on_error: bool = True
+
 
 @dataclass(frozen=True)
 class RenderHintsPolicy:

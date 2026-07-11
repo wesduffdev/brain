@@ -20,6 +20,7 @@ from app.policies import (
     EnvironmentPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
+    PredictionBlendPolicy,
     RenderHintsPolicy,
     SafetyRule,
 )
@@ -451,6 +452,21 @@ class ConfigService:
         threshold) when unset."""
         prediction = self._outcome.get("prediction", {}) or {}
         return float(prediction.get("threshold", 0.5))
+
+    def prediction_policy(self) -> PredictionBlendPolicy:
+        """How the decision layer blends the neural and rule-based predictors
+        (card v3), from the same `prediction:` block. `neural_enabled` defaults to
+        ``False`` — so prediction stays observational (shadow) until the config is
+        flipped to active — and the weights default to an even 50/50 blend with
+        fallback-to-rules on error. Retuning the blend, or activating the model,
+        is a config change only."""
+        prediction = self._outcome.get("prediction", {}) or {}
+        return PredictionBlendPolicy(
+            neural_enabled=bool(prediction.get("neural_enabled", False)),
+            neural_weight=float(prediction.get("neural_weight", 0.5)),
+            rule_weight=float(prediction.get("rule_weight", 0.5)),
+            fallback_to_rules_on_error=bool(prediction.get("fallback_to_rules_on_error", True)),
+        )
 
     def outcome_training_params(self) -> Dict[str, float]:
         """Trainer hyperparameters, config-driven with safe defaults so

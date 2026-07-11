@@ -18,12 +18,14 @@ Run it:
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
 from app import auth
 from app.auth import AuthConfig, require_auth
+from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.services.command_service import CommandError, CommandService
@@ -52,6 +54,10 @@ def create_app(
     (`AuthConfig.from_env()`) unless one is injected — it is always in the code
     path and gated only by `AUTH_REQUIRED` (ADR 0005).
     """
+    # When we build the being ourselves it may own a DB session; hold the handle
+    # so the lifespan can close it on shutdown. An injected simulation owns its
+    # own lifecycle, so there is nothing here to tear down.
+    built: Optional[BuiltSimulation] = None
     if (
         simulation is None
         or tick_interval_seconds is None
@@ -62,7 +68,12 @@ def create_app(
             config_root or os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
         )
         if simulation is None:
-            simulation = Simulation(config)
+            # The bootstrap wires the Postgres repositories + shadow-mode
+            # predictor when DATABASE_URL is set, so a served engine persists its
+            # interactions; with no DB it is the same plain in-memory being as
+            # before (ADR 0007/0011/0012).
+            built = build_simulation(config)
+            simulation = built.simulation
         if tick_interval_seconds is None:
             tick_interval_seconds = config.tick_duration_ms() / 1000.0
         if render_state_service is None:
@@ -76,7 +87,17 @@ def create_app(
     auth_config = auth_config if auth_config is not None else AuthConfig.from_env()
     guard = require_auth(auth_config)
 
-    app = FastAPI(title="jarvis engine", version="0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Close the being's DB session on shutdown when the bootstrap opened one,
+        # so the server never leaves a session idle-in-transaction on exit.
+        try:
+            yield
+        finally:
+            if built is not None:
+                built.close()
+
+    app = FastAPI(title="jarvis engine", version="0", lifespan=lifespan)
 
     @app.get("/health")
     async def health():

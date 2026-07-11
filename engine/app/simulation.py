@@ -18,7 +18,7 @@ from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
 from app.ml.encode_features import Example, FeatureEncoder
-from app.ports.predictor import PredictorPort
+from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredictor
 from app.ports.repositories import (
     InteractionEventRepository,
     PredictionRecordRepository,
@@ -68,22 +68,43 @@ class Simulation:
         self._room = config.room()
 
         self._actions = config.action_policies()
-        self._decision = DecisionService(self._actions, SafetyService(config.safety_rules()))
+        safety = SafetyService(config.safety_rules())
         # Per-action timing gate: the tick an action may next be taken.
         self._cooldown_until: Dict[str, int] = {}
         self._events: List[InteractionEvent] = []
         self._current_action: Optional[Dict] = None
 
-        # Shadow mode (ADR 0011): if a predictor was loaded, run it alongside the
-        # rule layer and record each prediction. With no predictor, there is no
-        # PredictionService and nothing is recorded — behavior is unchanged.
+        # Prediction (ADR 0011, extended by card v3). The flip is config:
+        # `prediction.neural_enabled`. Off (the default), prediction is
+        # OBSERVATIONAL — shadow mode records what the model would have predicted
+        # beside the rule layer and the actual outcome, and never touches the
+        # decision (behavior byte-identical predictor on vs off). On, prediction is
+        # ACTIVE — a rule-based baseline blended with the injected neural predictor
+        # (absent -> rules only) drives the decision, so the being anticipates and
+        # avoids harm within the safety floor; the decision consumes it directly,
+        # so shadow recording steps aside.
+        blend = config.prediction_policy()
         self._prediction_repo: Optional[PredictionRecordRepository] = None
         self._prediction: Optional[PredictionService] = None
-        if predictor is not None:
-            self._prediction_repo = prediction_repository or InMemoryPredictionRecordRepository()
-            self._prediction = PredictionService(
-                predictor, self._prediction_repo, threshold=config.prediction_threshold()
+        if blend.neural_enabled:
+            ensemble = EnsemblePredictor(
+                rule=RuleBasedPredictor(self._actions, config.outcome_labels()),
+                neural=predictor,
+                policy=blend,
             )
+            self._decision = DecisionService(
+                self._actions,
+                safety,
+                predictor=ensemble,
+                outcome_effects=config.outcome_effects(),
+            )
+        else:
+            self._decision = DecisionService(self._actions, safety)
+            if predictor is not None:
+                self._prediction_repo = prediction_repository or InMemoryPredictionRecordRepository()
+                self._prediction = PredictionService(
+                    predictor, self._prediction_repo, threshold=config.prediction_threshold()
+                )
 
         needs = config.initial_needs()
         self.being = BeingState(

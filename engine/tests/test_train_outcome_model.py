@@ -27,6 +27,7 @@ from app.ml.outcome_model import load_outcome_model
 from app.repositories import (
     InMemoryModelRunRepository,
     InMemoryTrainingExampleRepository,
+    PostgresInteractionEventRepository,
     PostgresModelRunRepository,
     PostgresTrainingExampleRepository,
 )
@@ -299,8 +300,14 @@ def test_training_on_real_persisted_examples_writes_an_artifact_and_a_model_run(
             )
         session.commit()
 
+        # Wire the event port too: each derived training example carries a
+        # foreign key to the interaction_events row it came from, so the parent
+        # event must be persisted before its example — real Postgres enforces
+        # this (SQLite does not). This mirrors the runtime write path, where
+        # Simulation._record writes the event before deriving the example.
+        event_repo = PostgresInteractionEventRepository(session)
         example_repo = PostgresTrainingExampleRepository(session)
-        sim = Simulation(config, training_repo=example_repo)
+        sim = Simulation(config, event_repo=event_repo, training_repo=example_repo)
         for _ in range(80):
             sim.tick()
         assert example_repo.all(), "the sim should have persisted at least one example"

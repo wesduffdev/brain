@@ -28,8 +28,8 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 
+from app.bootstrap import build_simulation
 from app.config_service import ConfigService
-from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
@@ -80,8 +80,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     obj = config.object_catalog()[object_id]
     is_hot = "hot" in obj.properties
 
-    sim = Simulation(config.with_room_contents([object_id]))
-
     label = obj.developer_label or object_id
     props = ", ".join(obj.properties) or "no notable properties"
     print(f"the being wakes in a room with one object: {label} ({props})")
@@ -90,40 +88,47 @@ def main(argv: Optional[List[str]] = None) -> None:
     else:
         print()
 
-    darken_at = 10
-    print(f"--- a curious explorer decides what to do each tick, for {ticks} ticks ---")
-    for _ in range(ticks):
-        if sim.current_tick == darken_at:
-            print(f"\ntick={sim.current_tick:>4}  *** the room goes dark — a world event ***\n")
-            sim.change_environment(light="dark")
-        _print_action(sim.tick())
+    # The bootstrap persists the run when DATABASE_URL is set (events, derived
+    # examples, and shadow predictions land in Postgres); with no DB it is the
+    # same in-memory being the demo has always shown. The `with` closes the being's
+    # DB session when the run finishes, so the demo never leaks one.
+    with build_simulation(config.with_room_contents([object_id])) as sim:
+        darken_at = 10
+        print(f"--- a curious explorer decides what to do each tick, for {ticks} ticks ---")
+        for _ in range(ticks):
+            if sim.current_tick == darken_at:
+                print(f"\ntick={sim.current_tick:>4}  *** the room goes dark — a world event ***\n")
+                sim.change_environment(light="dark")
+            _print_action(sim.tick())
 
-    events = sim.interactions()
-    on_object = [e for e in events if e["objectId"] == object_id]
-    print(f"\nfinished at tick {sim.current_tick}; dominant emotion: {sim.state()['emotion']}")
-    print(f"actions taken: {len(events)}  (on {label}: {len(on_object)})")
+        events = sim.interactions()
+        on_object = [e for e in events if e["objectId"] == object_id]
+        print(f"\nfinished at tick {sim.current_tick}; dominant emotion: {sim.state()['emotion']}")
+        print(f"actions taken: {len(events)}  (on {label}: {len(on_object)})")
 
-    if is_hot:
-        harmful = [e for e in on_object if e["action"] in {"touch", "grab"}]
-        felt_pain = any("causes_pain" in e["observedOutcome"] for e in on_object)
-        now = sim.state()
-        print(f"the being reached out: {len(harmful)} harmful contact(s) with {label}.")
-        if felt_pain:
+        if is_hot:
+            harmful = [e for e in on_object if e["action"] in {"touch", "grab"}]
+            felt_pain = any("causes_pain" in e["observedOutcome"] for e in on_object)
+            now = sim.state()
+            print(f"the being reached out: {len(harmful)} harmful contact(s) with {label}.")
+            if felt_pain:
+                print(
+                    "touching it hurt — recorded as `causes_pain`, so the being can later "
+                    "learn hot -> pain."
+                )
             print(
-                "touching it hurt — recorded as `causes_pain`, so the being can later "
-                "learn hot -> pain."
+                f"felt state now — pain: {now['needs'].get('pain', 0)}, "
+                f"safety: {now['needs'].get('safety')}, comfort: {now['needs'].get('comfort')}."
             )
-        print(
-            f"felt state now — pain: {now['needs'].get('pain', 0)}, "
-            f"safety: {now['needs'].get('safety')}, comfort: {now['needs'].get('comfort')}."
-        )
-        print("recoverable harm is allowed and learnable — nothing hard-blocked it (ADR 0013/0014).")
-    else:
-        by_action: Dict[str, int] = {}
-        for event in on_object:
-            by_action[event["action"]] = by_action.get(event["action"], 0) + 1
-        breakdown = ", ".join(f"{a}×{n}" for a, n in sorted(by_action.items())) or "nothing yet"
-        print(f"how it engaged {label}: {breakdown}")
+            print(
+                "recoverable harm is allowed and learnable — nothing hard-blocked it (ADR 0013/0014)."
+            )
+        else:
+            by_action: Dict[str, int] = {}
+            for event in on_object:
+                by_action[event["action"]] = by_action.get(event["action"], 0) + 1
+            breakdown = ", ".join(f"{a}×{n}" for a, n in sorted(by_action.items())) or "nothing yet"
+            print(f"how it engaged {label}: {breakdown}")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,14 @@ from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
+from app.domain.event import DomainEvent
+from app.domain.event_log import EventLogEntry
+from app.domain.instinct import (
+    InstinctPrediction,
+    InstinctReaction,
+    InstinctTrainingExample,
+)
+from app.domain.outbox import OutboxEntry
 
 
 def _copy(being: BeingState) -> BeingState:
@@ -608,6 +616,269 @@ class PostgresModelRunRepository:
                 artifact_path=row.artifact_path,
                 finished_at=row.finished_at,
                 metrics=dict(row.metrics or {}),
+            )
+            for row in rows
+        ]
+
+
+# --- event backbone: transactional outbox + event-log projection (ADR 0028) ---
+#
+# The Postgres adapters flatten a `DomainEvent`'s scalar fields into their own
+# queryable columns and store its timestamps as the ISO-8601 wire form; on read
+# they rebuild the envelope through `DomainEvent.from_snapshot`, which re-validates
+# it loudly (a stored row that has lost a field or a valid timestamp is rejected,
+# not half-rebuilt) — the same discipline a Kafka consumer uses off the wire.
+
+
+def _domain_event_columns(event: DomainEvent, topic: str) -> Dict:
+    return dict(
+        event_id=event.event_id,
+        topic=topic,
+        event_type=event.event_type,
+        event_version=event.event_version,
+        being_id=event.being_id,
+        correlation_id=event.correlation_id,
+        causation_id=event.causation_id,
+        source_service=event.source_service,
+        occurred_at=event.occurred_at.isoformat(),
+        produced_at=event.produced_at.isoformat(),
+        payload=dict(event.payload),
+    )
+
+
+def _domain_event_from_row(row) -> DomainEvent:
+    return DomainEvent.from_snapshot(
+        {
+            "eventId": row.event_id,
+            "eventType": row.event_type,
+            "eventVersion": row.event_version,
+            "occurredAt": row.occurred_at,
+            "producedAt": row.produced_at,
+            "sourceService": row.source_service,
+            "beingId": row.being_id,
+            "correlationId": row.correlation_id,
+            "causationId": row.causation_id,
+            "payload": dict(row.payload or {}),
+        }
+    )
+
+
+class InMemoryOutboxRepository:
+    """An append-only outbox held in a list — the test seam, no database. Entries
+    are immutable value objects (`OutboxEntry`), stored and returned directly."""
+
+    def __init__(self) -> None:
+        self._entries: List[OutboxEntry] = []
+
+    def add(self, entry: OutboxEntry) -> None:
+        self._entries.append(entry)
+
+    def all(self) -> List[OutboxEntry]:
+        return list(self._entries)
+
+
+class PostgresOutboxRepository:
+    """An outbox backed by Postgres via a SQLAlchemy ``Session``. Append-only:
+    each producer stages one row on the `event_outbox` table inside its unit of
+    work (ADR 0017/0028), and ``all`` reads them back oldest-first as `OutboxEntry`
+    value objects. Staged only — the caller's unit of work commits it."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, entry: OutboxEntry) -> None:
+        self._session.add(models.EventOutbox(**_domain_event_columns(entry.event, entry.topic)))
+
+    def all(self) -> List[OutboxEntry]:
+        rows = self._session.query(models.EventOutbox).order_by(models.EventOutbox.id).all()
+        return [OutboxEntry(topic=row.topic, event=_domain_event_from_row(row)) for row in rows]
+
+
+class InMemoryEventLogRepository:
+    """An event-log projection held in a dict keyed by ``event_id`` — the seam the
+    behavior suite drives, no database. ``add`` is idempotent on ``event_id`` (a
+    replayed envelope leaves the log at one entry, keeping the first); ``all``
+    reads them back in projection order."""
+
+    def __init__(self) -> None:
+        self._entries: Dict[str, EventLogEntry] = {}
+
+    def add(self, entry: EventLogEntry) -> None:
+        self._entries.setdefault(entry.event_id, entry)  # idempotent on event_id
+
+    def all(self) -> List[EventLogEntry]:
+        return list(self._entries.values())
+
+
+class PostgresEventLogRepository:
+    """An event-log projection backed by Postgres via a SQLAlchemy ``Session``.
+    ``add`` is idempotent: it ``merge``s by the ``event_id`` primary key, so
+    projecting the same envelope twice upserts in place rather than duplicating.
+    Staged only — the relay's unit of work commits it (ADR 0017/0028)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, entry: EventLogEntry) -> None:
+        self._session.merge(  # insert-or-update by event_id, so replay is idempotent
+            models.EventLog(**_domain_event_columns(entry.event, entry.topic))
+        )
+
+    def all(self) -> List[EventLogEntry]:
+        rows = self._session.query(models.EventLog).order_by(models.EventLog.created_at, models.EventLog.event_id).all()
+        return [EventLogEntry(topic=row.topic, event=_domain_event_from_row(row)) for row in rows]
+
+
+# --- instinct capture: predictions, reactions, derived training rows (ADR 0026) ---
+
+
+class InMemoryInstinctPredictionRepository:
+    """An append-only instinct-prediction store in a list — the test seam, no
+    database. Predictions are immutable value objects, stored and returned directly."""
+
+    def __init__(self) -> None:
+        self._predictions: List[InstinctPrediction] = []
+
+    def add(self, prediction: InstinctPrediction) -> None:
+        self._predictions.append(prediction)
+
+    def all(self) -> List[InstinctPrediction]:
+        return list(self._predictions)
+
+
+class PostgresInstinctPredictionRepository:
+    """An instinct-prediction store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only: each inference stages one row on the `instinct_predictions` table.
+    Staged only — the caller's unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, prediction: InstinctPrediction) -> None:
+        self._session.add(
+            models.InstinctPredictionRecord(
+                event_id=prediction.event_id,
+                being_id=prediction.being_id,
+                tick=prediction.tick,
+                features=list(prediction.features),
+                reaction_probabilities=list(prediction.reaction_probabilities),
+                reaction_intensity=prediction.reaction_intensity,
+            )
+        )
+
+    def all(self) -> List[InstinctPrediction]:
+        rows = (
+            self._session.query(models.InstinctPredictionRecord)
+            .order_by(models.InstinctPredictionRecord.id)
+            .all()
+        )
+        return [
+            InstinctPrediction(
+                being_id=row.being_id,
+                tick=row.tick,
+                event_id=row.event_id,
+                features=tuple(row.features or ()),
+                reaction_probabilities=tuple(row.reaction_probabilities or ()),
+                reaction_intensity=row.reaction_intensity or 0.0,
+            )
+            for row in rows
+        ]
+
+
+class InMemoryInstinctReactionRepository:
+    """An append-only instinct-reaction store in a list — the test seam, no database."""
+
+    def __init__(self) -> None:
+        self._reactions: List[InstinctReaction] = []
+
+    def add(self, reaction: InstinctReaction) -> None:
+        self._reactions.append(reaction)
+
+    def all(self) -> List[InstinctReaction]:
+        return list(self._reactions)
+
+
+class PostgresInstinctReactionRepository:
+    """An instinct-reaction store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only: each reaction decision stages one row on the `instinct_reactions`
+    table. Staged only — the caller's unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, reaction: InstinctReaction) -> None:
+        self._session.add(
+            models.InstinctReactionRecord(
+                event_id=reaction.event_id,
+                being_id=reaction.being_id,
+                tick=reaction.tick,
+                reaction=reaction.reaction,
+                intensity=reaction.intensity,
+                triggered=reaction.triggered,
+            )
+        )
+
+    def all(self) -> List[InstinctReaction]:
+        rows = (
+            self._session.query(models.InstinctReactionRecord)
+            .order_by(models.InstinctReactionRecord.id)
+            .all()
+        )
+        return [
+            InstinctReaction(
+                being_id=row.being_id,
+                tick=row.tick,
+                event_id=row.event_id,
+                reaction=row.reaction,
+                intensity=row.intensity or 0.0,
+                triggered=bool(row.triggered),
+            )
+            for row in rows
+        ]
+
+
+class InMemoryInstinctTrainingExampleRepository:
+    """An append-only instinct training-example store in a list — the test seam."""
+
+    def __init__(self) -> None:
+        self._examples: List[InstinctTrainingExample] = []
+
+    def add(self, example: InstinctTrainingExample) -> None:
+        self._examples.append(example)
+
+    def all(self) -> List[InstinctTrainingExample]:
+        return list(self._examples)
+
+
+class PostgresInstinctTrainingExampleRepository:
+    """An instinct training-example store backed by Postgres via a SQLAlchemy
+    ``Session``. Append-only: each derived row stages on the
+    `instinct_training_examples` table. Staged only — the caller's unit of work
+    commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, example: InstinctTrainingExample) -> None:
+        self._session.add(
+            models.InstinctTrainingExampleRecord(
+                event_id=example.event_id,
+                input_features=list(example.input_features),
+                output_labels=list(example.output_labels),
+            )
+        )
+
+    def all(self) -> List[InstinctTrainingExample]:
+        rows = (
+            self._session.query(models.InstinctTrainingExampleRecord)
+            .order_by(models.InstinctTrainingExampleRecord.id)
+            .all()
+        )
+        return [
+            InstinctTrainingExample(
+                event_id=row.event_id,
+                input_features=tuple(row.input_features or ()),
+                output_labels=tuple(row.output_labels or ()),
             )
             for row in rows
         ]

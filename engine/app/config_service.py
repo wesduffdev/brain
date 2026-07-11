@@ -21,6 +21,7 @@ from app.policies import (
     CuriosityWeights,
     EmotionRule,
     EnvironmentPolicy,
+    EventTopicsPolicy,
     ExplorationPolicy,
     GraphEdgePolicy,
     InstinctModelPolicy,
@@ -64,6 +65,7 @@ class ConfigService:
         "decision_weights",
         "traits",
         "instinct",
+        "events",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -116,6 +118,7 @@ class ConfigService:
         decision_weights: Optional[Mapping] = None,
         traits: Optional[Mapping] = None,
         instinct: Optional[Mapping] = None,
+        events: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -135,6 +138,7 @@ class ConfigService:
             decision_weights=decision_weights,
             traits=traits,
             instinct=instinct,
+            events=events,
         )
 
     @classmethod
@@ -163,6 +167,7 @@ class ConfigService:
             "decision_weights": "decision_weights.yaml",
             "traits": "traits.yaml",
             "instinct": "instinct.yaml",
+            "events": "events.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -696,3 +701,21 @@ class ConfigService:
             "learning_rate": float(params["learning_rate"]),
             "seed": int(params["seed"]),
         }
+
+    # --- events: the Kafka topic topology (EVT-KAFKA, ADR 0024) -----------
+
+    def event_topics_policy(self) -> EventTopicsPolicy:
+        """The being.* Kafka topic catalogue and partition / DLQ conventions the
+        runtime broker is provisioned with (EVT-KAFKA), from ``config/events.yaml``.
+        Topic NAMES, the partition count, and the DLQ suffix all come from config,
+        so the KafkaEventBus never hardcodes a topic and retuning the topology is a
+        config change only; the broker URL is the lone Kafka setting read from the
+        environment instead (``KAFKA_BOOTSTRAP_SERVERS``). An absent file yields the
+        empty policy (no topics, one partition, ``.dlq`` suffix) so the broker-free
+        suite needs no events config."""
+        topics = self._events.get("topics", {}) or {}
+        return EventTopicsPolicy(
+            names=tuple(str(name) for name in topics.values()),
+            partitions=int(self._events.get("partitions", 1)),
+            dlq_suffix=str(self._events.get("dlq_suffix", ".dlq")),
+        )

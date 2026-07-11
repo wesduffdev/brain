@@ -654,3 +654,44 @@ class InstinctModelPolicy:
     learning_rate: float = 0.05
     seed: int = 0
     intensity_loss: str = "bce"
+class EventTopicsPolicy:
+    """The being.* Kafka topic catalogue and the partition / dead-letter
+    conventions the runtime broker is provisioned with (EVT-KAFKA, ADR 0024). It
+    is the resolved answer to "which topics exist, how many partitions, and where
+    does a failed event go?" — read from ``config/events.yaml`` by
+    ``ConfigService.event_topics_policy``. Topic NAMES, the partition count, and
+    the DLQ suffix all come from config; the ``KafkaEventBus`` learns them from
+    here and never hardcodes one, so retuning the topology is a config change only.
+    (The broker URL is the lone Kafka setting that is NOT here — it is env-only
+    deploy config, ``KAFKA_BOOTSTRAP_SERVERS``, like ``DATABASE_URL``.)
+
+    ``partitions`` is sized for a SINGLE being (1): one being is a single ordered
+    stream, so one partition preserves its per-being order; scaling to many beings
+    raises it in config, never in code. ``dlq_for`` names an event topic's
+    dead-letter companion (``being.perception.events`` ->
+    ``being.perception.events.dlq``), where the consumer routes an event it cannot
+    process, so a poison message parks off to the side instead of wedging the flow.
+    ``bootstrap_topics`` is the full set the broker must be provisioned with —
+    every catalogue topic followed by its DLQ companion.
+    """
+
+    names: Tuple[str, ...] = ()
+    partitions: int = 1
+    dlq_suffix: str = ".dlq"
+
+    def dlq_for(self, topic: str) -> str:
+        """The dead-letter topic a failed ``topic`` event is routed to."""
+        return f"{topic}{self.dlq_suffix}"
+
+    def dlq_topics(self) -> Tuple[str, ...]:
+        """The DLQ companion of every catalogue topic, in authored order."""
+        return tuple(self.dlq_for(name) for name in self.names)
+
+    def bootstrap_topics(self) -> Tuple[str, ...]:
+        """Every topic the broker must be provisioned with: each being.* topic
+        followed immediately by its ``.dlq`` companion."""
+        provisioned: list = []
+        for name in self.names:
+            provisioned.append(name)
+            provisioned.append(self.dlq_for(name))
+        return tuple(provisioned)

@@ -1,0 +1,35 @@
+# Kafka topic topology for the domain-event backbone (EVT-KAFKA, ADR 0024).
+#
+# This is the single source of truth for the being.* topic catalogue and the
+# broker's provisioning conventions. Topic NAMES, the partition count, and the
+# dead-letter suffix all live here — never in the KafkaEventBus adapter, which
+# learns them from ConfigService.event_topics_policy(). The broker URL is the one
+# Kafka setting that does NOT live here: it is deploy config read from the
+# environment (KAFKA_BOOTSTRAP_SERVERS), the same category as DATABASE_URL.
+#
+# Retuning the topology — renaming a topic, adding partitions when the sim grows
+# past a single being, changing the DLQ suffix — is a change to this file only.
+
+# The being.* topics, one per producing responsibility (queue §"Kafka Topic
+# Design", renamed being.* per ADR 0024 — never npc.*). The topic-bootstrap step
+# creates each of these plus a `<topic>.dlq` companion.
+topics:
+  world: being.world.events                 # world/environment facts (ObjectMoved, LightChanged)
+  perception: being.perception.events       # perception output (ObjectApproached, SuddenSoundDetected)
+  instinct_predictions: being.instinct.predictions  # model inference (InstinctPredictionMade)
+  instinct_reactions: being.instinct.reactions      # thresholded reactions (InstinctReactionTriggered)
+  action: being.action.events               # action execution (ActionStarted, ActionInterrupted)
+  state: being.state.events                 # durable brain-state changes (NeedChanged, EmotionBiasApplied)
+  render: being.render.events               # renderer updates (PlayReactionAnimation)
+  training: being.training.examples         # ML learning examples (InstinctTrainingExampleCreated)
+  telemetry: being.model.telemetry          # model/inference telemetry
+
+# Partitions per topic. Sized for a SINGLE being (queue guardrail): one being is
+# a single ordered stream, so one partition preserves per-being order and needs
+# no scaling. Scaling to many beings raises this here, in config — never in code.
+partitions: 1
+
+# The dead-letter companion of each topic is `<topic><dlq_suffix>`. A message a
+# consumer cannot process (a handler raised, or the bytes would not deserialize)
+# is routed here so a poison event parks to the side instead of wedging the flow.
+dlq_suffix: .dlq

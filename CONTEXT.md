@@ -507,6 +507,69 @@ The discrete instinctive response the instinct model outputs — one of `flinch`
 deliberated behavior the decision layer chooses).
 _Avoid_: action, behavior, move, response-as-action, animation (the render hint is downstream).
 
+**Object motion**:
+An object's position and velocity relative to the being's body over ticks —
+world-truth the being never reads directly; perception derives an approach
+stimulus from it.
+_Avoid_: animation, movement hint (renderer), drift (a need's autonomous change).
+
+**Velocity**:
+An object's rate and direction of positional change per tick (2-D, relative to
+the body at the origin). Its magnitude alone is speed.
+_Avoid_: speed (magnitude only), drift rate.
+
+**Approach**:
+An object closing on the being's body faster than a configured threshold — the
+condition under which an approach stimulus is raised.
+_Avoid_: proximity (static nearness), collision.
+
+**Stimulus (approach stimulus)**:
+The being's perceived fast-sensory reading of an approaching object — the frozen
+ordered 14-scalar kinematic feature vector (ADR 0026), published as an
+`ObjectApproached` domain event. Pre-cognitive input, not a reaction or a
+decision.
+_Avoid_: percept / perceived object (the static properties view), event (the
+transport envelope), reaction (what a later layer does with it).
+
+**Instinct model**:
+The being's second neural network — a tiny feed-forward net mapping an approach
+stimulus's 14 features to the five reaction probabilities plus a reaction
+intensity. Separate model/port/artifact from the outcome predictor (ADR 0026).
+_Avoid_: reflex net, reaction classifier, the outcome predictor.
+
+**Instinct encoder**:
+The pure, torch-free, config-vocab-driven contract turning a stimulus into the
+frozen ordered 14-scalar feature vector (the instinct analogue of the outcome
+FeatureEncoder); config order is the contract.
+_Avoid_: feature builder.
+
+**Reaction intensity**:
+A scalar in [0,1] for how strongly a stimulus provokes a protective reaction — a
+separate regression head of the instinct model, distinct from a label
+probability.
+_Avoid_: confidence, salience, priority.
+
+**Transactional outbox**:
+Staging a domain event as a database row inside the SAME unit of work as the data
+it accompanies, so event and data commit atomically; a separate relay later
+publishes it and projects it into the event log. Solves the Postgres↔broker
+dual-write problem without a cross-system transaction.
+_Avoid_: dual-write, direct publish (publishing inside the DB transaction — the
+thing the outbox prevents).
+
+**Outbox**:
+The append-only queue of domain events staged for publication (one entry = topic
++ envelope); a producer adds to it inside its unit of work, the relay drains it.
+Distinct from the event log (the durable projection of what was published).
+_Avoid_: message queue, broker (the outbox is a DB table, not the transport).
+
+**Event log**:
+The durable, queryable projection of every published domain event, keyed on
+event_id so projection is idempotent (a replayed event stays one row) — audit
+trail and replay source for training.
+_Avoid_: outbox (the pre-publish queue), event bus / topic (the transport),
+interaction event (the outcome-model learning record).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

@@ -817,3 +817,41 @@ class MotionPolicy:
             "current_stability": self._default("current_stability"),
             "prior_prediction_error": self._default("prior_prediction_error"),
         }
+
+
+@dataclass(frozen=True)
+class InstinctRuntimePolicy:
+    """How the instinct CONSUMER (INS-RT, extends ADR 0011's shadow precedent to the
+    instinct layer) turns a per-stimulus prediction into a selected protective
+    REACTION — the reaction-selection tuning the model is forbidden to own (ADR
+    0026: the model only predicts; selection, thresholds, and cooldowns are a
+    downstream concern that can never bypass the safety floor). For each protective
+    reaction label, `thresholds[label]` is the probability at or above which that
+    reaction may fire, and `cooldowns[label]` is how many ticks must elapse after it
+    fires before it may fire again — so one stimulus stream cannot machine-gun the
+    same reaction. `shadow` is the record-only gate: ON (the default), the consumer
+    persists and publishes its prediction/reaction but changes NO simulation
+    behavior (decision / emotion / render untouched); the active integration that
+    reads a `False` here is INS-ACT's, not this slice's. Every number lives in the
+    `reaction:` block of `config/instinct.yaml`, so retuning instinct sensitivity —
+    or flipping it out of shadow — is a config change, never a code one. An empty
+    policy (no config) fires no reaction and stays in shadow: the safe default.
+    """
+
+    thresholds: Mapping[str, float] = field(default_factory=dict)
+    cooldowns: Mapping[str, int] = field(default_factory=dict)
+    shadow: bool = True
+
+    def thresholded_labels(self) -> Tuple[str, ...]:
+        """The reaction labels that CAN fire — those given a threshold, in authored
+        order. A label with no configured threshold is never a candidate."""
+        return tuple(self.thresholds.keys())
+
+    def threshold(self, label: str) -> float:
+        """The probability at or above which `label` fires; an unconfigured label
+        gets an unreachable 1.0 so it never fires by accident."""
+        return float(self.thresholds.get(label, 1.0))
+
+    def cooldown(self, label: str) -> int:
+        """How many ticks must elapse between firings of `label` (0 = no cooldown)."""
+        return int(self.cooldowns.get(label, 0))

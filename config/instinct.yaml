@@ -53,8 +53,29 @@ training:
   seed: 0
   intensity_loss: bce
 
-# Reaction selection — the probability THRESHOLDS at or above which a predicted
-# reaction fires, and per-reaction COOLDOWNS — is a *consumer* concern owned by
-# the later INS-RT ticket (the model only predicts; it never selects an action
-# and never bypasses safety). Left unset here on purpose; INS-RT adds a
-# `reaction:` block and its own typed policy.
+# Reaction SELECTION — the instinct CONSUMER's concern (INS-RT, extends ADR 0011),
+# read into a typed InstinctRuntimePolicy. The model only predicts; it never
+# selects an action and never bypasses the safety floor. Selection turns a
+# per-stimulus prediction into one protective reaction:
+#   - `thresholds` : per label, the probability at or above which that reaction may
+#                    fire (a label with no threshold can never fire). `ignore` has
+#                    none — it is the explicit no-reaction outcome.
+#   - `cooldowns`  : per label, how many TICKS must elapse after a reaction fires
+#                    before it may fire again, so one approach stream cannot
+#                    machine-gun the same reaction.
+#   - `shadow`     : the record-only gate. ON (the default) the consumer persists
+#                    and publishes its prediction/reaction but changes NO simulation
+#                    behavior; flipping it False (active integration) is INS-ACT's,
+#                    not INS-RT's. Retuning any of this is a config change only.
+reaction:
+  shadow: true
+  thresholds:
+    flinch: 0.5
+    freeze: 0.5
+    orient: 0.4
+    withdraw: 0.6
+  cooldowns:
+    flinch: 5
+    freeze: 5
+    orient: 3
+    withdraw: 8

@@ -23,3 +23,16 @@ emotions:
   happy:      { mouth: smile,      eyes: soft,   effects: [],          thought: "" }
   excited:    { mouth: big_open,   eyes: wide,   effects: [bounce],    thought: "!" }
   comforted:  { mouth: smile,      eyes: soft,   effects: [],          thought: "" }
+
+# Presentation draw hints for an ACTIVE instinct reaction (RENDER-RX), keyed by
+# the reaction label the instinct layer selected (INS-ACT). RenderStateService
+# folds these into the frame's `visual` block as `visual.reaction` when
+# state()["reaction"] is present; absent otherwise. Same static-token vocabulary
+# as the emotion hints above — STATIC hints only, no animation/timeline. The
+# renderer prefers this face over the emotion face while a reaction is active and
+# ignores any token it does not recognise.
+reactions:
+  flinch:   { mouth: open,    eyes: wide,   effects: [recoil],          thought: "!" }
+  freeze:   { mouth: neutral, eyes: wide,   effects: [still],           thought: "" }
+  orient:   { mouth: neutral, eyes: wide,   effects: [head_tilt, look], thought: "?" }
+  withdraw: { mouth: frown,   eyes: narrow, effects: [lean_back],       thought: "" }

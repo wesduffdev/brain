@@ -13,7 +13,7 @@
  * the sibling modules.
  */
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
-import type { RenderState } from "./RenderState";
+import { activeFace, reactionOverlayText, type RenderState } from "./RenderState";
 
 const EMOTION_TINT: Record<string, number> = {
   calm: 0x8fd3ff,
@@ -28,6 +28,14 @@ const EMOTION_TINT: Record<string, number> = {
 };
 const DEFAULT_TINT = 0x9aa4bf;
 
+// A static ring colour per instinct reaction (RENDER-RX) — presentation only.
+const REACTION_TINT: Record<string, number> = {
+  flinch: 0xff5c5c,
+  freeze: 0x8fb7ff,
+  orient: 0xffd479,
+  withdraw: 0xc08cff,
+};
+
 function needColor(level: number): number {
   // Low needs run hot (red), satisfied needs run calm (green).
   if (level <= 25) return 0xe06666;
@@ -40,11 +48,15 @@ export class BeingView {
   private readonly needsBox = new Container();
   private readonly labels: Text;
   private readonly thought: Text;
+  private readonly debugOverlay: Text;
+  private debug: boolean;
+  private lastReaction = "";
 
   constructor(
     stage: Container,
     private readonly width = 480,
     private readonly height = 460,
+    debug = false,
   ) {
     const labelStyle = new TextStyle({ fill: 0xe6e9ef, fontSize: 16, fontFamily: "system-ui" });
     this.labels = new Text({ text: "", style: labelStyle });
@@ -58,10 +70,33 @@ export class BeingView {
 
     this.needsBox.position.set(16, 340);
 
+    // Debug overlay: a toggleable readout of the latest instinct reaction
+    // (RENDER-RX). Hidden unless debug is on; persists the last reaction so a
+    // fired reaction stays confirmable after it fades.
+    this.debug = debug;
+    this.debugOverlay = new Text({
+      text: "reaction: none",
+      style: new TextStyle({ fill: 0xffe066, fontSize: 14, fontFamily: "monospace" }),
+    });
+    this.debugOverlay.position.set(16, 12);
+    this.debugOverlay.visible = debug;
+
     stage.addChild(this.face);
     stage.addChild(this.labels);
     stage.addChild(this.thought);
     stage.addChild(this.needsBox);
+    stage.addChild(this.debugOverlay);
+  }
+
+  /** Turn the reaction debug overlay on or off (toggled from a key / query param
+   * in `main`). */
+  setDebug(on: boolean): void {
+    this.debug = on;
+    this.debugOverlay.visible = on;
+  }
+
+  toggleDebug(): void {
+    this.setDebug(!this.debug);
   }
 
   /** Repaint everything from the latest frame. */
@@ -69,6 +104,7 @@ export class BeingView {
     this.drawFace(state);
     this.drawText(state);
     this.drawNeeds(state.needs);
+    this.drawDebug(state);
   }
 
   private drawFace(state: RenderState): void {
@@ -76,18 +112,29 @@ export class BeingView {
     const cy = 150;
     const r = 80;
     const tint = EMOTION_TINT[state.emotion] ?? DEFAULT_TINT;
+    // The face the being shows: an active instinct reaction takes over, else the
+    // emotion's hints (RENDER-RX). The renderer selects; it decides nothing.
+    const face = activeFace(state.visual);
 
     const g = this.face;
     g.clear();
     // Head.
     g.circle(cx, cy, r).fill({ color: tint, alpha: 0.35 }).stroke({ color: tint, width: 3 });
 
-    // Eyes, shaped by the hint (falls back to a plain eye for unknown hints).
-    this.drawEye(g, cx - 28, cy - 15, state.visual.eyes);
-    this.drawEye(g, cx + 28, cy - 15, state.visual.eyes);
+    // An active reaction rings the head in its own colour — a static visual
+    // treatment (no animation/timeline this slice).
+    const reaction = state.visual.reaction;
+    if (reaction) {
+      const ring = REACTION_TINT[reaction.type] ?? DEFAULT_TINT;
+      g.circle(cx, cy, r + 10).stroke({ color: ring, width: 4, alpha: 0.9 });
+    }
 
-    // Mouth, shaped by the hint.
-    this.drawMouth(g, cx, cy + 35, state.visual.mouth);
+    // Eyes, shaped by the active hint (falls back to a plain eye for unknown hints).
+    this.drawEye(g, cx - 28, cy - 15, face.eyes);
+    this.drawEye(g, cx + 28, cy - 15, face.eyes);
+
+    // Mouth, shaped by the active hint.
+    this.drawMouth(g, cx, cy + 35, face.mouth);
   }
 
   private drawEye(g: Graphics, x: number, y: number, hint?: string): void {
@@ -131,6 +178,7 @@ export class BeingView {
   }
 
   private drawText(state: RenderState): void {
+    const face = activeFace(state.visual);
     const parts = [
       `tick ${state.tick}`,
       `emotion: ${state.emotion} (${state.intensity.toFixed(2)})`,
@@ -138,11 +186,20 @@ export class BeingView {
     // pose/action arrive with V0-4 — only shown once present.
     if (state.pose) parts.push(`pose: ${state.pose}`);
     if (state.action) parts.push(`action: ${state.action}`);
-    if (state.visual.effects && state.visual.effects.length > 0) {
-      parts.push(`fx: ${state.visual.effects.join(", ")}`);
-    }
+    // An active instinct reaction is surfaced inline too (RENDER-RX) — visible
+    // confirmation the being reacts, independent of the debug overlay.
+    const reaction = state.visual.reaction;
+    if (reaction) parts.push(`reaction: ${reaction.type} (${reaction.intensity.toFixed(2)})`);
+    if (face.effects.length > 0) parts.push(`fx: ${face.effects.join(", ")}`);
     this.labels.text = parts.join("   ");
-    this.thought.text = state.visual.thought ?? "";
+    this.thought.text = face.thought;
+  }
+
+  private drawDebug(state: RenderState): void {
+    const text = reactionOverlayText(state.visual);
+    if (text) this.lastReaction = text;
+    this.debugOverlay.text = this.lastReaction ? `latest ${this.lastReaction}` : "reaction: none";
+    this.debugOverlay.visible = this.debug;
   }
 
   private drawNeeds(needs: Record<string, number>): void {

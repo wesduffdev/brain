@@ -20,6 +20,10 @@ _HINTS = {
         "curious": {"mouth": "small_open", "eyes": "wide", "effects": ["head_tilt"], "thought": "?"},
         "calm": {"mouth": "neutral", "eyes": "soft", "effects": [], "thought": ""},
     },
+    "reactions": {
+        "flinch": {"mouth": "open", "eyes": "wide", "effects": ["recoil"], "thought": "!"},
+        "freeze": {"mouth": "neutral", "eyes": "wide", "effects": ["still"], "thought": ""},
+    },
 }
 
 
@@ -113,3 +117,34 @@ def test_unknown_future_fields_pass_through_so_the_frame_can_grow():
     frame = _service().render(_domain_state(currentAction="observe"))
 
     assert frame["currentAction"] == "observe"
+
+
+def test_an_active_reaction_maps_into_the_visual_block_from_config():
+    # INS-ACT surfaces state()["reaction"] = {type, intensity}; RenderStateService
+    # presents it as visual.reaction, the config draw hints stamped with the
+    # engine-decided type + intensity (a pure presentation lookup, no psychology).
+    frame = _service().render(_domain_state(reaction={"type": "flinch", "intensity": 0.75}))
+
+    assert frame["visual"]["reaction"] == {
+        "type": "flinch",
+        "intensity": 0.75,
+        "mouth": "open",
+        "eyes": "wide",
+        "effects": ["recoil"],
+        "thought": "!",
+    }
+    # The emotion face still drives the top-level visual hints alongside it.
+    assert frame["visual"]["mouth"] == "small_open"
+
+
+def test_a_reaction_of_an_unknown_label_still_carries_its_type_and_intensity():
+    frame = _service().render(_domain_state(reaction={"type": "orient", "intensity": 0.4}))
+
+    assert frame["visual"]["reaction"]["type"] == "orient"
+    assert frame["visual"]["reaction"]["intensity"] == 0.4
+
+
+def test_no_reaction_leaves_the_visual_block_free_of_a_reaction():
+    frame = _service().render(_domain_state())
+
+    assert "reaction" not in frame["visual"]

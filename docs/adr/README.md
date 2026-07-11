@@ -20,4 +20,5 @@ ADR — supersede it with a new one and update both statuses.
 | [0013](0013-reframed-design-boundary.md) | Reframed design boundary: honest, possibly-lasting harm; no forced recovery | Accepted |
 | [0014](0014-invariant-floor-and-outcome-state-effects.md) | Invariant floor + outcome→state effects: harm is suffered (allowed + felt deltas), not blocked | Accepted |
 | [0015](0015-active-blended-outcome-prediction.md) | Active blended outcome prediction: neural+rule ensemble feeds the decision; safety still gates | Accepted |
-| [0016](0016-built-simulation-handle-runtime-session-lifecycle.md) | `BuiltSimulation` handle: explicit runtime session lifecycle (no leaked idle-in-transaction session) | Accepted |
+| [0016](0016-built-simulation-handle-runtime-session-lifecycle.md) | `BuiltSimulation` handle: explicit runtime session lifecycle (no leaked idle-in-transaction session) | Accepted (commit boundary added by [0017](0017-unit-of-work-transaction-boundary.md)) |
+| [0017](0017-unit-of-work-transaction-boundary.md) | Unit-of-work transaction boundary: repositories stage, the caller commits | Accepted |

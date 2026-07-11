@@ -18,9 +18,22 @@ import pytest
 
 from app.db.migrate import create_all, drop_all
 from app.db.models import Base
-from app.db.session import create_db_engine, session_factory
+from app.db.session import (
+    DatabaseUnavailable,
+    RetryPolicy,
+    create_db_engine,
+    session_factory,
+    wait_for_database,
+)
 from app.domain.being_state import BeingState
 from app.repositories import InMemoryBeingRepository, PostgresBeingRepository
+
+# A short, bounded wait so a just-started Postgres gets a brief chance to accept
+# connections (the same retry the app/migration use), without making the suite
+# hang for the full production budget when there is simply no DB.
+_PROBE_POLICY = RetryPolicy(
+    timeout_seconds=5, initial_backoff_seconds=0.25, max_backoff_seconds=1, multiplier=2
+)
 
 
 def _reachable_postgres_or_skip():
@@ -28,15 +41,18 @@ def _reachable_postgres_or_skip():
 
     Never fakes a DB: if DATABASE_URL is unset or the server is unreachable
     (the case in this sandbox, where host->container forwarding is broken), the
-    live variant is skipped rather than substituted."""
+    live variant is skipped rather than substituted. A reachable-but-still-booting
+    Postgres is waited for briefly (bounded backoff) before we give up."""
     url = os.environ.get("DATABASE_URL")
     if not url:
         pytest.skip("DATABASE_URL not set — skipping live Postgres round-trip")
+    engine = create_db_engine(url, connect_args={"connect_timeout": 2})
     try:
-        engine = create_db_engine(url, connect_args={"connect_timeout": 2})
-        with engine.connect():
-            pass
-    except Exception as exc:  # noqa: BLE001 — any connect failure means "skip, don't fake"
+        wait_for_database(engine, policy=_PROBE_POLICY)
+    except DatabaseUnavailable as exc:
+        reason = type(exc.__cause__).__name__ if exc.__cause__ else "timeout"
+        pytest.skip(f"Postgres not reachable at DATABASE_URL ({reason}) — skipping")
+    except Exception as exc:  # noqa: BLE001 — any other connect problem means "skip, don't fake"
         pytest.skip(f"Postgres not reachable at DATABASE_URL ({type(exc).__name__}) — skipping")
     return engine
 

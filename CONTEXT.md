@@ -299,6 +299,51 @@ subtracted from an action's utility when active prediction is on, so the being
 avoids harm it foresees rather than only harm it has already suffered.
 _Avoid_: risk score, penalty, expected loss.
 
+**Curiosity**:
+The being's config-weighted drive to explore an object it cannot yet predict —
+rises with novelty, uncertainty, and recent surprise; falls with familiarity.
+_Avoid_: interest, drive, exploration bonus.
+
+**Surprise**:
+How far an action's observed outcome diverged from the expected outcome (Jaccard
+distance of the two outcome sets); decays over ticks.
+_Avoid_: error, shock, mismatch, prediction error (that is the model's).
+
+**Novelty / Familiarity**:
+Novelty = the share of an object's perceived properties never encountered;
+familiarity = how mastered its properties are (rises as the being acts on them,
+pulling curiosity down).
+_Avoid_: newness, recognition.
+
+**Exploration policy**:
+How curiosity (and anticipated discomfort) adjust an action's decision score,
+within the safety floor.
+_Avoid_: exploration strategy, curiosity engine.
+
+**Scenario**:
+An authored experiment file that seeds the room with objects, runs the being N
+ticks, and defines a learning target + success condition — a repeatable "watch
+it learn".
+_Avoid_: test fixture, level, episode.
+
+**Learning target**:
+The concept (perceived feature + action + observed outcome) whose confidence a
+scenario tracks.
+_Avoid_: goal, objective.
+
+**Learning metric (regression metric)**:
+The single measured quantity a scenario reports before vs after a run — here, a
+concept's confidence.
+_Avoid_: score, KPI.
+
+**Success condition**:
+The config-driven floor the metric's rise (delta) must meet for a run to pass.
+_Avoid_: threshold (generic), assertion.
+
+**Scenario result**:
+The verdict of one run — before/after/delta/threshold and whether it passed.
+_Avoid_: report, outcome.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

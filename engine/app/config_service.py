@@ -18,6 +18,7 @@ from app.policies import (
     CommandSpec,
     EmotionRule,
     EnvironmentPolicy,
+    MemoryPriorityPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
@@ -48,6 +49,7 @@ class ConfigService:
         "actions",
         "safety",
         "outcome_effects",
+        "learning_rates",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -96,6 +98,7 @@ class ConfigService:
         actions: Optional[Mapping] = None,
         safety: Optional[Mapping] = None,
         outcome_effects: Optional[Mapping] = None,
+        learning_rates: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -111,6 +114,7 @@ class ConfigService:
             actions=actions,
             safety=safety,
             outcome_effects=outcome_effects,
+            learning_rates=learning_rates,
         )
 
     @classmethod
@@ -135,6 +139,7 @@ class ConfigService:
             "actions": "actions.yaml",
             "safety": "safety_rules.yaml",
             "outcome_effects": "outcome_effects.yaml",
+            "learning_rates": "learning_rates.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -408,6 +413,27 @@ class ConfigService:
                 str(need): int(delta) for need, delta in (deltas or {}).items()
             }
         return OutcomeEffectPolicy(effects=effects)
+
+    # --- learning: memory salience ---------------------------------------
+
+    def memory_priority_policy(self) -> MemoryPriorityPolicy:
+        """How the being scores the PRIORITY (salience) of a memory (card v1),
+        from the `memory.priority` block of `learning_rates.yaml`. Surprise (the
+        prediction error) and emotional intensity weight the score; the
+        per-emotion intensity table says how strongly each emotion is felt.
+        Absent config yields the neutral default (``priority == prediction_error``),
+        so a sim with no learning-rates file still forms memories. Retuning what
+        the being holds onto is a config change only."""
+        priority = (self._learning_rates.get("memory", {}) or {}).get("priority", {}) or {}
+        return MemoryPriorityPolicy(
+            baseline=float(priority.get("baseline", 0.0)),
+            prediction_error_weight=float(priority.get("prediction_error_weight", 1.0)),
+            emotion_intensity_weight=float(priority.get("emotion_intensity_weight", 1.0)),
+            emotion_intensity={
+                str(emotion): float(value)
+                for emotion, value in (priority.get("emotion_intensity", {}) or {}).items()
+            },
+        )
 
     # --- render / commands ------------------------------------------------
 

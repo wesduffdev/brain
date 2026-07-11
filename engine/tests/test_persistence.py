@@ -121,8 +121,9 @@ def test_a_fetched_being_does_not_alias_the_store(being_repo):
     assert repo.get("being_001").needs["hunger"] == 20
 
 
-def test_the_migration_defines_the_six_v0_tables():
-    # The schema seam declares exactly the v0 tables from BRIEF §15.
+def test_the_migration_defines_the_schema_tables():
+    # The schema seam declares exactly the v0 tables from BRIEF §15, plus the
+    # `memories` table the cognitive loop adds (card v1).
     assert set(Base.metadata.tables) == {
         "beings",
         "objects",
@@ -130,6 +131,7 @@ def test_the_migration_defines_the_six_v0_tables():
         "training_examples",
         "prediction_records",
         "model_runs",
+        "memories",
     }
 
 
@@ -151,4 +153,5 @@ def test_the_migration_creates_the_v0_tables_in_a_database():
         "training_examples",
         "prediction_records",
         "model_runs",
+        "memories",
     } <= tables

@@ -22,6 +22,7 @@ from typing import ContextManager, List, Optional, Protocol
 
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
@@ -107,4 +108,21 @@ class ModelRunRepository(Protocol):
 
     def all(self) -> List[ModelRun]:
         """Every recorded model run, oldest first."""
+        ...
+
+
+class MemoryRepository(Protocol):
+    """Stores the being's durable memories (append-only) and reads them back
+    (card v1). One memory is formed per interaction and staged inside that
+    interaction's unit of work, so it commits atomically with the
+    interaction_event it links to (ADR 0017). Like the other learned-fact ports,
+    the in-memory fake (`app.repositories`) is the seam the behavior suite drives;
+    a Postgres-backed adapter onto the `memories` table follows for the runtime."""
+
+    def add(self, memory: Memory) -> None:
+        """Append ``memory`` to the store."""
+        ...
+
+    def all(self) -> List[Memory]:
+        """Every stored memory, oldest first."""
         ...

@@ -22,6 +22,7 @@ from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredi
 from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
     InteractionEventRepository,
+    MemoryRepository,
     PredictionRecordRepository,
     TrainingExampleRepository,
     UnitOfWork,
@@ -30,6 +31,7 @@ from app.repositories import InMemoryPredictionRecordRepository
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
+from app.services.memory_service import MemoryService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
 from app.services.prediction_service import PredictionService
@@ -47,6 +49,7 @@ class Simulation:
         training_repo: Optional[TrainingExampleRepository] = None,
         predictor: Optional[PredictorPort] = None,
         prediction_repository: Optional[PredictionRecordRepository] = None,
+        memory_repository: Optional[MemoryRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
@@ -56,6 +59,16 @@ class Simulation:
         # training examples are actually derived.
         self._event_repo = event_repo
         self._training_repo = training_repo
+        # Memory seam (card v1): when a memory port is injected, every interaction
+        # forms one durable Memory — an object snapshot + outcome + emotion +
+        # prediction error, scored with a config-driven salience. Staged inside
+        # the interaction's unit of work below, so it commits with the event.
+        self._memory_repo = memory_repository
+        self._memory = (
+            MemoryService(memory_repository, config.memory_priority_policy())
+            if memory_repository is not None
+            else None
+        )
         # Transaction boundary (ADR 0017): one interaction's writes — its event,
         # the derived training example, the shadow prediction — commit together as
         # one unit. Defaults to the no-op in-memory unit, so a sim with no database
@@ -187,17 +200,26 @@ class Simulation:
         )
         self._events.append(event)
         # One unit of work per interaction (ADR 0017): the event, its derived
-        # training example, and the shadow prediction record all persist together
-        # or not at all. Shadow-mode recording is inside the unit but stays purely
-        # observational — nothing here reads the prediction back into the being.
+        # training example, the shadow prediction record, and the durable memory
+        # all persist together or not at all. Shadow-mode recording is inside the
+        # unit but stays purely observational — nothing here reads the prediction
+        # back into the being; forming the memory is likewise a side effect of the
+        # interaction, never an input to this tick's decision.
         with self._uow.begin():
             self._record(event, true_props, policy)
             # The model's action vocabulary is object affordances, so an action is
             # encoded by its affordance (`observe` -> `look`); a free action has
-            # none.
-            if self._prediction is not None:
+            # none. Capture the prediction so the memory can carry its error.
+            prediction = (
                 self._prediction.record(
                     event, properties=perceived_props, action=policy.affordance or ""
+                )
+                if self._prediction is not None
+                else None
+            )
+            if self._memory is not None:
+                self._memory.remember(
+                    event, perceived_properties=perceived_props, prediction=prediction
                 )
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
@@ -262,6 +284,15 @@ class Simulation:
         if self._prediction_repo is None:
             return []
         return [record.snapshot() for record in self._prediction_repo.all()]
+
+    def memories(self) -> List[Dict]:
+        """The durable memories the being has formed, oldest first, as plain
+        snapshots — each an object snapshot (as perceived), the action, expected
+        vs. observed outcome, emotion before/after, prediction error, and a
+        config-driven priority (card v1). Empty when no memory port is injected."""
+        if self._memory_repo is None:
+            return []
+        return [memory.snapshot() for memory in self._memory_repo.all()]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

@@ -28,6 +28,7 @@ from app.db import models
 from app.db.models import Being
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
+from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
@@ -231,6 +232,69 @@ class PostgresTrainingExampleRepository:
                 event_id=row.event_id,
                 input_features=tuple(row.input_features or ()),
                 output_labels=tuple(row.output_labels or ()),
+            )
+            for row in rows
+        ]
+
+
+class InMemoryMemoryRepository:
+    """A durable-memory store held in a list — the seam the behavior suite
+    drives, no database required. Memories are immutable value objects
+    (`Memory`), so it stores and returns them directly."""
+
+    def __init__(self) -> None:
+        self._memories: List[Memory] = []
+
+    def add(self, memory: Memory) -> None:
+        self._memories.append(memory)
+
+    def all(self) -> List[Memory]:
+        return list(self._memories)
+
+
+class PostgresMemoryRepository:
+    """A durable-memory store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only, like the event/example/prediction adapters: each interaction
+    stages one row on the `memories` table (card v1), and ``all`` reads them back
+    oldest-first as immutable `Memory` value objects. The row links to the
+    interaction it was formed from by ``event_id`` (``being:tick``)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, memory: Memory) -> None:
+        self._session.add(
+            models.Memory(
+                event_id=memory.event_id,
+                being_id=memory.being_id,
+                tick=memory.tick,
+                object_id=memory.object_id,
+                action=memory.action,
+                perceived_properties=list(memory.perceived_properties),
+                expected_outcome=list(memory.expected_outcome),
+                observed_outcome=list(memory.observed_outcome),
+                emotion_before=memory.emotion_before,
+                emotion_after=memory.emotion_after,
+                prediction_error=memory.prediction_error,
+                priority=memory.priority,
+            )
+        )
+
+    def all(self) -> List[Memory]:
+        rows = self._session.query(models.Memory).order_by(models.Memory.id).all()
+        return [
+            Memory(
+                being_id=row.being_id,
+                tick=row.tick,
+                object_id=row.object_id,
+                action=row.action,
+                perceived_properties=tuple(row.perceived_properties or ()),
+                expected_outcome=tuple(row.expected_outcome or ()),
+                observed_outcome=tuple(row.observed_outcome or ()),
+                emotion_before=row.emotion_before,
+                emotion_after=row.emotion_after,
+                prediction_error=row.prediction_error or 0.0,
+                priority=row.priority or 0.0,
             )
             for row in rows
         ]

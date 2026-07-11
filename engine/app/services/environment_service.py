@@ -15,14 +15,10 @@ the single source of truth for a need's floor/ceiling stays `tick_rates.yaml`.
 """
 from __future__ import annotations
 
-from typing import Dict, Mapping, Tuple
+from typing import Dict, Mapping
 
 from app.domain.room import Room
-from app.policies import EnvironmentPolicy, NeedTickPolicy
-
-
-def _clamp(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
+from app.policies import EnvironmentPolicy, NeedBands, NeedTickPolicy
 
 
 class EnvironmentService:
@@ -32,9 +28,10 @@ class EnvironmentService:
         need_policies: Mapping[str, NeedTickPolicy],
     ):
         self._policy = policy
-        self._bands: Dict[str, Tuple[int, int]] = {
-            name: (p.min_value, p.max_value) for name, p in need_policies.items()
-        }
+        # The need bands come from the need policies — the single source of truth
+        # for a need's floor/ceiling — and are the one clamp authority all
+        # need-moving forces share.
+        self._bands = NeedBands.from_policies(need_policies)
 
     def apply(self, needs: Mapping[str, int], room: Room, tick: int) -> Dict[str, int]:
         """Return the needs after this tick's environmental push. Pure: it copies
@@ -54,7 +51,5 @@ class EnvironmentService:
         for need_name, delta in deltas.items():
             if need_name not in updated or delta == 0:
                 continue
-            moved = updated[need_name] + delta
-            band = self._bands.get(need_name)
-            updated[need_name] = _clamp(moved, band[0], band[1]) if band else moved
+            updated[need_name] = self._bands.clamp(need_name, updated[need_name] + delta)
         return updated

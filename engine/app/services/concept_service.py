@@ -55,11 +55,18 @@ class ConceptService:
         action: str,
         perceived_properties: Sequence[str],
         observed_outcomes: Sequence[str],
+        intensity: float = 0.0,
     ) -> List[ConceptSchema]:
         """Learn from one interaction: for each (perceived property x observed
         outcome), strengthen the matching concept and record its evidence. Returns
         the concepts this interaction formed or reinforced (empty when the action
-        produced no outcome)."""
+        produced no outcome).
+
+        `intensity` is how INTENSELY the being felt this interaction — its salience
+        (emotional intensity / prediction error), the same signal that scores a
+        memory's priority. A high-intensity interaction reinforces its concepts more
+        (card AVERSIVE-LEARN), so one emotionally-searing burn is learned in nearly
+        one shot; the default 0.0 reproduces the pre-slice, intensity-blind curve."""
         event_id = f"{being_id}:{tick}"
         touched: List[ConceptSchema] = []
         for feature in _ordered_unique(perceived_properties):
@@ -71,7 +78,8 @@ class ConceptService:
                 concept = replace(
                     probe,
                     confidence=self._policy.reinforce(
-                        existing.confidence if existing is not None else None
+                        existing.confidence if existing is not None else None,
+                        intensity=intensity,
                     ),
                     evidence_count=(existing.evidence_count if existing is not None else 0) + 1,
                 )

@@ -28,6 +28,24 @@ class BeliefService:
         self._concepts = concepts
         self._repository = repository
 
+    def anticipated(
+        self, *, being_id: str, perceived_properties: Sequence[str], action: str
+    ) -> Dict[str, float]:
+        """What the being currently EXPECTS `action` on an object with these
+        perceived properties to produce — a map ``outcome -> confidence``, each at
+        the strongest supporting concept's confidence (the being goes with what it
+        is surest of). READ-ONLY: it forms no persistent belief, so the decision can
+        consult the being's expectation every tick without polluting the belief log
+        — `believe` is the write path, and reads this same expectation. Empty when
+        no concept bears on the object."""
+        strongest: Dict[str, float] = {}
+        for concept in self._concepts.concepts_for(
+            being_id=being_id, perceived_properties=perceived_properties, action=action
+        ):
+            if concept.confidence > strongest.get(concept.outcome, -1.0):
+                strongest[concept.outcome] = concept.confidence
+        return strongest
+
     def believe(
         self,
         *,
@@ -41,15 +59,10 @@ class BeliefService:
         inherited from the concepts its `perceived_properties` bear on. One belief
         per predicted outcome, each at the strongest supporting concept's
         confidence. Returns the beliefs formed (empty when no concept applies)."""
-        strongest: Dict[str, float] = {}
-        for concept in self._concepts.concepts_for(
-            being_id=being_id, perceived_properties=perceived_properties, action=action
-        ):
-            if concept.confidence > strongest.get(concept.outcome, -1.0):
-                strongest[concept.outcome] = concept.confidence
-
         beliefs: List[Belief] = []
-        for outcome, confidence in strongest.items():
+        for outcome, confidence in self.anticipated(
+            being_id=being_id, perceived_properties=perceived_properties, action=action
+        ).items():
             belief = Belief(
                 being_id=being_id,
                 tick=tick,

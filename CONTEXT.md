@@ -799,6 +799,29 @@ can say WHERE a fact was read. Every retrieved passage is attributable to the
 document that was ingested.
 _Avoid_: reference, provenance, footnote, source (bare).
 
+**Reading QA**:
+The being answering a question about what it has READ — retrieving the relevant
+passages, grounding its answer in them, and citing the source — and declining
+honestly when it has read nothing relevant, optionally adding a clearly-labelled
+base-knowledge answer. Distinct from a subject query (what it KNOWS/FEELS about a
+perceived property, from learned concepts) and from self-report (what it has DONE).
+_Avoid_: chat, conversation (multi-turn is later), search, retrieval (the store step), Q&A bot.
+
+**Grounded answer**:
+An answer built ONLY from the passages the being actually retrieved from what it
+has read, plus the question — never the model's free invention — and carrying the
+source document it drew on. When nothing read is relevant the being says so rather
+than forcing one. Distinct from a self-report, which is grounded in the being's own
+lived memories rather than read documents.
+_Avoid_: response, generation, completion, RAG answer, hallucination.
+
+**Base knowledge**:
+What the being knows from its underlying language model itself, independent of any
+document you have given it to read. A reading answer keeps base knowledge separate
+from — and labelled distinctly from — what the being READ, so the two are never
+conflated (the learn-and-grow stance: transparent, not blinded).
+_Avoid_: general knowledge (bare), prior, training data, world knowledge, the base model (the artifact).
+
 **Fine-tune**:
 To adapt the being's OWN open base model to what it has read by training a small
 LoRA adapter on the ingested text — host-native on the Mac's GPU. The trained

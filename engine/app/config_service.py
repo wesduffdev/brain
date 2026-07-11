@@ -41,6 +41,7 @@ from app.policies import (
     PreferencePolicy,
     ReactionResponsePolicy,
     ReactionTemperamentPolicy,
+    ReadingQAPolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -764,6 +765,36 @@ class ConfigService:
             dim=int(retrieval.get("dim", defaults.dim)),
             k=int(retrieval.get("k", defaults.k)),
             model=str(retrieval.get("model", defaults.model)),
+        )
+
+    def reading_qa_policy(self) -> ReadingQAPolicy:
+        """How the being answers a question about what it has READ (reading R4, ADR
+        0039), from the `reading_qa:` block of ``config/language.yaml``: how many
+        passages a query retrieves (`k`) and the `min_relevance` below which a
+        passage is not counted (so an unmatched query declines honestly), the
+        `unread_response` line (`{topic}` slot) and its `topic_markers`, whether an
+        unread answer also blends a labelled base-knowledge answer
+        (`blend_base_knowledge`), and the `read_label` / `base_label` / `cite_template`
+        the answer is composed from. Absent config yields the safe defaults, so
+        retuning how the being answers -- and how honestly it declines the unread --
+        is a config change only. Distinct from `knowledge_retrieval_policy` (which
+        tunes the STORE; this tunes the ANSWER)."""
+        block = self._language.get("reading_qa", {}) or {}
+        defaults = ReadingQAPolicy()
+        return ReadingQAPolicy(
+            k=int(block.get("k", defaults.k)),
+            min_relevance=float(block.get("min_relevance", defaults.min_relevance)),
+            unread_response=str(block.get("unread_response", defaults.unread_response)),
+            blend_base_knowledge=bool(
+                block.get("blend_base_knowledge", defaults.blend_base_knowledge)
+            ),
+            read_label=str(block.get("read_label", defaults.read_label)),
+            base_label=str(block.get("base_label", defaults.base_label)),
+            cite_template=str(block.get("cite_template", defaults.cite_template)),
+            topic_markers=tuple(
+                str(m).lower()
+                for m in (block.get("topic_markers", list(defaults.topic_markers)) or [])
+            ),
         )
 
     def local_model_policy(self) -> LocalModelPolicy:

@@ -34,17 +34,21 @@ from fastapi import (
 from app import auth
 from app.auth import AuthConfig, require_auth
 from app.adapters.narrator import build_narrator
+from app.language.embedding import build_embedder
+from app.language.knowledge_store import KnowledgeStore
 from app.adapters.voice import build_voice
 from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.ports.voice import VoicePort
 from app.policies import VoicePolicy
+from app.repositories import InMemoryKnowledgeChunkRepository
 from app.services.command_service import CommandError, CommandService
 from app.services.memory_summary_service import MemorySummaryService
 from app.services.narration_service import NarrationService
 from app.services.render_state_service import RenderStateService
 from app.services.self_report_service import SelfReportService
+from app.services.reading_qa_service import ReadingQAService
 from app.services.subject_report_service import SubjectReportService
 from app.services.subject_resolver import SubjectResolver
 from app.simulation import Simulation
@@ -62,6 +66,7 @@ def create_app(
     render_state_service: Optional[RenderStateService] = None,
     command_service: Optional[CommandService] = None,
     self_report_service: Optional[SelfReportService] = None,
+    reading_qa_service: Optional[ReadingQAService] = None,
     voice: Optional[VoicePort] = None,
 ) -> FastAPI:
     """Build the app around a being, a clock, and the render/command services.
@@ -84,6 +89,7 @@ def create_app(
         or render_state_service is None
         or command_service is None
         or self_report_service is None
+        or reading_qa_service is None
         or voice is None
     ):
         config = ConfigService.from_files(
@@ -108,6 +114,11 @@ def create_app(
             # The grounded self-report surface (S1, ADR 0032): a narrator behind
             # the LanguageModelPort renders the being's own memories into prose.
             self_report_service = _build_self_report(config)
+        if reading_qa_service is None:
+            # The reading-QA surface (reading R4, ADR 0039): grounded, cited
+            # answers from the being's growing knowledge store. A fresh store is
+            # empty, so a being that has read nothing declines honestly.
+            reading_qa_service = _build_reading_qa(config)
         if voice is None:
             # The voicebox (S4, ADR 0035): the VoicePort engine is selected from
             # config, and the espeak-ng adapter degrades to a no-op on a host with
@@ -173,6 +184,17 @@ def create_app(
             explanations=_readback(simulation, "explanations"),
         )
         return {"query": query, "report": report}
+
+    @app.post("/ask/reading", dependencies=[Depends(guard)])
+    async def post_ask_reading(payload: dict = Body(...)):
+        # Answer a natural-language question about what the being has READ,
+        # grounded in the retrieved passages and CITING the source document; an
+        # unread topic is declined honestly (reading R4, ADR 0039). Read-only:
+        # touches the knowledge store + the model, never the being (ADR 0022).
+        # Behind the same always-on JWT guard as /state (ADR 0005).
+        query = str(payload.get("query", ""))
+        answer = reading_qa_service.answer(query)
+        return {"query": query, "answer": answer}
 
     @app.post("/speak", dependencies=[Depends(guard)])
     async def post_speak(payload: dict = Body(...)):
@@ -250,6 +272,25 @@ def _build_self_report(config: ConfigService) -> SelfReportService:
         recent_count=policy.recent_count,
         subject=subject,
     )
+
+
+def _build_reading_qa(config: ConfigService) -> ReadingQAService:
+    """Wire the reading-QA surface from config (reading R4, ADR 0039). The being
+    retrieves from its growing knowledge store (the R3 `KnowledgeStore` over the
+    config-selected embedder; in-memory by default — a fresh being has read
+    nothing, so it honestly declines until documents are ingested). A grounded
+    answer is phrased by a GENERATIVE narrator when one is configured
+    (`narrator.kind` == fake/claude/local, reusing `build_narrator`); with the
+    offline template default there is no generative model, so the answer is
+    EXTRACTIVE — it quotes what it read — and grounding + citation hold with no
+    model call. Read-only throughout (ADR 0022)."""
+    store = KnowledgeStore(
+        embedder=build_embedder(config.knowledge_retrieval_policy()),
+        repository=InMemoryKnowledgeChunkRepository(),
+    )
+    kind = config.self_report_policy().narrator_kind
+    model = None if kind in ("deterministic", "template") else build_narrator(config)
+    return ReadingQAService(store, model=model, policy=config.reading_qa_policy())
 
 
 def _readback(simulation, name: str):

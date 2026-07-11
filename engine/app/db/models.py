@@ -1,6 +1,6 @@
 """SQLAlchemy models — the v0 database schema (BRIEF §15).
 
-Six tables, kept deliberately small, hold the simulation's dynamic and learned
+Seven tables, kept deliberately small, hold the simulation's dynamic and learned
 data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 
 - ``beings``              — being identity and current snapshot.
@@ -9,6 +9,7 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``training_examples``   — model-ready rows derived from events.
 - ``prediction_records``  — model predictions, for comparison against actuals.
 - ``model_runs``          — training-run metadata.
+- ``memories``            — durable per-interaction memories with a salience.
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -132,3 +133,31 @@ class ModelRun(Base):
     notes = Column(String, nullable=True)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class Memory(Base):
+    """A durable memory of one interaction (card v1): the object as the being
+    PERCEIVED it, the action, expected vs. observed outcome, emotion before/after,
+    the prediction error the moment carried, and a config-driven ``priority``
+    (salience). ``event_id`` links back to the interaction_event it was formed
+    from (``being:tick``); the row is written inside that interaction's unit of
+    work so it commits atomically with the event (ADR 0017). ``perceived_properties``
+    is the being's view of the object — there is deliberately no developer_label
+    (ADR 0002)."""
+
+    __tablename__ = "memories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, ForeignKey("interaction_events.event_id"), nullable=True, index=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    object_id = Column(String, ForeignKey("objects.object_id"), nullable=True, index=True)
+    action = Column(String, nullable=True)
+    perceived_properties = Column(JSON, nullable=False, default=list)
+    expected_outcome = Column(JSON, nullable=False, default=list)
+    observed_outcome = Column(JSON, nullable=False, default=list)
+    emotion_before = Column(String, nullable=True)
+    emotion_after = Column(String, nullable=True)
+    prediction_error = Column(Float, nullable=True)
+    priority = Column(Float, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -266,6 +266,45 @@ class PredictionBlendPolicy:
 
 
 @dataclass(frozen=True)
+class MemoryPriorityPolicy:
+    """How a Memory's PRIORITY (salience) is scored (card v1). Salience is a
+    weighted sum of two signals the being cares about most:
+
+        priority = baseline
+                 + prediction_error_weight * prediction_error   (how *surprised* it was)
+                 + emotion_intensity_weight * emotional_intensity (how much it was *felt*)
+
+    `emotional_intensity` is the strongest of the emotion-before / emotion-after
+    intensities, read from the `emotion_intensity` table (an emotion not listed
+    contributes none). Every weight and every intensity lives in
+    `config/learning_rates.yaml`, so retuning what the being holds onto — making
+    it dwell more on surprise, or more on fear — is a config change, never a code
+    one. An empty policy (no config) falls back to "priority == prediction_error".
+    """
+
+    baseline: float = 0.0
+    prediction_error_weight: float = 1.0
+    emotion_intensity_weight: float = 1.0
+    emotion_intensity: Mapping[str, float] = field(default_factory=dict)
+
+    def priority_for(
+        self, *, prediction_error: float, emotion_before: str, emotion_after: str
+    ) -> float:
+        """The salience of an interaction with this prediction error and these
+        emotions. Monotonic in both the error and the felt emotional intensity —
+        the more wrong or the more affected, the higher the priority."""
+        intensity = max(
+            float(self.emotion_intensity.get(emotion_before, 0.0)),
+            float(self.emotion_intensity.get(emotion_after, 0.0)),
+        )
+        return (
+            float(self.baseline)
+            + float(self.prediction_error_weight) * float(prediction_error)
+            + float(self.emotion_intensity_weight) * intensity
+        )
+
+
+@dataclass(frozen=True)
 class RenderHintsPolicy:
     """Resolved presentation hints for the render frame (ADR 0004): the neutral
     `intensity` to report until the emotion model carries one, the fallback

@@ -127,38 +127,73 @@ unreachable they **skip cleanly** with a reason — the database is never faked:
 DATABASE_URL=postgresql+psycopg://sim:sim@localhost:5432/being_sim make test
 ```
 
-## Roadmap (vertical slices)
+## Roadmap (single source of truth)
 
-Delivered in parallel **waves** (see
-[`docs/v0_execution_plan.md`](docs/v0_execution_plan.md)), so completion is not
-strictly top-to-bottom.
+The ordered, status-bearing roadmap. One version scheme
+([ADR 0018](docs/adr/0018-canonical-v1-v14-roadmap.md)): **v0** is the Minimal
+Learning Loop, delivered as slices `V0-1…V0-11` + `V0-SEC`; everything after it
+is the canonical **`v1…v14`** capability roadmap. Delivered in parallel **waves**
+(sequenced by dependency, not version number), so completion is not strictly
+top-to-bottom. Per-version goals, exit criteria, and wave sequencing live in
+[`docs/post_v0_execution_plan.md`](docs/post_v0_execution_plan.md); the live
+per-wave board/dispatch state in
+[`docs/next_loop_execution_plan.md`](docs/next_loop_execution_plan.md). Each
+slice is test-first and ends in something observable.
 
-1. **Minimal being state** — needs drift from config, emotion derived. ✅
-2. **Objects + a room; the being perceives what is near.** ✅
-3. Environmental conditions (light/dark, sound, temperature) that move
-   contextual needs like safety — this is what makes `scared`/fear fire.
-4. **Actions + a simple rule/utility decision (generic object interactions);
-   a safety *invariant floor* blocks only simulation-breaking actions, while
-   recoverable-but-harmful ones (touching something hot) are allowed and land
-   felt consequences the being learns from** ([ADR 0014](docs/adr/0014-invariant-floor-and-outcome-state-effects.md)). ✅
-5. **FastAPI engine: REST `/state` + WebSocket tick stream; `docker-compose.yml`
-   (engine + postgres).** ✅
-6. Postgres persistence: interaction events + training examples.
-7. PyTorch outcome predictor + `ml-trainer` sidecar, running in shadow mode.
-   *(Trainer landed: a multi-label net trains via `ml-trainer` / `make train` on
-   the real stored `training_examples` when a database holds them, and on a
-   config-derived synthetic seed set otherwise; each run records a `model_runs`
-   row. The feature/label encoding contract is pinned in
-   [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
-   Shadow-mode inference + prediction/actual comparison come next.)*
-8. **PixiJS renderer showing the being's current emotion/needs; sends a
-   `player_command` back.** ✅ *(the wire contract is pinned in
-   [ADR 0004](docs/adr/0004-render-state-contract.md); how the renderer
-   authenticates in [ADR 0010](docs/adr/0010-renderer-authentication.md).
-   `pose`/`action` render once V0-4 lands.)*
+### v0 — Minimal Learning Loop ✅ (`V0-1…V0-11` + `V0-SEC`, all done)
 
-Each slice is test-first and ends in something observable. See
-[`docs/adr/`](docs/adr/) for the decisions behind the structure and
+- **V0-1** — Minimal being state: needs drift from config, emotion derived.
+- **V0-2** — Objects + a room; the being perceives what is near.
+- **V0-3** — Environmental conditions (light/dark, sound, temperature) move
+  contextual needs like safety — this is what makes `scared`/fear fire
+  ([ADR 0006](docs/adr/0006-environmental-conditions-to-contextual-need-seam.md)).
+- **V0-4** — Actions + a simple rule/utility decision; a safety *invariant floor*
+  blocks only simulation-breaking actions, while recoverable-but-harmful ones
+  (touching something hot) are allowed and land felt consequences the being
+  learns from
+  ([ADR 0014](docs/adr/0014-invariant-floor-and-outcome-state-effects.md)).
+- **V0-5** — Docker Compose skeleton (engine + postgres) + engine image.
+- **V0-6** — FastAPI engine: REST `/state` + WebSocket tick stream.
+- **V0-7** — Postgres persistence: interaction events + training examples
+  ([ADR 0007](docs/adr/0007-persistence-repository-port-and-schema-seam.md)).
+- **V0-8** — PyTorch outcome predictor + `ml-trainer` sidecar; the feature/label
+  encoding contract is pinned in
+  [ADR 0008](docs/adr/0008-outcome-predictor-and-feature-encoding.md).
+- **V0-9** — Prediction shadow mode: the model records predictions beside actual
+  outcomes without changing behavior
+  ([ADR 0011](docs/adr/0011-prediction-shadow-mode-and-predictor-port.md)).
+- **V0-10 / V0-10a** — Render-state contract + `RenderStateService`
+  ([ADR 0004](docs/adr/0004-render-state-contract.md)).
+- **V0-11** — PixiJS renderer showing the being's emotion/needs; sends a
+  `player_command` back
+  ([ADR 0010](docs/adr/0010-renderer-authentication.md)).
+- **V0-SEC** — Always-on JWT API authentication
+  ([ADR 0005](docs/adr/0005-api-authentication.md)).
+
+### post-v0 — the canonical `v1…v14` capability roadmap
+
+Sequenced by dependency in waves; a `vN` label is a capability, not a build slot.
+Per-version detail and current per-wave status are in the execution plans linked
+above (this list does not restate them).
+
+- **v1** — Stable cognitive loop: persisted memory records
+  (perception→action→predict→error→memory).
+- **v2** — Object concepts and belief formation.
+- **v3** — PyTorch outcome prediction becomes active, blended into the decision;
+  safety still gates
+  ([ADR 0015](docs/adr/0015-active-blended-outcome-prediction.md)).
+- **v4** — Curiosity, surprise, and exploration policy.
+- **v5** — Environment awareness *(delivered early as V0-3)*.
+- **v6** — Memory retrieval and long-term trait drift.
+- **v7** — Graph-like concept network (Postgres node/edge tables).
+- **v8** — Model-service sidecar and multi-model inference.
+- **v9** — Natural language layer (interpret + narrate, never controls the sim).
+- **v10** — Developmental progression and scenario system.
+- **v11–v14** *(optional)* — vector memory search (pgvector) · reinforcement-
+  learning sandbox · multi-shell simulation · production runtime split
+  (observability).
+
+See [`docs/adr/`](docs/adr/) for the decisions behind the structure and
 [`CLAUDE.md`](CLAUDE.md) for how work is done here.
 
 ## How we work (governance index)

@@ -23,3 +23,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0016](0016-built-simulation-handle-runtime-session-lifecycle.md) | `BuiltSimulation` handle: explicit runtime session lifecycle (no leaked idle-in-transaction session) | Accepted (commit boundary added by [0017](0017-unit-of-work-transaction-boundary.md)) |
 | [0017](0017-unit-of-work-transaction-boundary.md) | Unit-of-work transaction boundary: repositories stage, the caller commits | Accepted |
 | [0018](0018-canonical-v1-v14-roadmap.md) | Canonical `v1…v14` roadmap (supersedes BRIEF §18's old `v0…v6` path) | Accepted |
+| [0019](0019-object-concepts-and-belief-formation.md) | Object concepts and belief formation | Accepted |

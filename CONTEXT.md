@@ -570,6 +570,66 @@ trail and replay source for training.
 _Avoid_: outbox (the pre-publish queue), event bus / topic (the transport),
 interaction event (the outcome-model learning record).
 
+**Reaction threshold**:
+The per-label probability at or above which a predicted reaction may fire; below
+it the candidate is suppressed. Distinct from the outcome predictor's prediction
+threshold.
+_Avoid_: prediction threshold, confidence cutoff.
+
+**Reaction cooldown**:
+The ticks that must elapse after a reaction of a given label fires before that
+same label may fire again — damping instinct spam.
+_Avoid_: duration, refractory period, action cooldown (that gates deliberated actions).
+
+**Suppressed reaction**:
+The dominant candidate reaction that did not fire — below threshold, still
+cooling down, or (at the interrupt step) unsafe to act on — recorded with
+`triggered=False`.
+_Avoid_: ignore (the model's no-reaction label), blocked (a safety-floor term).
+
+**Emotion bias**:
+A transient affect signal a triggered reaction feeds into the being's
+needs→emotion derivation for one tick, nudging the displayed emotion (a flinch
+reads as `scared`) without mutating stored needs or setting emotion directly.
+_Avoid_: setting the emotion, emotion override, mood (emotion is always derived).
+
+**Action interruption**:
+Cancelling the being's current action mid-tick because a high-intensity reaction
+fired — permitted only when the action is interruptible and the safety floor
+allows the protective response; its outcomes never land and an `ActionInterrupted`
+event is emitted.
+_Avoid_: abort, block (the floor blocks; instinct interrupts an already-safe action).
+
+**Visual-only mode**:
+The first instinct-activation step (`visual_only`): a reaction is surfaced in
+state and biases the displayed emotion, but actions stay byte-identical — show
+it, don't let it drive. Distinct from shadow (record-only) and controlled
+interruption.
+_Avoid_: preview, dry run, shadow.
+
+**Reaction visual**:
+The presentation of an active reaction on the render frame — the config draw
+hints for the reaction's label stamped with the engine-decided type and
+intensity, carried under `visual.reaction`; present only while a reaction is
+active and carrying no psychology.
+_Avoid_: reaction animation (static hints only), reaction emotion.
+
+**Model telemetry**:
+A read-only observability record pairing an instinct prediction with its observed
+outcome (accepted/suppressed) on the `being.model.telemetry` stream; never feeds
+back into decision or reaction selection.
+_Avoid_: metric, log, feedback signal.
+
+**Consumer lag**:
+How many predictions are still awaiting their reaction on the telemetry observer;
+settles to zero as the chain drains.
+_Avoid_: backlog, queue depth.
+
+**Correlation trace**:
+The structured per-hop log line carrying `correlation_id`/`causation_id` that
+lets one stimulus→prediction→reaction chain be followed end to end.
+_Avoid_: audit log, request log.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

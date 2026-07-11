@@ -34,7 +34,11 @@ from app.config_service import ConfigService
 from app.domain.event import DomainEvent
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC
 from app.services.reaction_response_service import ACTION_EVENTS_TOPIC, ACTION_INTERRUPTED
-from app.services.stimulus_service import PERCEPTION_TOPIC
+from app.services.stimulus_service import (
+    OBJECT_CONTACTED,
+    PERCEPTION_TOPIC,
+    SOUND_SPIKE,
+)
 from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -175,6 +179,70 @@ def _react_demo(config_root: str, ticks: int = 8) -> None:
         print("the instinct chain was inert — train models/instinct.pt to see suppression.")
 
 
+def _sensory_demo(config_root: str, ticks: int = 8) -> None:
+    """SENSORY-STIM demonstration: real SOUND and TOUCH signals now drive the
+    instinct chain. The running being (loads `models/instinct.pt` via the
+    bootstrap) is shown beside a no-instinct baseline. A fast ball RUSHES IN and
+    REACHES the body (a CONTACT -> the being WITHDRAWS), and partway through the
+    room fills with a sudden UNKNOWN sound (a spike -> the being FREEZES) —
+    reactions the motion-only stimulus could never produce, because
+    sound_spike_intensity / touch_intensity were stubbed 0.0 until this slice.
+    With no torch or no artifact the chain is inert and the run says so."""
+    base = ConfigService.from_files(config_root).with_room_contents(["obj_red_ball"])
+    print("the being sits alone; a ball rushes in and REACHES it, then a sudden UNKNOWN sound fills the room.")
+    print("SENSORY-STIM: sound_spike_intensity + touch_intensity now populate the frozen 14-feature stimulus.\n")
+
+    bus = InMemoryEventBus()
+    perception: List[DomainEvent] = []
+    reactions: List[DomainEvent] = []
+    bus.subscribe(PERCEPTION_TOPIC, perception.append)
+    bus.subscribe(INSTINCT_REACTIONS_TOPIC, reactions.append)
+    baseline = Simulation(base)  # no instinct chain -> the reference
+
+    sound_at = max(3, ticks - 3)
+    print(f"--- the wired being beside a no-instinct baseline, {ticks} ticks ---")
+    with build_simulation(base, event_publisher=bus, event_consumer=bus) as sim:
+        for t in range(1, ticks + 1):
+            state = sim.tick()
+            baseline.tick()
+            _print_action(state)
+            if t == sound_at:
+                print(f"\ntick={sim.current_tick:>4}  *** a sudden UNKNOWN sound fills the room ***\n")
+                sim.change_environment(sound="unknown_sound")
+
+    spikes = [e for e in perception if e.event_type == SOUND_SPIKE]
+    contacts = [e for e in perception if e.event_type == OBJECT_CONTACTED]
+    triggered = [
+        (e.payload["tick"], e.payload["reaction"], e.payload["intensity"])
+        for e in reactions
+        if e.payload.get("triggered")
+    ]
+    print()
+    if not reactions and not spikes and not contacts:
+        print(
+            "the instinct chain was inert -- no trained model loaded. Run "
+            "`PYTHONPATH=. python -m app.ml.train_instinct_model` to produce "
+            "models/instinct.pt, then retry."
+        )
+        return
+    print(f"sensory stimuli on the bus: {len(spikes)} sound spike(s), {len(contacts)} contact(s).")
+    for label in ("flinch", "withdraw", "freeze"):
+        hits = [t for (t, r, _) in triggered if r == label]
+        if hits:
+            intensity = next(i for (t, r, i) in triggered if r == label)
+            print(f"  the being {label.upper()} on tick(s) {hits} (intensity ~{intensity:.2f}).")
+    fired = sorted({r for (_, r, _) in triggered})
+    baseline_reacted = 0  # baseline has no instinct chain, so it never reacts
+    print(
+        f"reactions triggered: {fired or 'none'} -- the no-instinct baseline reacted on "
+        f"{baseline_reacted} tick(s)."
+    )
+    if "freeze" not in fired:
+        print("NOTE: freeze did not clear its threshold on the trained model's sound features this run.")
+    if "withdraw" not in fired:
+        print("NOTE: withdraw did not clear its threshold on the trained model's contact features this run.")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     argv = argv if argv is not None else sys.argv[1:]
     config_root = os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
@@ -186,6 +254,15 @@ def main(argv: Optional[List[str]] = None) -> None:
             (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 8
         )
         _react_demo(config_root, ticks=react_ticks)
+        return
+    # SENSORY-STIM: `demo sensory [ticks]` shows the being FREEZE at a sudden
+    # loud/unknown sound and WITHDRAW from a contact — the sound/touch sources this
+    # slice adds — beside a no-instinct baseline.
+    if any(token.strip().lstrip("-").lower() == "sensory" for token in argv):
+        sensory_ticks = next(
+            (int(t.strip().lstrip("-")) for t in argv if t.strip().lstrip("-").isdigit()), 8
+        )
+        _sensory_demo(config_root, ticks=sensory_ticks)
         return
     ticks, selector = _parse_argv(argv)
 

@@ -304,6 +304,15 @@ class ConfigService:
             str(name): float(value)
             for name, value in (motion.get("sensory_defaults", {}) or {}).items()
         }
+        # SENSORY-STIM: the sudden-sound spike map (category -> sensory features)
+        # and the contact tuning, both config-driven so retuning what startles the
+        # being is a `config/motion.yaml` change only.
+        sound = motion.get("sound", {}) or {}
+        sound_spikes = {
+            str(category): {str(k): float(v) for k, v in (spec or {}).items()}
+            for category, spec in (sound.get("spike", {}) or {}).items()
+        }
+        contact = motion.get("contact", {}) or {}
         catalog = self.object_catalog()
         motions: Dict[str, Motion] = {}
         for object_id, spec in (motion.get("objects", {}) or {}).items():
@@ -332,6 +341,10 @@ class ConfigService:
             min_closing_speed=float(approach.get("min_closing_speed", 0.0)),
             sensory_defaults=defaults,
             motions=motions,
+            sound_spikes=sound_spikes,
+            contact_distance=float(contact.get("contact_distance", 0.0)),
+            contact_min_touch=float(contact.get("min_touch_intensity", 0.0)),
+            contact_unexpectedness=float(contact.get("unexpectedness", 0.0)),
         )
 
     def resolve_object(self, selector: str) -> str:

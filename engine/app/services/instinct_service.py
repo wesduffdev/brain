@@ -7,8 +7,9 @@ turns the being's perceived approaches into live protective reactions, observed
 but not yet acted on.
 
 The service subscribes as an `EventConsumer` to `being.perception.events`. For
-each `ObjectApproached` (the frozen stimulus WORLD-MOTION publishes: a 14-feature
-vector, ADR 0026/0027), it encodes the stimulus (`InstinctFeatureEncoder`), runs
+each perception STIMULUS (an object approach, a sudden sound spike, or an object
+contact — the frozen 14-feature vector WORLD-MOTION / SENSORY-STIM publish, ADR
+0026/0027), it encodes the stimulus (`InstinctFeatureEncoder`), runs
 the `InstinctPredictorPort`, selects one protective reaction against the config
 `thresholds`/`cooldowns` (or suppresses it), and — in ONE unit of work (ADR
 0017) — persists the prediction + reaction (EVT-PERSIST) and STAGES the outgoing
@@ -53,7 +54,12 @@ from app.ports.repositories import (
     OutboxRepository,
     UnitOfWork,
 )
-from app.services.stimulus_service import OBJECT_APPROACHED, PERCEPTION_TOPIC
+from app.services.stimulus_service import (
+    OBJECT_APPROACHED,
+    OBJECT_CONTACTED,
+    PERCEPTION_TOPIC,
+    SOUND_SPIKE,
+)
 
 # The two topics the instinct layer produces (EVT-KAFKA catalogue, ADR 0024) and
 # the event types they carry. `being.*` naming throughout (never `npc.*`).
@@ -67,6 +73,12 @@ _SOURCE_SERVICE = "instinct-service"
 # The explicit "no protective reaction" label — recorded suppressed when no
 # reaction label is even a candidate (never fires).
 _NO_REACTION = "ignore"
+
+# The perception stimuli that drive instinct — an object APPROACH (WORLD-MOTION),
+# a sudden SOUND SPIKE, or an object CONTACT (SENSORY-STIM). All three carry the
+# same frozen 14-feature payload, so the consumer handles them identically;
+# anything else on the topic is ignored.
+_STIMULUS_EVENTS = frozenset({OBJECT_APPROACHED, SOUND_SPIKE, OBJECT_CONTACTED})
 
 
 class InstinctService:
@@ -115,10 +127,11 @@ class InstinctService:
 
     def _on_event(self, event: DomainEvent) -> None:
         """Handle one event delivered on the perception topic. Only
-        `ObjectApproached` drives instinct; anything else is ignored. Idempotent on
+        a perception STIMULUS (approach, sound spike, or contact) drives instinct;
+        anything else is ignored. Idempotent on
         the source `event_id`, and any failure to process a stimulus routes the
         event to the DLQ rather than propagating back to the publisher."""
-        if event.event_type != OBJECT_APPROACHED:
+        if event.event_type not in _STIMULUS_EVENTS:
             return
         if event.event_id in self._processed:
             return  # idempotent: a replayed approach is dropped

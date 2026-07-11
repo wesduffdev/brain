@@ -24,9 +24,11 @@ normalization:
 approach:
   min_closing_speed: 0.0
 
-# sensory_defaults: features the world has no source for yet (no sound/touch
-# sensing; the being's fast-loop internal state is folded in by the instinct
-# consumer, not here). Each defaults to 0.0 until a later slice supplies it.
+# sensory_defaults: the features still without a world source — the being's
+# fast-loop internal state, folded in later by the instinct consumer, not here.
+# (`sound_spike_intensity` and `touch_intensity` ARE sourced now — see `sound:`
+# and `contact:` below — but keep their 0.0 default here for the motion-approach
+# stimulus, which carries neither.) Each defaults to 0.0 until a slice supplies it.
 sensory_defaults:
   unexpectedness: 0.0
   sound_spike_intensity: 0.0
@@ -34,6 +36,35 @@ sensory_defaults:
   current_focus_level: 0.0
   current_stability: 0.0
   prior_prediction_error: 0.0
+
+# sound (SENSORY-STIM): a SUDDEN transition into one of these sound categories
+# (via change_environment) is a startle the being HEARS but cannot see. It raises
+# a `being.perception.sound_spike` stimulus carrying these sensory features into
+# the frozen instinct vector, so the instinct model can FREEZE (a loud/unknown
+# sound reads as intense, unexpected, and unseen — ADR 0026's freeze archetype).
+# A category not listed here raises no spike; holding a category is not a fresh
+# spike each tick (only the onset is sudden). The same categories carry a safety
+# push in environment.yaml — that is the slow contextual need, this is the fast
+# instinct startle; two distinct concerns.
+#   sound_spike_intensity : how strong the heard spike is (feature idx 9)
+#   unexpectedness        : how novel/unpredictable the sound is (idx 7)
+#   visibility_confidence : deliberately LOW — a sound has no visible source (idx 8)
+sound:
+  spike:
+    loud:          { sound_spike_intensity: 0.80, unexpectedness: 0.70, visibility_confidence: 0.20 }
+    unknown_sound: { sound_spike_intensity: 0.95, unexpectedness: 0.90, visibility_confidence: 0.10 }
+
+# contact (SENSORY-STIM): when an approaching object CROSSES into the body (its
+# distance falls to/within contact_distance, in the same abstract world units as
+# positions), that contact raises a `being.perception.object_contacted` stimulus
+# carrying a real `touch_intensity` (+ the unexpectedness that makes an unforeseen
+# touch a startle), so the instinct model can WITHDRAW (ADR 0026's withdraw
+# archetype). touch_intensity scales with the impact speed (speed / max_speed) but
+# is floored at min_touch_intensity so any real contact is felt.
+contact:
+  contact_distance: 0.5
+  min_touch_intensity: 0.60
+  unexpectedness: 0.70
 
 # objects: the world's starting kinematics, per catalogued object id. The ball and
 # the hot lamp are being moved toward the being (an approach the being can feel);

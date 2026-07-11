@@ -1,9 +1,10 @@
 """Watch the being decide — alone in a room with one object.
 
 Each tick the being scores its options and takes ONE action toward the object,
-with a stated reason. By default the object is the hot lamp, which safety
-hard-blocks from being touched no matter how the utility falls; partway through
-the room goes dark, safety drains, and the curious explorer turns fearful.
+with a stated reason. By default the object is the hot lamp: nothing hard-blocks
+the being from touching it (ADR 0013/0014), so a curious explorer reaches out,
+is hurt — a pain/fear spike recorded as `causes_pain` — and afterwards keeps its
+distance. Partway through the room goes dark and safety drains further.
 
 Point it at a different object to watch how the being treats that one:
 
@@ -85,7 +86,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     props = ", ".join(obj.properties) or "no notable properties"
     print(f"the being wakes in a room with one object: {label} ({props})")
     if is_hot:
-        print("it is hot and must never be touched — safety hard-blocks that.\n")
+        print("it is hot — touching it will hurt, but nothing stops the being from trying.\n")
     else:
         print()
 
@@ -103,9 +104,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"actions taken: {len(events)}  (on {label}: {len(on_object)})")
 
     if is_hot:
-        unsafe = [e for e in on_object if e["action"] in {"touch", "grab"}]
-        assert not unsafe, "SAFETY VIOLATION: a hot object was touched"
-        print(f"safety held: {label} was never touched or grabbed.")
+        harmful = [e for e in on_object if e["action"] in {"touch", "grab"}]
+        felt_pain = any("causes_pain" in e["observedOutcome"] for e in on_object)
+        now = sim.state()
+        print(f"the being reached out: {len(harmful)} harmful contact(s) with {label}.")
+        if felt_pain:
+            print(
+                "touching it hurt — recorded as `causes_pain`, so the being can later "
+                "learn hot -> pain."
+            )
+        print(
+            f"felt state now — pain: {now['needs'].get('pain', 0)}, "
+            f"safety: {now['needs'].get('safety')}, comfort: {now['needs'].get('comfort')}."
+        )
+        print("recoverable harm is allowed and learnable — nothing hard-blocked it (ADR 0013/0014).")
     else:
         by_action: Dict[str, int] = {}
         for event in on_object:

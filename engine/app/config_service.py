@@ -19,6 +19,7 @@ from app.policies import (
     EmotionRule,
     EnvironmentPolicy,
     NeedTickPolicy,
+    OutcomeEffectPolicy,
     RenderHintsPolicy,
     SafetyRule,
 )
@@ -41,6 +42,7 @@ class ConfigService:
         outcome: Optional[Mapping] = None,
         actions: Optional[Mapping] = None,
         safety: Optional[Mapping] = None,
+        outcome_effects: Optional[Mapping] = None,
     ):
         self._tick_rates = tick_rates
         self._emotions = emotions
@@ -52,6 +54,7 @@ class ConfigService:
         self._outcome = outcome or {}
         self._actions = actions or {}
         self._safety = safety or {}
+        self._outcome_effects = outcome_effects or {}
 
     # --- construction -----------------------------------------------------
 
@@ -68,6 +71,7 @@ class ConfigService:
         outcome: Optional[Mapping] = None,
         actions: Optional[Mapping] = None,
         safety: Optional[Mapping] = None,
+        outcome_effects: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -82,6 +86,7 @@ class ConfigService:
             outcome,
             actions,
             safety,
+            outcome_effects,
         )
 
     @classmethod
@@ -101,6 +106,7 @@ class ConfigService:
         outcome = yaml.safe_load((root / "outcome_labels.yaml").read_text())
         actions = yaml.safe_load((root / "actions.yaml").read_text())
         safety = yaml.safe_load((root / "safety_rules.yaml").read_text())
+        outcome_effects = yaml.safe_load((root / "outcome_effects.yaml").read_text())
         return cls(
             tick_rates,
             emotions,
@@ -112,6 +118,7 @@ class ConfigService:
             outcome,
             actions,
             safety,
+            outcome_effects,
         )
 
     # --- ticks / needs ----------------------------------------------------
@@ -284,6 +291,7 @@ class ConfigService:
             self._outcome,
             self._actions,
             self._safety,
+            self._outcome_effects,
         )
 
     # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
@@ -369,6 +377,26 @@ class ConfigService:
                 )
             )
         return tuple(rules)
+
+    def outcome_effects(self) -> OutcomeEffectPolicy:
+        """How each outcome felt-consequence pushes the being's needs (ADR 0014):
+        the config that turns a harmful action into real, possibly-lasting
+        deltas (pain up, safety/comfort down) instead of a hard block. An effect
+        keyed to an outcome outside the label vocabulary (outcome_labels.yaml) is
+        rejected at load, the same fail-loud discipline as the object catalog. An
+        absent file moves nothing (so pre-V0-SAFE slices behave unchanged)."""
+        label_vocab = set(self.outcome_labels())
+        effects: Dict[str, Dict[str, int]] = {}
+        for outcome, deltas in (self._outcome_effects.get("effects", {}) or {}).items():
+            if label_vocab and outcome not in label_vocab:
+                raise ValueError(
+                    f"outcome effect: {outcome!r} is not a known outcome label "
+                    f"(config/outcome_labels.yaml)"
+                )
+            effects[str(outcome)] = {
+                str(need): int(delta) for need, delta in (deltas or {}).items()
+            }
+        return OutcomeEffectPolicy(effects=effects)
 
     # --- render / commands ------------------------------------------------
 

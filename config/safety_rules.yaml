@@ -1,20 +1,19 @@
-# Hard safety guardrails (ADR 0009). SafetyService enforces these ABSOLUTELY:
-# no utility score — and, later, no confident learned prediction — can buy an
-# action past a matching rule (BRIEF §12). A blocked action is simply removed
-# from the being's choices, and the being takes a safe alternative instead.
+# The INVARIANT FLOOR (ADR 0009, narrowed by ADR 0013/0014). SafetyService
+# enforces these ABSOLUTELY: no utility score — and, later, no confident learned
+# prediction — can buy an action past a matching rule (BRIEF §12). A blocked
+# action is simply removed from the being's choices, and the being takes another.
 #
-# Per the design boundary (docs/design_boundary.md), every rule states an
-# ABSTRACT reason (what would go wrong, in feeling terms) — never any depiction
-# of harm. Every blocked path leaves the being a safe action to take instead.
+# The floor blocks ONLY genuinely simulation-breaking actions — not merely
+# harmful ones. Recoverable-but-harmful actions (touching something hot) are now
+# ALLOWED and learnable: their harm plays out as felt consequences on the being's
+# needs (config/outcome_effects.yaml) — a pain/fear spike it suffers and can learn
+# from — rather than as a hard block (ADR 0013). Cause and effect only teaches
+# when the effect is allowed to land.
 #
-# A rule blocks `action` whenever the target object has `blocked_property`.
-# `blocked_property` must be a real object property (object_properties.yaml);
-# a typo is rejected at load, like the object catalog.
+# In v0 there are NO simulation-breaking actions, so the floor is empty. The seam
+# is kept: adding a rule here (same shape as before — `action`, `blocked_property`
+# from object_properties.yaml, `reason`) reinstates a hard block for that action,
+# and its behavior is proven by tests. Every rule states an ABSTRACT reason (what
+# would go wrong, in feeling terms) — never any depiction of harm.
 
-rules:
-  - action: touch
-    blocked_property: hot
-    reason: "a hot surface would cause pain"
-  - action: grab
-    blocked_property: hot
-    reason: "grasping a hot surface would cause pain"
+rules: []

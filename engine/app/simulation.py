@@ -58,7 +58,7 @@ class Simulation:
         )
 
         self._clock = TickService()
-        self._needs = NeedService(config.need_policies())
+        self._needs = NeedService(config.need_policies(), config.outcome_effects())
         self._environment = EnvironmentService(
             config.environment_policy(), config.need_policies()
         )
@@ -134,11 +134,17 @@ class Simulation:
             (),
         )
         true_props = self._catalog[decision.target_id].properties
+        observed_outcome = policy.outcomes_for(true_props)
 
-        # The action has no effect on needs in this slice, so the emotion after is
-        # re-derived from the (unchanged) needs — the field is honest and will
-        # diverge once actions move needs.
+        # The action's observed outcome lands its felt consequence on the being's
+        # needs (ADR 0014): touching a hot object produces `causes_pain`, which
+        # spikes pain and drops felt safety/comfort — real, possibly-lasting harm
+        # instead of a hard block. The emotion after is then re-derived from the
+        # changed needs, so `emotionBefore`/`emotionAfter` diverge exactly when an
+        # action mattered (closing the deferral in ADR 0009).
+        self.being.needs = self._needs.apply_outcomes(self.being.needs, observed_outcome)
         emotion_after = self._emotion.derive(self.being.needs)
+        self.being.emotion = emotion_after
 
         event = InteractionEvent(
             being_id=self.being.being_id,
@@ -146,7 +152,7 @@ class Simulation:
             object_id=decision.target_id,
             action=decision.action,
             expected_outcome=policy.outcomes_for(perceived_props),
-            observed_outcome=policy.outcomes_for(true_props),
+            observed_outcome=observed_outcome,
             emotion_before=emotion_before,
             emotion_after=emotion_after,
         )

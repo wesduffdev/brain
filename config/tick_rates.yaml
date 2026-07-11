@@ -21,6 +21,13 @@ needs:
   warmth:    { direction: contextual, amount: 1, every_ticks: 30, min: 0, max: 100, start: 20 }
   curiosity: { direction: increase,   amount: 1, every_ticks: 15, min: 0, max: 100, start: 55 }
   safety:    { direction: contextual, amount: 1, every_ticks: 10, min: 0, max: 100, start: 80 }
+  # pain is a felt-harm need (ADR 0014): higher means more hurt. It is born at 0
+  # (no pain) and DECAYS back toward 0 on its own — the plausible recovery path
+  # for acute pain. A harmful outcome (`causes_pain`, config/outcome_effects.yaml)
+  # spikes it upward; it then fades over ticks. Felt safety/comfort do NOT
+  # auto-recover here, so fear from a bad experience can linger (no forced
+  # recovery — see ADR 0013).
+  pain:      { direction: decrease,   amount: 2, every_ticks: 4, min: 0, max: 100, start: 0 }
 
 # Action TIMING lives here — tick_rates.yaml is the single tuning surface for
 # time (BRIEF §10), and the decision system (ADR 0009) reads these. What each

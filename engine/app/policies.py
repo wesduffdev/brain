@@ -162,14 +162,42 @@ class ActionPolicy:
 
 @dataclass(frozen=True)
 class SafetyRule:
-    """One hard guardrail (ADR 0009): taking `action` on an object that has
-    `blocked_property` is forbidden, with `reason` explaining why. Safety is
-    absolute — no utility or learned score can override a matching rule.
+    """One rule of the **invariant floor** (ADR 0009, narrowed by ADR 0013/0014):
+    taking `action` on an object that has `blocked_property` is forbidden, with
+    `reason` explaining why. The floor is absolute — no utility or learned score
+    can override a matching rule — but it now blocks only genuinely
+    simulation-breaking actions, not merely harmful ones. Recoverable-but-harmful
+    actions (touching something hot) are *allowed* and their harm plays out as
+    felt consequences (see `OutcomeEffectPolicy`), not as a block.
     """
 
     action: str
     blocked_property: str
     reason: str
+
+
+@dataclass(frozen=True)
+class OutcomeEffectPolicy:
+    """How an action's observed OUTCOMES push the being's needs — the felt
+    consequence of an experience (ADR 0014). Keyed `outcome_label -> {need:
+    delta}`: a harmful outcome (`causes_pain`) raises the being's pain and lowers
+    its felt safety and comfort at once; an outcome with no entry moves nothing.
+    Magnitudes are config (`outcome_effects.yaml`); the being's own need bands
+    clamp the result (`tick_rates.yaml`), so a need's floor/ceiling has one home.
+    This is what makes a harmful action land real, possibly-lasting consequences
+    instead of being hard-blocked.
+    """
+
+    effects: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+
+    def deltas_for(self, outcomes) -> Mapping[str, int]:
+        """Sum the per-need deltas across all of `outcomes` the action produced.
+        Order-independent; an outcome not in the table contributes nothing."""
+        totals: dict = {}
+        for outcome in outcomes:
+            for need_name, delta in self.effects.get(outcome, {}).items():
+                totals[need_name] = totals.get(need_name, 0) + int(delta)
+        return totals
 
 
 @dataclass(frozen=True)

@@ -13,8 +13,8 @@ The situated agent the whole simulation is about — human-like in psychology
 _Avoid_: baby, child, person, character, NPC.
 
 **Need**:
-A drive the being has, held as a level in 0–100 that changes over time — hunger,
-sleep, comfort, warmth, curiosity, safety.
+A drive or felt level the being has, held as 0–100 that changes over time —
+hunger, sleep, comfort, warmth, curiosity, safety, and pain (felt harm).
 _Avoid_: stat, attribute, meter.
 
 **Contextual need**:
@@ -68,12 +68,41 @@ action, its target, the felt emotion, and a stated reason. A safety rule can
 forbid a candidate, and no score ever overrides it.
 _Avoid_: plan, policy, choice engine, AI move.
 
+**Invariant floor**:
+The minimal, absolute set of safety rules the being can never cross — it blocks
+only actions that would break the *simulation itself*, not merely harmful ones. A
+high utility, or a confident learned prediction, can never buy an action past it.
+In v0 it is empty. Narrowed from the earlier "safety guardrails hard-block
+harmful actions" stance.
+_Avoid_: safety guardrail (now names the floor), hard block, safety net, sandbox.
+
 **Safety rule**:
-A hard guardrail that forbids an action on an object with a given property (e.g.
-no touching something hot). Absolute: a high utility — or, later, a confident
-learned prediction — can never bypass it. Every blocked path leaves the being a
-safe action to take instead.
+One rule of the invariant floor: it forbids an `action` on an object with a given
+property, with an abstract reason. Absolute — no score bypasses it — but it
+covers only simulation-breaking actions; recoverable harm is not blocked.
 _Avoid_: constraint, penalty, filter, validation.
+
+**Recoverable harm**:
+A harmful-but-not-simulation-breaking action the being is allowed to take and
+suffer — such as touching something hot. Its cost lands as an outcome effect (a
+pain/fear spike), and being allowed to happen is how cause and effect is learned,
+rather than being hard-blocked.
+_Avoid_: safe harm, minor harm, permitted risk, sanctioned damage.
+
+**Pain**:
+The being's felt-harm need — 0–100, born at 0, spiking when a harmful outcome
+lands and decaying back toward 0 on its own (acute pain fades; the plausible
+recovery). Distinct from fear, which is the `scared` emotion derived from low
+safety.
+_Avoid_: damage, hurt, injury, health, hit points.
+
+**Outcome effect**:
+The abstract internal cost an action's outcome imposes on the being — the need
+deltas (pain up, felt safety and comfort down) and the emotion and behavior that
+follow. This is how harm is represented and *suffered*: felt state only, never a
+depiction of harm. Distinct from the outcome, which is a fact about the world;
+the effect is what the being feels from it.
+_Avoid_: damage, penalty, result, reaction, consequence.
 
 **Room**:
 The local place the being occupies and perceives; holds objects and its

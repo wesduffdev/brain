@@ -1,0 +1,60 @@
+# The instinct model's frozen input/output contract and training tuning (ADR 0026).
+#
+# The instinct layer is the being's SECOND neural network (event-instinct wave):
+# a tiny net that maps fast-sensory/kinematic stimulus features to pre-conceptual
+# protective REACTIONS. Unlike the outcome predictor's multi-hot categorical
+# vector, every input slot here is a single continuous, normalized scalar. This
+# file is the single source of truth for:
+#
+#   - `feature_order` : the 14 stimulus features, IN ORDER — the frozen encode
+#                       contract the InstinctFeatureEncoder reproduces and the
+#                       artifact carries (reordering/inserting one is a contract
+#                       change → retrain; a drifted artifact is rejected on load).
+#   - `labels`        : the 5 reactions the model predicts (its output slots),
+#                       independent sigmoid probabilities (multi-label, not
+#                       softmax) — a stimulus can score high on several at once.
+#   - `training`      : trainer hyperparameters (config-driven tuning — the
+#                       trainer reads these, never hard-codes them).
+#
+# The model also emits one scalar `reaction_intensity` in [0, 1] (a separate
+# regression head), so no label slot is needed for it.
+
+feature_order:
+  - distance
+  - velocity
+  - acceleration
+  - trajectory_toward_body
+  - time_to_contact
+  - object_size
+  - size_change_rate
+  - unexpectedness
+  - visibility_confidence
+  - sound_spike_intensity
+  - touch_intensity
+  - current_focus_level
+  - current_stability
+  - prior_prediction_error
+
+labels:
+  - flinch
+  - freeze
+  - orient
+  - withdraw
+  - ignore
+
+# Trainer tuning. Retuning training is a config change, not a code change.
+#   intensity_loss : how the scalar reaction_intensity head is trained —
+#                    "bce" (BCEWithLogits on the [0,1] target, the default) or
+#                    "mse" (mean-squared error on the sigmoid-activated output).
+training:
+  epochs: 400
+  hidden_size: 16
+  learning_rate: 0.05
+  seed: 0
+  intensity_loss: bce
+
+# Reaction selection — the probability THRESHOLDS at or above which a predicted
+# reaction fires, and per-reaction COOLDOWNS — is a *consumer* concern owned by
+# the later INS-RT ticket (the model only predicts; it never selects an action
+# and never bypasses safety). Left unset here on purpose; INS-RT adds a
+# `reaction:` block and its own typed policy.

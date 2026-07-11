@@ -23,6 +23,7 @@ from app.policies import (
     EnvironmentPolicy,
     ExplorationPolicy,
     GraphEdgePolicy,
+    InstinctModelPolicy,
     MemoryPriorityPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
@@ -62,6 +63,7 @@ class ConfigService:
         "learning_rates",
         "decision_weights",
         "traits",
+        "instinct",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -113,6 +115,7 @@ class ConfigService:
         learning_rates: Optional[Mapping] = None,
         decision_weights: Optional[Mapping] = None,
         traits: Optional[Mapping] = None,
+        instinct: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -131,6 +134,7 @@ class ConfigService:
             learning_rates=learning_rates,
             decision_weights=decision_weights,
             traits=traits,
+            instinct=instinct,
         )
 
     @classmethod
@@ -158,6 +162,7 @@ class ConfigService:
             "learning_rates": "learning_rates.yaml",
             "decision_weights": "decision_weights.yaml",
             "traits": "traits.yaml",
+            "instinct": "instinct.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -649,6 +654,35 @@ class ConfigService:
             neural_weight=float(prediction.get("neural_weight", 0.5)),
             rule_weight=float(prediction.get("rule_weight", 0.5)),
             fallback_to_rules_on_error=bool(prediction.get("fallback_to_rules_on_error", True)),
+        )
+
+
+    # --- ML: the instinct model's feature/label contract + tuning (ADR 0026) ---
+    #
+    # The instinct model is a SEPARATE net from the outcome predictor, with a
+    # disjoint input space: 14 continuous fast-sensory scalars (not the multi-hot
+    # categorical vocab above). Its `feature_order` and reaction `labels` in
+    # `config/instinct.yaml` are the fixed encode contract the
+    # InstinctFeatureEncoder is built from; the artifact carries them so a drifted
+    # `instinct.pt` is rejected on load. Reaction thresholds/cooldowns are a
+    # consumer concern (INS-RT) and live in a later config block.
+
+    def instinct_feature_order(self) -> Tuple[str, ...]:
+        return tuple(self._instinct.get("feature_order", []) or [])
+
+    def instinct_labels(self) -> Tuple[str, ...]:
+        return tuple(self._instinct.get("labels", []) or [])
+
+    def instinct_model_policy(self) -> InstinctModelPolicy:
+        """The instinct trainer's hyperparameters, config-driven with safe defaults
+        so retuning training never touches Python."""
+        training = self._instinct.get("training", {}) or {}
+        return InstinctModelPolicy(
+            epochs=int(training.get("epochs", 400)),
+            hidden_size=int(training.get("hidden_size", 16)),
+            learning_rate=float(training.get("learning_rate", 0.05)),
+            seed=int(training.get("seed", 0)),
+            intensity_loss=str(training.get("intensity_loss", "bce")),
         )
 
     def outcome_training_params(self) -> Dict[str, float]:

@@ -870,51 +870,49 @@ Render:        emotion curious + action observe → valid pose/visual fields.
 
 ## 18. Version Path
 
-### v0 — Minimal Learning Loop
+> **Superseded.** The old `v0 — Minimal Learning Loop / v1…v6` path this section
+> used to carry has been **replaced by the single canonical `v1…v14` roadmap**
+> ([ADR 0018](adr/0018-canonical-v1-v14-roadmap.md)). The two schemes are *not* a
+> renumbering of the same milestones — the old `v1…v6` here do **not** map
+> one-to-one onto the canonical `v1…v14` (e.g. the old `v5` LLM layer is now
+> `v9`). Use the canonical scheme below; the old path is retired.
 
-Docker Compose (engine, postgres, renderer, ml-trainer); config-driven ticks;
-basic world/room/object/being; simple needs; simple emotions; simple
-rule/utility decisions; Postgres event logging; training-examples table;
-PyTorch outcome predictor; shadow mode; PixiJS render state over WebSocket.
+**v0** is the Minimal Learning Loop — Docker Compose (engine + postgres),
+config-driven ticks, perception, needs/emotion, actions + rule/utility decision
+under a safety invariant floor, Postgres event logging + training examples, a
+PyTorch outcome predictor in shadow mode, and PixiJS render state over WebSocket,
+all behind always-on JWT auth. It is **delivered** as slices `V0-1…V0-11` +
+`V0-SEC` (done — see the [`README.md`](../README.md) roadmap), not a future
+version.
 
-Success: simulation runs via Compose; needs drift from config; tick config
-changes need no code changes; interactions stored; trainer produces a model
-artifact; engine loads it and records predictions; renderer updates from state.
+Everything beyond v0 is the single canonical **`v1…v14`** capability roadmap.
+Its per-version goals, exit criteria, wave sequencing, and the archive-vs-repo
+reconciliation live in
+[`docs/post_v0_execution_plan.md`](post_v0_execution_plan.md) — this section does
+**not** restate them:
 
-### v1 — Prediction Influences Curiosity
+```
+v1  Stable cognitive loop (perception→action→predict→error→memory)
+v2  Object concepts and belief formation
+v3  PyTorch outcome prediction becomes active (blended into decision)
+v4  Curiosity, surprise, and exploration policy
+v5  Environment awareness (delivered early as V0-3)
+v6  Memory retrieval and long-term trait drift
+v7  Graph-like concept network (Postgres node/edge tables)
+v8  Model-service sidecar and multi-model inference
+v9  Natural language layer (interpret + narrate, never controls the sim)
+v10 Developmental progression and scenario system
+v11 Optional — vector memory search (pgvector)
+v12 Optional — reinforcement-learning sandbox
+v13 Optional — multi-shell simulation
+v14 Optional — production runtime split (observability)
+```
 
-Prediction uncertainty affects curiosity; unknown/surprising objects become
-more interesting; prediction error updates memory; more object properties and
-outcomes.
-
-### v2 — Prediction Influences Decision Scoring
-
-Neural prediction contributes to utility scores; safety rules remain hard
-guardrails; object memories influence action selection.
-
-### v3 — Beliefs and Concept Schemas
-
-Belief records and concept schemas (`unsupported_objects_fall`,
-`round_objects_roll`, `rubbery_objects_bounce`, `hot_objects_hurt`,
-`dark_reduces_visibility`) with evidence counts and confidence. The being
-generalizes from one round object to another and learns nuance.
-
-### v4 — Memory Retrieval and Similarity
-
-Memory retrieval service; optional pgvector for similarity search; more
-nuanced object similarity influencing predictions and curiosity.
-
-### v5 — LLM Integration
-
-Natural-language command interpretation, narrative log generation, memory
-summarization, personality-flavored text. The LLM converts commands into
-structured actions the engine validates; it does not control game logic.
-
-### v6 — Graph Projection (Optional)
-
-A graph database as a read-model/projection only if relationship traversal
-becomes central. Postgres stays the source of truth; the graph can be rebuilt
-from events.
+Sequencing is **by dependency, not version number** — a `vN` label is a
+capability, not a build slot. The ordered, status-bearing roadmap is the
+[`README.md`](../README.md) roadmap (the single source of truth for order and
+status); the live per-wave board state is
+[`docs/next_loop_execution_plan.md`](next_loop_execution_plan.md).
 
 ---
 

@@ -68,6 +68,7 @@ from app.services.stimulus_service import StimulusService
 from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
 from app.services.trait_service import TraitService
+from app.services.temperament_service import TemperamentService
 
 
 def _sum_biases(*maps: Optional[Dict]) -> Optional[Dict]:
@@ -269,6 +270,7 @@ class Simulation:
         self._instinct_event_log: Optional[InMemoryEventLogRepository] = None
         self._instinct: Optional[InstinctService] = None
         self._telemetry: Optional[ModelTelemetryService] = None
+        self._temperament: Optional[TemperamentService] = None
         if (
             instinct_predictor is not None
             and event_publisher is not None
@@ -276,16 +278,31 @@ class Simulation:
         ):
             self._instinct_outbox = InMemoryOutboxRepository()
             self._instinct_event_log = InMemoryEventLogRepository()
+            # ADAPTIVE instinct temperament (INS-TEMPERAMENT, ADR 0031): the being's
+            # per-label reaction thresholds PERSONALIZE from experience — a harmless
+            # startle habituates (raises the threshold, less reactive), a harmful
+            # outcome sensitizes (lowers every threshold, jumpier). Seeded from the
+            # runtime baseline; drifts only where config gives a non-zero rate, so the
+            # default is byte-identical to the static consumer. The InstinctService
+            # gates on it; this Simulation feeds it the harm cue each tick (the being's
+            # own `pain` need — no parallel harm detector). Instinct still never
+            # bypasses the safety floor: temperament shifts only reaction GATING.
+            runtime_policy = config.instinct_runtime_policy()
+            self._temperament = TemperamentService(
+                config.reaction_temperament_policy(),
+                base_thresholds=dict(runtime_policy.thresholds),
+            )
             self._instinct = InstinctService(
                 consumer=event_consumer,
                 publisher=event_publisher,
                 predictor=instinct_predictor,
                 encoder=InstinctFeatureEncoder.from_config(config),
-                policy=config.instinct_runtime_policy(),
+                policy=runtime_policy,
                 being_id=being_id,
                 predictions=InMemoryInstinctPredictionRepository(),
                 reactions=InMemoryInstinctReactionRepository(),
                 outbox=self._instinct_outbox,
+                temperament=self._temperament,
             )
             self._telemetry = ModelTelemetryService(
                 consumer=event_consumer, publisher=event_publisher, being_id=being_id
@@ -366,7 +383,15 @@ class Simulation:
         self.being.needs = self._needs.apply(self.being.needs, tick)
         self.being.needs = self._environment.apply(self.being.needs, self._room, tick)
         self.being.emotion = self._emotion.derive(self.being.needs)
+        pain_before = self.being.needs.get("pain", 0)
         self._act(tick)
+        # INS-TEMPERAMENT (ADR 0031): fold this tick's harm cue into the being's
+        # adaptive instinct temperament — a HARMFUL outcome (the being's `pain` rose
+        # this tick) SENSITIZES every reaction threshold; a HARMLESS tick HABITUATES
+        # whatever startled. The being's EXISTING `pain` need is the cue (ADR 0014); no
+        # parallel harm detector. A no-op when no instinct temperament is wired.
+        if self._temperament is not None:
+            self._temperament.settle(harm=self.being.needs.get("pain", 0) > pain_before)
         # EVT-VALID: publish this tick's staged instinct reactions onto the bus
         # (the in-process outbox relay, ADR 0028), so a reaction produced this
         # tick reaches the ReactionResponseService at the next begin_tick.
@@ -711,6 +736,16 @@ class Simulation:
         safe exploration lifting curiosity — so a long-lived being grows an individual
         temperament. Always present (unlike the persisted learned facts)."""
         return self._traits.levels()
+
+    def reaction_thresholds(self) -> Dict[str, float]:
+        """The being's CURRENT effective instinct thresholds (INS-TEMPERAMENT, ADR
+        0031), per reaction label — the config baseline reshaped by a life of startles
+        (habituation raising them, so a harmless stimulus eventually stops firing) and
+        harms (sensitization lowering them, so a hurt being is jumpier). Empty when no
+        adaptive instinct temperament is wired (no instinct predictor); the static
+        baseline whenever the drift rates are 0. Observable like `traits()`, but kept
+        off the `state()` snapshot so an un-wired being stays byte-identical."""
+        return self._temperament.thresholds() if self._temperament is not None else {}
 
     def concepts(self) -> List[Dict]:
         """The concept schemas the being has learned (card v2), as plain

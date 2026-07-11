@@ -38,7 +38,10 @@ behavior.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
+
+if TYPE_CHECKING:  # avoid a runtime import cycle — only the duck-typed surface is used
+    from app.services.temperament_service import TemperamentService
 
 from app.db.unit_of_work import NullUnitOfWork
 from app.domain.event import DomainEvent
@@ -97,6 +100,7 @@ class InstinctService:
         unit_of_work: Optional[UnitOfWork] = None,
         source_topic: str = PERCEPTION_TOPIC,
         dlq_topic: Optional[str] = None,
+        temperament: Optional["TemperamentService"] = None,
     ) -> None:
         if not policy.shadow:
             raise ValueError(
@@ -116,6 +120,11 @@ class InstinctService:
         self._uow = unit_of_work or NullUnitOfWork()
         self._source_topic = source_topic
         self._dlq_topic = dlq_topic or f"{source_topic}.dlq"
+        # ADAPTIVE temperament (INS-TEMPERAMENT, ADR 0031): when wired, the being's
+        # per-label reaction thresholds DRIFT from experience (habituation /
+        # sensitization) and this consumer gates on the drifted EFFECTIVE threshold
+        # instead of the static config one. None -> the static baseline (byte-identical).
+        self._temperament = temperament
         # In-process idempotency ledger + per-label cooldown clocks. Transient by
         # design (like ADR 0020's familiarity signal): the outbox/event-log carry
         # the durable at-least-once guarantee for the OUTGOING events.
@@ -198,9 +207,13 @@ class InstinctService:
             self._outbox.add(OutboxEntry(topic=INSTINCT_PREDICTIONS_TOPIC, event=prediction_event))
             self._outbox.add(OutboxEntry(topic=INSTINCT_REACTIONS_TOPIC, event=reaction_event))
 
-        # Start the label's cooldown only once its firing has committed.
+        # Start the label's cooldown only once its firing has committed, and note the
+        # firing for the adaptive temperament — a harmless startle HABITUATES the being
+        # (INS-TEMPERAMENT, ADR 0031); the tick's harm verdict is settled by the caller.
         if triggered:
             self._last_triggered[label] = tick
+            if self._temperament is not None:
+                self._temperament.record_reaction(label)
 
     def _select(self, prediction, tick: int) -> Tuple[str, bool]:
         """Pick the being's reaction to a prediction and whether it fires. The
@@ -214,9 +227,18 @@ class InstinctService:
             return _NO_REACTION, False
         label = max(labels, key=lambda name: prediction.reactions.get(name, 0.0))
         probability = float(prediction.reactions.get(label, 0.0))
-        at_threshold = probability >= self._policy.threshold(label)
+        at_threshold = probability >= self._effective_threshold(label)
         triggered = at_threshold and not self._cooling_down(label, tick)
         return label, triggered
+
+    def _effective_threshold(self, label: str) -> float:
+        """The threshold `label` must clear to fire: the being's DRIFTED temperament
+        threshold when an adaptive temperament is wired (INS-TEMPERAMENT, ADR 0031),
+        else the static config baseline. Either way this only gates which REACTION
+        fires; it never bypasses the safety floor (ADR 0026)."""
+        if self._temperament is not None:
+            return self._temperament.threshold(label)
+        return self._policy.threshold(label)
 
     def _cooling_down(self, label: str, tick: int) -> bool:
         last = self._last_triggered.get(label)

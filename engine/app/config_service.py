@@ -34,6 +34,7 @@ from app.policies import (
     PredictionBlendPolicy,
     PreferencePolicy,
     ReactionResponsePolicy,
+    ReactionTemperamentPolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -832,6 +833,26 @@ class ConfigService:
                 str(a) for a in (interrupt.get("interruptible_actions", []) or [])
             ),
             protective_action=str(interrupt.get("protective_action", "withdraw")),
+        )
+
+    def reaction_temperament_policy(self) -> ReactionTemperamentPolicy:
+        """The ADAPTIVE-instinct temperament tuning (INS-TEMPERAMENT, ADR 0031) from the
+        `reaction.temperament:` block of `config/instinct.yaml`: how fast the being's
+        EFFECTIVE reaction thresholds DRIFT from experience — `habituate_rate` (raising a
+        harmless startle's threshold until it stops firing) and `sensitize_rate` (lowering
+        every threshold after a harmful outcome), bounded by `floor`/`ceiling` in
+        probability space. Both rates default 0.0, so absent config the effective
+        thresholds stay exactly the static `instinct_runtime_policy` ones — byte-identical
+        to the pre-slice consumer. `floor`/`ceiling` bound the reaction PROBABILITY gate,
+        not the SafetyService floor. Retuning how fast a being habituates or sensitizes is
+        a config change only."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        temperament = reaction.get("temperament", {}) or {}
+        return ReactionTemperamentPolicy(
+            habituate_rate=float(temperament.get("habituate_rate", 0.0)),
+            sensitize_rate=float(temperament.get("sensitize_rate", 0.0)),
+            floor=float(temperament.get("floor", 0.0)),
+            ceiling=float(temperament.get("ceiling", 1.0)),
         )
 
     def outcome_training_params(self) -> Dict[str, float]:

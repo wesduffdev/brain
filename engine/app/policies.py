@@ -927,6 +927,55 @@ class InstinctRuntimePolicy:
 
 
 @dataclass(frozen=True)
+class ReactionTemperamentPolicy:
+    """How the being's EFFECTIVE instinct thresholds DRIFT with experience — the slow
+    PERSONALIZATION of the reaction GATING owned by `InstinctRuntimePolicy` (adaptive
+    temperament, INS-TEMPERAMENT, ADR 0031). Two harm-driven forces move a per-label
+    threshold on the same saturating curve the v6 trait / ADR 0020 familiarity signals
+    use, so sensitivity shifts fast at first and then settles:
+
+    - HABITUATION: a startle that FIRES and proves HARMLESS (the being's `pain` did not
+      rise that tick) nudges that label's threshold a `habituate_rate` fraction toward
+      the `ceiling`, so a repeated harmless startle gradually STOPS firing (less
+      reactive).
+    - SENSITIZATION: a HARMFUL outcome (the being's `pain` spiked) nudges EVERY
+      threshold a `sensitize_rate` fraction toward the `floor`, so the being is jumpier
+      next time — a previously sub-threshold stimulus may now fire (more reactive).
+
+        habituated = t + habituate_rate * (ceiling - t)
+        sensitized = t - sensitize_rate * (t - floor)
+
+    Both rates default 0.0 — no drift, so the effective threshold stays exactly the
+    static `InstinctRuntimePolicy` one (byte-identical to the pre-slice consumer). Slow
+    by construction, like the v6 traits. `floor`/`ceiling` bound the threshold in
+    PROBABILITY space; they are NOT the SafetyService invariant floor — temperament only
+    ever reshapes which REACTION fires, never whether an action is allowed (ADR
+    0026/0029). Every number lives in the `reaction.temperament:` block of
+    `config/instinct.yaml`, so retuning how fast a being habituates or sensitizes is a
+    config change, never a code one.
+    """
+
+    habituate_rate: float = 0.0
+    sensitize_rate: float = 0.0
+    floor: float = 0.0
+    ceiling: float = 1.0
+
+    def habituate(self, threshold: float) -> float:
+        """`threshold` after one harmless startle — nudged a `habituate_rate` fraction
+        toward the ceiling (less reactive), clamped to ``[floor, ceiling]``. Rate 0
+        returns it unchanged."""
+        moved = float(threshold) + self.habituate_rate * (self.ceiling - float(threshold))
+        return max(self.floor, min(self.ceiling, moved))
+
+    def sensitize(self, threshold: float) -> float:
+        """`threshold` after one harmful outcome — nudged a `sensitize_rate` fraction
+        toward the floor (more reactive), clamped to ``[floor, ceiling]``. Rate 0
+        returns it unchanged."""
+        moved = float(threshold) - self.sensitize_rate * (float(threshold) - self.floor)
+        return max(self.floor, min(self.ceiling, moved))
+
+
+@dataclass(frozen=True)
 class ReactionResponsePolicy:
     """How the being ACTS on a triggered instinct reaction (INS-ACT, ADR 0029) —
     the active counterpart to `InstinctRuntimePolicy`'s shadow selection. Staged

@@ -92,16 +92,31 @@ class TrainingExample(Base):
 
 class PredictionRecord(Base):
     """A model prediction recorded for later comparison against the actual
-    outcome (shadow mode, BRIEF §11)."""
+    outcome (shadow mode, BRIEF §11, ADR 0011).
+
+    Columns mirror the domain `PredictionRecord` so a stored row round-trips:
+    ``predicted`` holds the thresholded model outcome, ``probabilities`` the raw
+    per-label probabilities, ``rule_expected`` what the rule layer expected, and
+    ``actual`` what was observed; ``correct``/``prediction_error`` are the
+    exact-match verdict and the continuous error. ``event_id`` links back to the
+    interaction it shadowed (``being:tick``); ``model_run_id`` is unset until a
+    trained run owns the prediction."""
 
     __tablename__ = "prediction_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(String, ForeignKey("interaction_events.event_id"), nullable=True, index=True)
     model_run_id = Column(Integer, ForeignKey("model_runs.id"), nullable=True, index=True)
-    predicted = Column(JSON, nullable=False, default=dict)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    object_id = Column(String, ForeignKey("objects.object_id"), nullable=True, index=True)
+    action = Column(String, nullable=True)
+    predicted = Column(JSON, nullable=False, default=list)
+    probabilities = Column(JSON, nullable=False, default=dict)
+    rule_expected = Column(JSON, nullable=False, default=list)
     actual = Column(JSON, nullable=True)
     correct = Column(Boolean, nullable=True)
+    prediction_error = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

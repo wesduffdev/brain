@@ -24,6 +24,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketD
 
 from app import auth
 from app.auth import AuthConfig, require_auth
+from app.bootstrap import build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
 from app.services.command_service import CommandError, CommandService
@@ -62,7 +63,11 @@ def create_app(
             config_root or os.environ.get("CONFIG_ROOT", _DEFAULT_CONFIG_ROOT)
         )
         if simulation is None:
-            simulation = Simulation(config)
+            # The bootstrap wires the Postgres repositories + shadow-mode
+            # predictor when DATABASE_URL is set, so a served engine persists its
+            # interactions; with no DB it is the same plain in-memory being as
+            # before (ADR 0007/0011/0012).
+            simulation = build_simulation(config)
         if tick_interval_seconds is None:
             tick_interval_seconds = config.tick_duration_ms() / 1000.0
         if render_state_service is None:

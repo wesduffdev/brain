@@ -26,6 +26,7 @@ from app.policies import (
     ExplorationPolicy,
     GraphEdgePolicy,
     InstinctModelPolicy,
+    InstinctRuntimePolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
     NeedTickPolicy,
@@ -739,6 +740,30 @@ class ConfigService:
             learning_rate=float(training.get("learning_rate", 0.05)),
             seed=int(training.get("seed", 0)),
             intensity_loss=str(training.get("intensity_loss", "bce")),
+        )
+
+    def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
+        """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR
+        0011), from the `reaction:` block of `config/instinct.yaml`: the per-label
+        probability `thresholds` at or above which a reaction fires, the per-label
+        `cooldowns` (in ticks) between firings, and the `shadow` record-only gate
+        (default ON — the consumer persists and publishes but changes no behavior
+        until INS-ACT flips it). Absent config yields empty thresholds/cooldowns and
+        shadow ON, so no reaction ever fires and no behavior changes. Retuning
+        instinct sensitivity is a config change only."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        thresholds = {
+            str(label): float(value)
+            for label, value in (reaction.get("thresholds", {}) or {}).items()
+        }
+        cooldowns = {
+            str(label): int(value)
+            for label, value in (reaction.get("cooldowns", {}) or {}).items()
+        }
+        return InstinctRuntimePolicy(
+            thresholds=thresholds,
+            cooldowns=cooldowns,
+            shadow=bool(reaction.get("shadow", True)),
         )
 
     def outcome_training_params(self) -> Dict[str, float]:

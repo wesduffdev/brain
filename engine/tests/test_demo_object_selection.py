@@ -19,18 +19,12 @@ from app.simulation import Simulation
 
 _CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
-
-@pytest.fixture(autouse=True)
-def _fresh_in_memory_being(monkeypatch):
-    """These are demo-BEHAVIOR tests, not integration tests: each asserts how a
-    freshly-woken being treats a single object (e.g. first-contact harm from the
-    hot lamp). When `DATABASE_URL` is set in the ambient environment, the demo's
-    `build_simulation` wires the Postgres memory repos, so v6 memory retrieval
-    would recall lamp-burns persisted by earlier runs — the being then avoids the
-    lamp within 5 ticks and never records `causes_pain`. Isolate the whole module
-    from `DATABASE_URL` so every test builds the same fresh in-memory being and
-    validates first-contact behavior regardless of the ambient DB."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+# These are demo-BEHAVIOR tests, not integration tests: each asserts how a
+# freshly-woken being treats a single object (e.g. first-contact harm from the
+# hot lamp). The autouse `_hermetic_database_url` guard in conftest strips an
+# ambient `DATABASE_URL` for every non-`@integration` test, so each test here
+# builds the same fresh in-memory being regardless of the ambient DB — the
+# earlier module-level delenv it needed is now redundant (CHORE-HERMETIC).
 
 
 def _config() -> ConfigService:

@@ -182,6 +182,17 @@ in shadow mode and, in later versions, is the signal that feeds curiosity: a
 surprising outcome is one the model predicted poorly.
 _Avoid_: loss, inaccuracy, mistake, residual.
 
+**Memory**:
+What the being keeps from one interaction — a durable, self-contained trace (the
+object as perceived, the action, expected vs. observed outcome, emotion
+before/after, prediction error, and a priority) that later learning attends to.
+_Avoid_: log entry, cache, history.
+
+**Priority (salience)**:
+How strongly later learning should attend to a memory — a config-driven score
+raised by surprise (prediction error) and emotional intensity.
+_Avoid_: weight, importance, rank, score.
+
 **Model run**:
 The metadata of one training run — when it ran, how it scored, and where its
 weights artifact lives; the learned weights themselves live in a `.pt` file, not

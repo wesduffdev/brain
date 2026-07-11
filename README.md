@@ -50,6 +50,142 @@ docs/
   adr/                    # architecture decision records
 ```
 
+## Architecture
+
+The current, **as-built** architecture of the being — a true map of what the
+code does today, not the full target in [`docs/BRIEF.md`](docs/BRIEF.md). Domain
+terms are defined in [`CONTEXT.md`](CONTEXT.md); the decisions behind each seam
+are in [`docs/adr/`](docs/adr/). The fast layers (perception, instinct,
+reaction) feed into — but **never bypass** — the safety **invariant floor** that
+gates every action
+([ADR 0014](docs/adr/0014-invariant-floor-and-outcome-state-effects.md)).
+
+```mermaid
+flowchart TB
+    %% ---- World / Environment ----
+    subgraph world["World / Environment (true world)"]
+        Room["Room: objects + affordances"]
+        Env["Environmental conditions: light / sound / temperature"]
+        Motion["Object motion / kinematics: position + velocity"]
+    end
+
+    %% ---- Perception (perceived, never the true world) ----
+    subgraph perception["Perception"]
+        Perc["PerceptionService: perceived objects + confidence"]
+        Stim["StimulusService: derives approach / sound-spike / contact stimuli as the frozen 14-feature vector"]
+    end
+
+    %% ---- Event backbone ----
+    subgraph backbone["Event backbone"]
+        Bus["EventBus port: InMemory default / Kafka runtime"]
+        Topics["being.* topics: perception / instinct / model"]
+        Outbox["Transactional outbox"]
+        Elog["event_log projection (idempotent)"]
+    end
+
+    %% ---- Instinct layer (fast, pre-conceptual) ----
+    subgraph instinct["Instinct layer"]
+        Inst["InstinctService"]
+        IModel["InstinctModel (PyTorch) + InstinctEncoder"]
+        Temper["TemperamentService: habituation / sensitization"]
+        React["Reaction: flinch / freeze / orient / withdraw / ignore + intensity"]
+    end
+
+    RResp["ReactionResponseService: emotion bias (visual-only) + safety-gated action interrupt"]
+
+    %% ---- Cognitive core ----
+    subgraph core["Cognitive core"]
+        Need["NeedService: needs drift over ticks"]
+        Emo["EmotionService: dominant emotion (derived)"]
+        Dec["DecisionService: utility choice of one action"]
+        Safety["SafetyService: invariant floor (absolute)"]
+        Pred["OutcomePredictor: rule + neural ensemble (shadow / active)"]
+    end
+
+    %% ---- Learning / memory ----
+    subgraph learning["Learning / memory"]
+        Mem["MemoryService + retrieval"]
+        Concepts["ConceptService / BeliefService"]
+        KGraph["KnowledgeGraphService: concept graph"]
+        Curio["CuriosityService / SurpriseService"]
+        Traits["TraitService: caution / curiosity tendencies"]
+    end
+
+    Lang["Language layer: interpret + narrate (non-authoritative)"]
+
+    PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct tables")]
+
+    %% ---- Client / transport ----
+    subgraph client["Client / transport"]
+        API["FastAPI: GET /state + WebSocket /ws render frames (JWT)"]
+        Renderer["Renderer (PixiJS)"]
+    end
+
+    Trainer["ml-trainer sidecar: trains outcome + instinct models (.pt)"]
+
+    %% ---- Sensing flow ----
+    Room --> Perc
+    Env --> Perc
+    Motion --> Stim
+    Room --> Stim
+    Perc --> Bus
+    Stim --> Bus
+    Bus --- Topics
+
+    %% ---- Instinct flow ----
+    Bus --> Inst
+    Inst --> IModel
+    IModel --> React
+    Temper -.->|reshapes thresholds| Inst
+    React --> Temper
+    React --> RResp
+
+    %% ---- Cognitive flow ----
+    Env --> Need
+    Need --> Emo
+    RResp -->|emotion bias| Emo
+    Emo --> Dec
+    Pred -->|anticipated cost| Dec
+    Concepts -->|anticipated discomfort| Dec
+    Curio -->|exploration| Dec
+    Mem --> Dec
+    Traits --> Dec
+
+    %% ---- Safety floor is absolute — nothing bypasses it ----
+    Dec ==>|gated by| Safety
+    RResp ==>|interrupt gated by| Safety
+    Safety ==>|approves| Action["Action on object"]
+
+    %% ---- Learning + persistence ----
+    Action --> Mem
+    Action --> Pred
+    Action --> Bus
+    Mem --> Concepts
+    Concepts --> KGraph
+    Mem --> Curio
+    Inst --> Outbox
+    Action --> Outbox
+    Outbox --> Elog
+    Outbox --> PG
+    Elog --> PG
+    Mem --> PG
+
+    %% ---- Language + client ----
+    Emo --> Lang
+    Mem --> Lang
+    Emo --> API
+    Dec --> API
+    React --> API
+    API <--> Renderer
+    Renderer -->|player command| API
+    API -->|player command| Room
+
+    %% ---- Trainer sidecar ----
+    PG -.->|training data| Trainer
+    Trainer -.->|outcome model .pt| Pred
+    Trainer -.->|instinct model .pt| IModel
+```
+
 ## Run it
 
 ```bash
@@ -210,6 +346,7 @@ change** (enforced by convention — see CLAUDE.md → Documentation).
 | Deep modules | Simple interfaces, testable seams | Lots of behavior behind one small public class; no port until something varies across it |
 | Deep-module review gate | Catch design drift early | `/legacy-deep-module-review` runs after each slice, before it is called done |
 | Domain-model gate | Keep the ubiquitous language current | After each slice, update root `CONTEXT.md` (via the `domain-modeling` skill) with new/changed terms; an ADR only per its 3-part test |
+| Architecture-diagram gate | Keep the architecture map honest | After each slice, update the root `README.md` **Architecture** Mermaid diagram for any new/changed module, seam, service, topic, or data flow; a no-change slice says so; sub-agents report the diagram-update outcome |
 | Config-driven tuning | Retune without touching code | Rates/thresholds/vocab live in `config/*.yaml`; only `ConfigService` reads them |
 | Transactional persistence (unit of work) | Atomic writes; no partial/orphan rows | Repos stage; the caller commits one transaction per logical op (event + example + prediction together); READ COMMITTED; deviations only with a stated reason (ADR 0017) |
 | ADRs | Durable decision record | One `docs/adr/NNNN` per significant decision; never rewritten, only superseded |

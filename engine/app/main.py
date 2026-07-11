@@ -34,6 +34,8 @@ from app.services.memory_summary_service import MemorySummaryService
 from app.services.narration_service import NarrationService
 from app.services.render_state_service import RenderStateService
 from app.services.self_report_service import SelfReportService
+from app.services.subject_report_service import SubjectReportService
+from app.services.subject_resolver import SubjectResolver
 from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -143,7 +145,12 @@ def create_app(
         # Protected by the same always-on JWT guard as /state (ADR 0005).
         query = str(payload.get("query", ""))
         report = self_report_service.report(
-            query, memories=simulation.memories(), state=simulation.state()
+            query,
+            memories=simulation.memories(),
+            state=simulation.state(),
+            concepts=_readback(simulation, "concepts"),
+            beliefs=_readback(simulation, "beliefs"),
+            explanations=_readback(simulation, "explanations"),
         )
         return {"query": query, "report": report}
 
@@ -183,11 +190,25 @@ def _build_self_report(config: ConfigService) -> SelfReportService:
     never reaches a real provider (env-gated, ADR 0022)."""
     policy = config.self_report_policy()
     narrator = build_narrator(config)
+    subject = SubjectReportService(
+        narrator,
+        SubjectResolver(config.object_property_vocab()),
+        policy=config.subject_query_policy(),
+    )
     return SelfReportService(
         MemorySummaryService(narrator),
         NarrationService(narrator),
         recent_count=policy.recent_count,
+        subject=subject,
     )
+
+
+def _readback(simulation, name: str):
+    """A `Simulation` read-back (`concepts`/`beliefs`/`explanations`) if the being
+    exposes it, else an empty list — so a subject query works over a real being and
+    a duck-typed fake alike, degrading (never erroring) when a seam is absent."""
+    accessor = getattr(simulation, name, None)
+    return accessor() if callable(accessor) else []
 
 
 app = create_app()

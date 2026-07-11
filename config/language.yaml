@@ -32,6 +32,23 @@ narrator:
     base_url_env: OLLAMA_BASE_URL
     timeout_seconds: 30.0
 
+# How the being answers a SUBJECT query — "what do you know / how do you feel
+# about X?" (S3). It is answered ONLY from what the being has LEARNED (its
+# concepts / beliefs / graph explanations and the emotions its memories recorded),
+# keyed on the PERCEIVED property a subject term resolves to ("hot things" -> hot,
+# never a developer label). A subject it has no learned concept for is answered
+# honestly, never invented.
+subject:
+  # The connective(s) that INTRODUCE a subject in a question — the word after which
+  # the subject term begins. A question with none of these is not a subject query
+  # and stays on the recent-experience path ("what have you done recently?").
+  query_markers: [about]
+  # How many learned facts an answer cites (the strongest concepts first).
+  max_facts: 6
+  # What the being says about a subject it has NEVER learned about — an honest
+  # no-knowledge line, not an invention. `{subject}` is filled with the term asked.
+  unknown_response: "I don't know anything about {subject} yet — I haven't encountered anything like that."
+
 report:
   # How many of the most-recent memories a "what have you done recently?" report
   # covers, in the order they were lived.

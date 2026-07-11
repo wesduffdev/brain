@@ -21,10 +21,11 @@ present when there is no experience yet.
 """
 from __future__ import annotations
 
-from typing import List, Mapping, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 from app.services.memory_summary_service import MemorySummaryService
 from app.services.narration_service import NarrationService
+from app.services.subject_report_service import SubjectReportService
 
 
 class SelfReportService:
@@ -34,10 +35,14 @@ class SelfReportService:
         narration: NarrationService,
         *,
         recent_count: int = 5,
+        subject: Optional[SubjectReportService] = None,
     ) -> None:
         self._summary = summary
         self._narration = narration
         self._recent_count = int(recent_count)
+        # The S3 subject path; when absent, `report` is byte-identical to S1 —
+        # every question answered with the recent-experience report.
+        self._subject = subject
 
     def report(
         self,
@@ -45,11 +50,26 @@ class SelfReportService:
         *,
         memories: Sequence[Mapping],
         state: Mapping,
+        concepts: Sequence[Mapping] = (),
+        beliefs: Sequence[Mapping] = (),
+        explanations: Sequence[Mapping] = (),
     ) -> str:
-        """A grounded self-report for ``query``. Built only from ``memories`` when
-        the being has any (the recent slice), else from the present ``state``.
-        ``query`` is the person's question; S1 answers every question with the
-        recent-experience report — subject routing is a later slice (S3)."""
+        """A grounded self-report for ``query``. A SUBJECT query — "what do you know
+        / how do you feel about X?" (S3) — is answered from the being's learned
+        ``concepts`` / ``beliefs`` / ``explanations`` and the emotions its
+        ``memories`` recorded; every other question is the recent-experience report
+        built from ``memories`` (the recent slice), or, when the being has lived
+        nothing, the present ``state``. Read-only throughout (ADR 0022)."""
+        if self._subject is not None:
+            subject = self._subject.subject_of(query)
+            if subject is not None:
+                return self._subject.report(
+                    subject,
+                    concepts=concepts,
+                    beliefs=beliefs,
+                    explanations=explanations,
+                    memories=memories,
+                )
         selected = self._recent(memories)
         if selected:
             return self._summary.summarize(selected)

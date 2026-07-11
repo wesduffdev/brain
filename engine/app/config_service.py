@@ -42,6 +42,7 @@ from app.policies import (
     RetrievalPolicy,
     SafetyRule,
     SelfReportPolicy,
+    SubjectQueryPolicy,
     SurprisePolicy,
     TraitDriftPolicy,
     TraitPolicy,
@@ -712,6 +713,30 @@ class ConfigService:
             action_past=_table("action_past"),
             outcome_clause=_table("outcome_clause"),
             feeling=_table("feeling"),
+        )
+
+    def subject_query_policy(self) -> SubjectQueryPolicy:
+        """How the being fields a SUBJECT query (S3, ADR 0034), from the `subject:`
+        block of `config/language.yaml`: the connective(s) that introduce a subject
+        in a question (`query_markers`), how many learned facts an answer cites
+        (`max_facts`), and the honest line it gives for a subject it has never
+        learned about (`unknown_response`, with a `{subject}` slot). Absent config
+        yields the safe defaults, so retuning how the being answers about a subject
+        — and how it declines an unknown one — is a config change only."""
+        subject = self._language.get("subject", {}) or {}
+        return SubjectQueryPolicy(
+            query_markers=tuple(
+                str(marker).lower()
+                for marker in (subject.get("query_markers", ["about"]) or [])
+            ),
+            max_facts=int(subject.get("max_facts", 6)),
+            unknown_response=str(
+                subject.get(
+                    "unknown_response",
+                    "I don't know anything about {subject} — I haven't "
+                    "encountered anything like that.",
+                )
+            ),
         )
 
     def local_model_policy(self) -> LocalModelPolicy:

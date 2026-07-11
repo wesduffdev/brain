@@ -53,10 +53,15 @@ class TemplateLanguageModel:
         self._neutral_emotion = neutral_emotion
 
     def complete(self, prompt: str) -> str:
-        """Render the fact-lines in ``prompt`` into a plain self-report. Memory
-        facts (past tense) take precedence; with none, a present-state fact
-        describes the current moment; with neither, a safe 'nothing yet' line."""
+        """Render the fact-lines in ``prompt`` into a plain self-report. A subject
+        fact (``kind=subject``, the S3 "what do you know about X" answer) takes
+        precedence; else a memory fact (past tense); else a present-state fact
+        describes the current moment; with none, a safe 'nothing yet' line."""
         facts = [self._parse(line) for line in prompt.splitlines() if line.lstrip().startswith("-")]
+
+        subjects = [fact for fact in facts if fact.get("kind") == "subject"]
+        if subjects:
+            return self._render_subject(subjects)
 
         memories = [fact for fact in facts if fact.get("action")]
         if memories:
@@ -88,6 +93,47 @@ class TemplateLanguageModel:
         if props:
             parts.append(f"I can see {self._thing(props)}.")
         return " ".join(parts)
+
+    def _render_subject(self, facts: List[Dict[str, object]]) -> str:
+        # The S3 subject answer: what the being KNOWS and FEELS about a property it
+        # has learned about. Group the learned facts by (perceived property, action)
+        # so one sentence carries a property's outcomes together, and colour it with
+        # the strongest-felt emotion the being's memories recorded of that property.
+        groups: "Dict[tuple, Dict[str, object]]" = {}
+        order: List[tuple] = []
+        for fact in facts:
+            prop = str(fact.get("property", ""))
+            action = str(fact.get("action", ""))
+            key = (prop, action)
+            group = groups.get(key)
+            if group is None:
+                group = {"outcomes": [], "felt": "", "salience": -1.0}
+                groups[key] = group
+                order.append(key)
+            outcome = str(fact.get("outcome", ""))
+            outcomes = group["outcomes"]
+            if outcome and outcome not in outcomes:
+                outcomes.append(outcome)
+            felt = str(fact.get("felt", ""))
+            salience = self._salience(fact)
+            if felt and salience >= float(group["salience"]):
+                group["felt"] = felt
+                group["salience"] = salience
+        return self._join_sentences(
+            self._subject_sentence(prop, action, groups[(prop, action)])
+            for (prop, action) in order
+        )
+
+    def _subject_sentence(self, prop: str, action: str, group: Dict[str, object]) -> str:
+        clauses = self._join_list(
+            [self._phrasing.outcome(o) for o in group["outcomes"]]
+        )
+        salience = float(group["salience"])
+        affect = self._affect(str(group["felt"]), salience if salience > 0.0 else 0.0)
+        thing = f"a {prop} thing"
+        if action:
+            return f"When I {self._phrasing.action(action)} {thing}, {clauses}{affect}."
+        return f"A {prop} thing — {clauses}{affect}."
 
     def _outcome_clause(self, outcomes: Sequence[str]) -> str:
         if not outcomes:

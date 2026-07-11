@@ -113,7 +113,9 @@ flowchart TB
 
     %% ---- Language / self-report surface (non-authoritative, read-only) ----
     subgraph language["Language layer (non-authoritative, read-only)"]
-        Self["SelfReportService: grounded self-report from memory"]
+        Self["SelfReportService: grounded self-report from memory + subject routing"]
+        Subj["SubjectReportService: what it knows/feels about X (from learning)"]
+        Res["SubjectResolver: subject term -> perceived-property tokens"]
         Narr["MemorySummaryService / NarrationService"]
         LMPort["LanguageModelPort seam"]
         Sel["build_narrator: config provider selection + fallback-safe"]
@@ -184,6 +186,11 @@ flowchart TB
     %% ---- Language + client ----
     Mem -.->|memory snapshots| Self
     Emo -.->|state snapshot| Self
+    Self -->|subject query| Subj
+    Subj --> Res
+    Concepts -.->|learned concepts / beliefs| Subj
+    KGraph -.->|explanation paths| Subj
+    Subj --> LMPort
     Self --> Narr
     Narr --> LMPort
     LMPort --> Sel

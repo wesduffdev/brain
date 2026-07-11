@@ -49,6 +49,7 @@ from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
 from app.ml.inference import load_predictor
 from app.ports.events import EventConsumer, EventPublisher
 from app.ports.predictor import PredictorPort
+from app.ports.instinct import InstinctPredictorPort
 from app.ports.repositories import (
     BeliefRepository,
     ConceptRepository,
@@ -128,6 +129,7 @@ def build_simulation(
     predictor: Optional[PredictorPort] = None,
     event_publisher: Optional[EventPublisher] = None,
     event_consumer: Optional[EventConsumer] = None,
+    instinct_predictor: Optional[InstinctPredictorPort] = None,
 ) -> BuiltSimulation:
     """Build a runtime `Simulation`, wiring persistence when configured.
 
@@ -189,6 +191,7 @@ def build_simulation(
         unit_of_work=unit_of_work,
         event_publisher=event_publisher,
         event_consumer=event_consumer,
+        instinct_predictor=instinct_predictor,
     )
     return BuiltSimulation(simulation, close)
 

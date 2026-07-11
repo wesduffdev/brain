@@ -25,6 +25,7 @@ from app.db.session import (
     session_factory,
     wait_for_database,
 )
+from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
 from app.domain.being_state import BeingState
 from app.repositories import InMemoryBeingRepository, PostgresBeingRepository
 
@@ -64,10 +65,11 @@ def _reachable_postgres_or_skip():
     ]
 )
 def being_repo(request):
-    """A BeingRepository under test. Runs the same contract against the
-    in-memory fake and, when a DB is reachable, a live Postgres adapter."""
+    """A BeingRepository under test, paired with the unit of work its writes go
+    through (ADR 0017): the no-op unit for the in-memory fake, a session-backed
+    unit for the live Postgres adapter. Runs the same contract against both."""
     if request.param == "memory":
-        yield InMemoryBeingRepository()
+        yield InMemoryBeingRepository(), NullUnitOfWork()
         return
 
     engine = _reachable_postgres_or_skip()
@@ -75,40 +77,48 @@ def being_repo(request):
     create_all(engine)
     session = session_factory(engine)()
     try:
-        yield PostgresBeingRepository(session)
+        yield PostgresBeingRepository(session), SessionUnitOfWork(session)
     finally:
         session.close()
         engine.dispose()
 
 
 def test_a_saved_being_round_trips_through_the_repository(being_repo):
+    repo, uow = being_repo
     being = BeingState(being_id="being_001", needs={"hunger": 35, "safety": 70}, emotion="curious")
 
-    being_repo.save(being)
+    with uow.begin():
+        repo.save(being)
 
-    assert being_repo.get("being_001") == being
+    assert repo.get("being_001") == being
 
 
 def test_an_unknown_being_reads_as_absent(being_repo):
-    assert being_repo.get("being_nobody") is None
+    repo, _uow = being_repo
+    assert repo.get("being_nobody") is None
 
 
 def test_saving_a_being_again_replaces_the_stored_one(being_repo):
-    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 10}, emotion="calm"))
-    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 90}, emotion="hungry"))
+    repo, uow = being_repo
+    with uow.begin():
+        repo.save(BeingState(being_id="being_001", needs={"hunger": 10}, emotion="calm"))
+    with uow.begin():
+        repo.save(BeingState(being_id="being_001", needs={"hunger": 90}, emotion="hungry"))
 
-    stored = being_repo.get("being_001")
+    stored = repo.get("being_001")
     assert stored.emotion == "hungry"
     assert stored.needs == {"hunger": 90}
 
 
 def test_a_fetched_being_does_not_alias_the_store(being_repo):
-    being_repo.save(BeingState(being_id="being_001", needs={"hunger": 20}, emotion="calm"))
+    repo, uow = being_repo
+    with uow.begin():
+        repo.save(BeingState(being_id="being_001", needs={"hunger": 20}, emotion="calm"))
 
-    fetched = being_repo.get("being_001")
+    fetched = repo.get("being_001")
     fetched.needs["hunger"] = 999  # mutating the copy must not leak back into the store
 
-    assert being_repo.get("being_001").needs["hunger"] == 20
+    assert repo.get("being_001").needs["hunger"] == 20
 
 
 def test_the_migration_defines_the_six_v0_tables():

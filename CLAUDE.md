@@ -98,6 +98,20 @@ Drift rates, thresholds, timings, and vocabularies live in `config/*.yaml`, not
 in service code. `ConfigService` is the only code that knows config exists; it
 hands services typed policies. Retuning must be a config change only.
 
+### Transactional persistence (atomic unit of work)
+
+Persistence is transactional by unit of work. A single logical operation
+persists atomically or not at all: repositories STAGE writes (add/merge) and
+never call commit themselves; the caller opens one transaction per unit of work
+(`with session.begin(): …`) so an interaction's rows — its interaction_event,
+the derived training_example, the prediction_record — commit together, and a
+failure mid-unit rolls the whole unit back (no orphaned child rows). Postgres
+runs at READ COMMITTED (sufficient for the single-writer sim; raise the
+isolation level only with a reason stated in an ADR). The repository port stays
+the seam; the ORM never leaks above it. A deviation — e.g. an append-only
+single-row write that self-commits — is allowed only with a stated reason (in
+the code and on its card).
+
 ### Documentation
 
 - `docs/adr/NNNN-slug.md` for every architecturally significant decision

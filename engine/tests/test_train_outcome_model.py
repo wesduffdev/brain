@@ -20,6 +20,7 @@ from app.config_service import ConfigService
 from app.db import models
 from app.db.migrate import create_all, drop_all
 from app.db.session import create_db_engine, session_factory
+from app.db.unit_of_work import SessionUnitOfWork
 from app.domain.training_example import TrainingExample
 from app.ml import train_outcome_model as trainer
 from app.ml.encode_features import Example, FeatureEncoder, FeatureSpec
@@ -303,11 +304,16 @@ def test_training_on_real_persisted_examples_writes_an_artifact_and_a_model_run(
         # Wire the event port too: each derived training example carries a
         # foreign key to the interaction_events row it came from, so the parent
         # event must be persisted before its example — real Postgres enforces
-        # this (SQLite does not). This mirrors the runtime write path, where
-        # Simulation._record writes the event before deriving the example.
+        # this (SQLite does not). One unit of work per interaction (ADR 0017)
+        # commits the event and its example in the same transaction, and
+        # SQLAlchemy inserts the parent before the child within it, so the FK
+        # holds. This mirrors the runtime write path.
         event_repo = PostgresInteractionEventRepository(session)
         example_repo = PostgresTrainingExampleRepository(session)
-        sim = Simulation(config, event_repo=event_repo, training_repo=example_repo)
+        uow = SessionUnitOfWork(session)
+        sim = Simulation(
+            config, event_repo=event_repo, training_repo=example_repo, unit_of_work=uow
+        )
         for _ in range(80):
             sim.tick()
         assert example_repo.all(), "the sim should have persisted at least one example"
@@ -319,6 +325,7 @@ def test_training_on_real_persisted_examples_writes_an_artifact_and_a_model_run(
             output_path=str(out),
             training_repo=example_repo,
             model_run_repo=run_repo,
+            unit_of_work=uow,
             timestamp=_FIXED_TIME,
             epochs=5,
             hidden_size=8,

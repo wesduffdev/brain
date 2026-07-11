@@ -11,6 +11,12 @@ shape behind their own ports; events, examples, and runs are append-only, so
 those adapters `add` and read back rather than upserting by id. The Simulation
 writes through the event/example ports as it runs; the trainer writes through the
 model-run port. Neither caller touches the ORM.
+
+Persistence is transactional *by unit of work* (ADR 0017): every Postgres adapter
+only **stages** its write (``session.add``/``merge``) and never commits — the
+caller opens one transaction per logical operation through the `UnitOfWork` seam
+(`app.db.unit_of_work`), so an operation's rows commit together or roll back
+together. An adapter that self-committed would break that atomicity.
 """
 from __future__ import annotations
 
@@ -88,7 +94,6 @@ class PostgresPredictionRecordRepository:
                 prediction_error=record.prediction_error,
             )
         )
-        self._session.commit()
 
     def all(self) -> List[PredictionRecord]:
         rows = (
@@ -123,7 +128,6 @@ class PostgresBeingRepository:
         self._session.merge(  # insert-or-update by primary key
             Being(being_id=being.being_id, needs=dict(being.needs), emotion=being.emotion)
         )
-        self._session.commit()
 
     def get(self, being_id: str) -> Optional[BeingState]:
         row = self._session.get(Being, being_id)
@@ -178,7 +182,6 @@ class PostgresInteractionEventRepository:
                 tick=event.tick,
             )
         )
-        self._session.commit()
 
     def all(self) -> List[InteractionEvent]:
         rows = (
@@ -216,7 +219,6 @@ class PostgresTrainingExampleRepository:
                 output_labels=list(example.output_labels),
             )
         )
-        self._session.commit()
 
     def all(self) -> List[TrainingExample]:
         rows = (
@@ -261,7 +263,6 @@ class PostgresModelRunRepository:
                 finished_at=run.finished_at,
             )
         )
-        self._session.commit()
 
     def all(self) -> List[ModelRun]:
         rows = self._session.query(models.ModelRun).order_by(models.ModelRun.id).all()

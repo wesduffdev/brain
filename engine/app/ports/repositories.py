@@ -18,13 +18,31 @@ snapshot.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Protocol
+from typing import ContextManager, List, Optional, Protocol
 
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.training_example import TrainingExample
+
+
+class UnitOfWork(Protocol):
+    """A transaction boundary owned by the caller — the atomicity seam.
+
+    Repositories only *stage* writes (``add``/``merge``); the caller groups the
+    writes of one logical operation inside ``with uow.begin(): ...`` so they
+    persist atomically. A clean exit commits every staged row together; any
+    exception rolls the whole unit back, leaving no orphan child rows (ADR 0017).
+
+    Two implementations vary across the seam (`app.db.unit_of_work`): a no-op
+    context for the in-memory fakes (no database), and one real transaction over
+    a SQLAlchemy ``Session`` for the Postgres path."""
+
+    def begin(self) -> ContextManager[None]:
+        """Open one unit of work: a context that commits its staged writes on a
+        clean exit and rolls them all back on any exception."""
+        ...
 
 
 class BeingRepository(Protocol):

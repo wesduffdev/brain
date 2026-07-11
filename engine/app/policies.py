@@ -1159,6 +1159,9 @@ class VoicePolicy:
     rate: int = 175
     pitch: int = 50
     emotion_params: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    # Reading a whole DOCUMENT aloud (reading R8): the largest utterance the being
+    # voices in one go — a long file is chunked to this before synthesis.
+    read_aloud_max_chars: int = 2000
 
     def default_params(self) -> VoiceParams:
         """The neutral voice, before any emotion override."""

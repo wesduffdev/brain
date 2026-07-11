@@ -727,19 +727,22 @@ _Avoid_: priority-as-queue-order, importance, weight, relevance (the recall
 signal).
 
 **Voicebox**:
-The faculty that turns the being's self-report into audible SPEECH — a voice port
-behind which an open-source TTS engine (espeak-ng) renders the report text to
-audio, exposed at `/speak`. Like narration it sits ON TOP of the simulation: it
-gives the words sound, never new words, and controls nothing. Voice is an upgrade,
-not a dependency — a host with no engine degrades to a clear no-op and the being
-still answers in text.
+The faculty that turns the being's words into audible SPEECH — a voice port behind
+which an open-source TTS engine (espeak-ng) renders text to audio. It voices the
+being's self-report (`/speak`), reads a document you hand it aloud (`/read`), and
+speaks a grounded reading answer on request (an opt-in `speak` on `/ask/reading`
+and `/chat`) — one voicebox, one port, reused across all three (reading R8). Like
+narration it sits ON TOP of the simulation: it gives words sound, never new words,
+and controls nothing. Voice is an upgrade, not a dependency — a host with no engine
+degrades to a clear no-op and the being still answers in text.
 _Avoid_: voice assistant, speech agent, TTS-as-feature, speaker, mouth.
 
 **Utterance**:
-One thing the being is asked to speak — the self-report text handed to the
-voicebox, together with the voice parameters (rate, pitch, voice) it is spoken
-with. The being can only utter what it can report, so an utterance is as grounded
-as the self-report behind it.
+One thing the being is asked to speak — the text handed to the voicebox (its
+self-report, a grounded reading answer, or one chunk of a document being read
+aloud), together with the voice parameters (rate, pitch, voice) it is spoken with.
+The being can only utter what it can report, read, or answer, so an utterance is as
+grounded as the text behind it.
 _Avoid_: message, phrase, line, dialogue, sound clip.
 
 **Synthesize**:
@@ -749,6 +752,15 @@ the host. Synthesis adds sound to words the being already produced; it never
 produces the words.
 _Avoid_: speak (the act itself), generate, narrate/render (the narrator's words),
 TTS (as a verb).
+
+**Read aloud**:
+To voice a whole DOCUMENT through the voicebox — the document is cleaned and chunked
+into utterances (reusing ingest, at a config-driven read-aloud size) and each is
+synthesized in turn, so a long file is spoken in sensible pieces rather than one
+enormous synthesis call (`/read`, reading R8). Distinct from reading-as-perception
+(which CHANGES the being) and Reading QA (which ANSWERS a question): reading aloud
+only speaks the document's own words and mutates nothing.
+_Avoid_: narrate, recite, playback, dictate, text-to-speech (the mechanism).
 
 **Reading**:
 The faculty by which the being takes in a document you hand it and LEARNS from

@@ -135,7 +135,7 @@ flowchart TB
         Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
         VBuild["build_voice: config engine selection (S4 = reading R8)"]
-        VPort["VoicePort seam: synthesize self-report → speech"]
+        VPort["VoicePort seam: synthesize self-report / reading answers / documents → speech (reading R8)"]
         Espeak["EspeakVoice: espeak-ng TTS (host-gated; no-op if binary absent)"]
         FakeV["FakeVoice: in-memory (tests)"]
     end
@@ -247,6 +247,10 @@ flowchart TB
     Self -->|self-report| API
     API -->|"/speak"| Self
     Self -->|self-report text| VPort
+    API -->|"/read: voice a document aloud"| Ingest
+    Ingest -.->|cleaned + chunked read-aloud utterances| VPort
+    ReadingQA -.->|"answer text (speak=true)"| VPort
+    Convo -.->|"answer text (speak=true)"| VPort
     VPort --> VBuild
     VBuild --> Espeak
     VBuild -.-> FakeV

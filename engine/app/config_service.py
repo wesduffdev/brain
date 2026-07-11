@@ -940,12 +940,14 @@ class ConfigService:
             str(name): {str(k): int(v) for k, v in (spec or {}).items()}
             for name, spec in (voice.get("emotion", {}) or {}).items()
         }
+        read_aloud = voice.get("read_aloud", {}) or {}
         return VoicePolicy(
             engine=str(voice.get("engine", "espeak-ng")),
             voice=str(voice.get("voice", "en")),
             rate=int(voice.get("rate", 175)),
             pitch=int(voice.get("pitch", 50)),
             emotion_params=emotion_params,
+            read_aloud_max_chars=int(read_aloud.get("max_chars", 2000)),
         )
 
     # --- render / commands ------------------------------------------------

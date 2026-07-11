@@ -1,0 +1,66 @@
+# The being's LEARNED DISPOSITIONS (card v6): what it recalls, the like/dislike it
+# forms from those memories, and the slow personality traits that grow from a life
+# of experience. This is the single tuning surface for "how the past shapes the
+# present" — retuning it is a change HERE, never in Python.
+#
+# Two layers, both kept WITHIN the safety floor (BRIEF §12): they only ever reshape
+# the ranking of the already-SAFE candidate actions, so no memory and no trait can
+# push the being into an action a safety rule forbids.
+
+# --- preference: how a recalled memory biases the current decision ---------------
+#
+# Before it acts, the being RETRIEVES the memories relevant to what it now perceives
+# and lets them bias each safe action's score. A prior NEGATIVE memory of a SIMILAR
+# object lowers a risky action's score (the hot-lamp generalization: a burn learned
+# from one hot thing makes a new hot thing less touchable); a fond memory raises an
+# appealing action's score.
+#
+#   relevance = (similarity_weight · perceived-property similarity
+#                + same_object_weight · [same object])
+#              · [1 if same action else same_action_floor]
+#              · (1 + salience_weight · memory priority)
+#   bias      = weight · Σ (relevance · valence of what that memory observed)
+#
+# `weight` is the master switch: 0.0 leaves the being deciding on pure utility while
+# still forming memories (the pre-v6 baseline). similarity leans on the ADR 0019
+# perceived-property overlap; `same_action_floor` 0.0 means a burn while *touching*
+# does not weigh on whether to *look*; `salience_weight` lets an emotional/surprising
+# memory (its priority) be recalled more strongly.
+preference:
+  weight: 0.5
+  similarity_weight: 1.0
+  same_object_weight: 1.0
+  same_action_floor: 0.0
+  salience_weight: 0.5
+
+# --- traits: the slow personality that drifts from repeated experience -----------
+#
+# A trait is a level in [min, max] that starts at `start` and drifts a `drift_rate`
+# fraction of the way toward `max` each time an experience pushes it — the saturating
+# curve confidence/familiarity use, so it rises fast at first and then settles into a
+# stable temperament. Small rates on purpose: a single interaction barely moves the
+# being; a life of them forms a disposition.
+#
+#   level_next = level + drift_rate · signal · (max − level)
+#
+# CAUTION rises from repeated NEGATIVE SURPRISE (an outcome that eroded the being AND
+# differed from what it foresaw — hurt worse than expected). Its `decision_gain`
+# amplifies how strongly the being's bad memories hold it back: a being that has been
+# hurt and grown wary drops a risky action's score more for the same remembered burn.
+#
+# CURIOSITY rises from repeated POSITIVE EXPLORATION (safe, non-harmful interactions).
+# Its decision effect is held at 0.0 this slice — the v4 exploration drive already
+# steers novelty-seeking; unifying the two is a follow-up.
+traits:
+  caution:
+    start: 0.2
+    drift_rate: 0.03
+    decision_gain: 1.0
+    min: 0.0
+    max: 1.0
+  curiosity:
+    start: 0.3
+    drift_rate: 0.03
+    decision_gain: 0.0
+    min: 0.0
+    max: 1.0

@@ -19,6 +19,7 @@ from app.policies import (
     BeliefDecisionPolicy,
     CommandSpec,
     ConceptLearningPolicy,
+    ConsolidationPolicy,
     ConversationPolicy,
     CuriosityWeights,
     EmotionRule,
@@ -927,6 +928,28 @@ class ConfigService:
                 str(k): v for k, v in (serve.get("params", {}) or {}).items()
             },
             system=str(serve.get("system", "")),
+        )
+
+    def consolidation_policy(self) -> ConsolidationPolicy:
+        """How the being CONSOLIDATES what it has read into its own weights on its
+        'sleep' cycle (reading R5, ADR 0041), from the `consolidation:` block of
+        ``config/language.yaml``: whether it is `enabled` (default OFF, so the
+        shipped tick is byte-identical), the `sleep_threshold` the `sleep` need must
+        cross to trigger a pass (the rising edge -- the being falling asleep), how
+        many `pair_count` Q/A pairs to synthesize FROM the accumulated knowledge
+        store, the `synthesis_prompt`/`pair_template` the BUILD-time model renders
+        them with, and the dataset `source` label. Absent config yields safe,
+        disabled defaults, so turning consolidation on and retuning it is a config
+        change only -- never a code one."""
+        block = self._language.get("consolidation", {}) or {}
+        defaults = ConsolidationPolicy()
+        return ConsolidationPolicy(
+            enabled=bool(block.get("enabled", defaults.enabled)),
+            sleep_threshold=int(block.get("sleep_threshold", defaults.sleep_threshold)),
+            pair_count=int(block.get("pair_count", defaults.pair_count)),
+            synthesis_prompt=str(block.get("synthesis_prompt", defaults.synthesis_prompt)),
+            pair_template=str(block.get("pair_template", defaults.pair_template)),
+            source=str(block.get("source", defaults.source)),
         )
 
     def voice_policy(self) -> VoicePolicy:

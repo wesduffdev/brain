@@ -133,6 +133,7 @@ flowchart TB
         Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
         Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
         Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
+        Consol["ConsolidationScheduler + run_consolidation: the being's sleep cycle TRIGGERS an ASYNC host-native LoRA pass (never blocks the tick) over Q/A pairs synthesized from the knowledge store via the LanguageModelPort (Claude, BUILD-time); reuses R1 fine-tune + R2 serve so facts are later recalled WITHOUT retrieval (reading R5; config-gated + disabled by default, host-gated)"]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
         VBuild["build_voice: config engine selection (S4 = reading R8)"]
         VPort["VoicePort seam: synthesize self-report / reading answers / documents → speech (reading R8)"]
@@ -242,6 +243,13 @@ flowchart TB
     Finetune -.->|host-native LoRA fine-tune| Adapter
     Adapter -.->|fuse → GGUF → ollama create| Serve
     Serve -.->|Ollama :11434 (host.docker.internal)| Local
+
+    %% ---- Knowledge consolidation on 'sleep': the sim tick TRIGGERS an async, non-blocking LoRA pass; it never runs on the tick thread and never drives the being (reading R5, ADR 0041) ----
+    Need -.->|sleep-need rising edge enqueues consolidation (async, non-blocking)| Consol
+    Store -.->|accumulated chunks to consolidate| Consol
+    LMPort -.->|build-time Q/A pair synthesis (Claude)| Consol
+    Consol -.->|consolidation pairs → host-native LoRA fine-tune| Finetune
+    Consol -.->|re-fuse → GGUF → ollama create| Serve
     LCmd --> LMPort
     API -->|"/ask"| Self
     Self -->|self-report| API

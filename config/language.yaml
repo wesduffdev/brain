@@ -262,3 +262,33 @@ reading_perception:
               they, them, their, when, then, than, so, if, we, you, your, he, she,
               his, her, do, does, did, has, have, had, will, would, can, could, not,
               no, yes, there, here, what, which, who, whom, into, over, under, about]
+
+# The being's KNOWLEDGE CONSOLIDATION on its 'sleep' cycle (reading R5, ADR 0041).
+# The growing knowledge store (retrieval:, above) makes what it reads usable
+# IMMEDIATELY; consolidation is the "learn it for good" step -- on the being's sleep
+# cycle it LoRA-fine-tunes over Q/A pairs synthesized FROM the accumulated store, so
+# recurring facts are baked into the model's WEIGHTS and later recalled WITHOUT
+# retrieval. The sim tick only TRIGGERS the pass (async, host-native, never blocks the
+# tick); `make consolidate` forces one now. The synthesis model (Claude) is a
+# BUILD/HOST-time data step only -- runtime inference stays 100% our local model.
+# Only ConfigService reads this; retuning consolidation -- and turning it on -- is a
+# change HERE, never in Python.
+consolidation:
+  # OFF by default, so the shipped tick is byte-identical: no consolidation is
+  # triggered until this is flipped on (and a scheduler is wired at the host runtime).
+  enabled: false
+  # The `sleep` need level (>=) that marks the sleep cycle; the trigger fires on the
+  # RISING EDGE across it (the being just fell asleep), so a pass runs once per sleep,
+  # not every tick while asleep. Aligned with the `sleepy` emotion threshold
+  # (config/emotions.yaml: sleep >= 80).
+  sleep_threshold: 80
+  # How many consolidation Q/A pairs to synthesize per pass (the first accumulated
+  # knowledge chunks). Keep small for a test-scale LoRA pass.
+  pair_count: 32
+  # What the BUILD-time model turns each knowledge chunk into a consolidation pair
+  # with ({passage} is filled with the chunk); and how its completion becomes the
+  # training line ({passage}/{completion} slots). Runtime never sees these.
+  synthesis_prompt: "From the following passage the being has read, write ONE factual question and its answer, as 'Q: <question>\nA: <answer>'. Answer only from the passage.\n\nPassage:\n{passage}"
+  pair_template: "{completion}"
+  # The dataset label the consolidation training set carries (its `source`).
+  source: consolidation

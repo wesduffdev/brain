@@ -266,6 +266,50 @@ def test_a_low_intensity_reaction_does_not_interrupt():
     assert action_events == []
 
 
+def test_an_action_not_in_interruptible_actions_is_not_interrupted():
+    # A strong, safe reaction on an action the config does NOT list as interruptible
+    # changes nothing: the being completes its action. Only listed actions may be
+    # broken off, so instinct cannot cancel an action the config withholds from it.
+    def _cfg():
+        block = _reaction_block(visual_only=True, allow_interrupt=True)
+        block["reaction"]["interrupt"]["interruptible_actions"] = ["touch"]  # NOT observe
+        return ConfigService.from_dict(
+            {"tick": {"duration_ms": 1000}, "needs": _needs()},
+            _EMOTIONS,
+            rooms={"room": {"id": "room_001", "contains": ["obj_soft"]}},
+            objects=_OBJECTS,
+            outcome={"labels": ["pleasant"], "context_features": []},
+            actions=_ACTIONS,
+            safety={"rules": []},
+            instinct=block,
+        )
+
+    sim, bus = _sim(_cfg())
+    action_events = _recorder(bus, ACTION_EVENTS_TOPIC)
+    bus.publish(INSTINCT_REACTIONS_TOPIC, _flinch(intensity=0.99))
+
+    state = sim.tick()
+
+    assert state["currentAction"]["type"] == "observe"   # completed, not cancelled
+    assert sim.interactions()[-1]["action"] == "observe"
+    assert action_events == []
+
+
+def test_the_being_still_reads_scared_on_the_interrupted_tick():
+    # On the very tick an interruption cancels the action, the visual-only bias still
+    # applies: the being reads `scared` and surfaces the flinch, even though it took
+    # no action. Interruption (behaviour) and emotion bias (expression) are both live.
+    sim, bus = _sim(_config(contains=("obj_soft",), visual_only=True, allow_interrupt=True))
+    bus.publish(INSTINCT_REACTIONS_TOPIC, _flinch(intensity=0.95))
+
+    state = sim.tick()
+
+    assert "currentAction" not in state          # the action was broken off
+    assert state["emotion"] == "scared"          # emotion still biased (derived)
+    assert state["reaction"] == {"type": "flinch", "intensity": 0.95}
+    assert state["needs"]["safety"] == 80        # derived, NOT assigned
+
+
 # --- config plumbing ----------------------------------------------------------
 
 
@@ -291,14 +335,20 @@ def test_config_reads_the_two_activation_flags():
     assert policy.allow_interrupt is True
 
 
-def test_the_shipped_config_activates_visual_only_and_keeps_interrupt_off():
-    # VISUAL-ON: the shipped being SURFACES reactions and biases its DERIVED
-    # emotion (visual_only ON), but no action is ever interrupted (allow_interrupt
-    # stays OFF this slice). The flags-off SAFE DEFAULT for an unset reaction block
-    # is covered by test_config_yields_the_reaction_response_policy_defaulting_off.
+def test_the_shipped_config_activates_both_visual_only_and_interrupt():
+    # INTERRUPT-ON: the shipped being SURFACES reactions and biases its DERIVED
+    # emotion (visual_only ON) AND now BREAKS OFF a safe, interruptible action on a
+    # strong reaction (allow_interrupt ON) -- the first time instinct changes what the
+    # being DOES. The flags-off SAFE DEFAULT for an unset reaction block is still
+    # covered by test_config_yields_the_reaction_response_policy_defaulting_off.
     import os
 
     root = os.path.join(os.path.dirname(__file__), "..", "..", "config")
     policy = ConfigService.from_files(root).reaction_response_policy()
     assert policy.visual_only is True
-    assert policy.allow_interrupt is False
+    assert policy.allow_interrupt is True
+    # tuned to be legible AND safe: a strong reaction interrupts an epistemic/contact
+    # action, and the protective response it implies is validated through the floor.
+    assert policy.intensity_threshold == 0.7
+    assert "observe" in policy.interruptible_actions
+    assert policy.protective_action == "withdraw"

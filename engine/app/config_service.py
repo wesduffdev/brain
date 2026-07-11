@@ -391,6 +391,14 @@ class ConfigService:
         # through unchanged, so none can be silently dropped here.
         return self._with(rooms=rooms)
 
+    def with_safety_rules(self, rules: List[Mapping]) -> "ConfigService":
+        """Return a copy of this config whose invariant-floor rules are exactly
+        `rules` (each `{action, blocked_property, reason}`), every other section
+        carried through unchanged — the demo seam for showing the floor SUPPRESS a
+        would-be action interruption. Mirrors `with_room_contents`; the floor stays
+        the sole arbiter (ADR 0009/0014), so this only tightens what is forbidden."""
+        return self._with(safety={"rules": list(rules)})
+
     # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
 
     def action_policies(self) -> Dict[str, ActionPolicy]:

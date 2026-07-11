@@ -43,9 +43,10 @@ Three capabilities, one faculty:
 | Fork | Decision | Consequence |
 |---|---|---|
 | How to build "our own LLM" | **Fine-tune a small open model** (LoRA) | Local, open-source, our own artifact; fluent enough to converse. |
+| Base model | **Qwen2.5-3B-Instruct** (Apache-2.0) — a **test-scale** default | Comfortable on the 48 GB M4 Pro; fast LoRA fine-tunes; 7B+ headroom exists but is unneeded for a test. This is a test, not a production app. |
 | Knowledge stance | **Learn-and-grow** — base knowledge **+** everything you teach it, accumulating over time | Evolved from the earlier "closed world / knows only what I give it." No refusal machinery to blind the base model; instead a **growing knowledge store** (see [§3](#3-knowledge-stance-learn-and-grow)). |
 | First thing to see run | **Watch our own model train & generate** | Slice **R1**: LoRA fine-tune on the Mac's GPU (MLX), watch loss drop, sample generations in the document's style. |
-| Where it runs | **Locally on the MacBook** (Rancher + Docker) now; robust production model later | Model runs **host-native** for the Apple GPU; the engine container calls it behind `LanguageModelPort` ([§5](#5-runtime--deployment-local-mac-now-production-later)). |
+| Where it runs | **Locally on a 48 GB M4 Pro MacBook** (Rancher + Docker) now; robust production model later | Model runs **host-native** for the Apple GPU (~30 GB usable when the Mac is otherwise idle); the engine container calls it behind `LanguageModelPort` ([§5](#5-runtime--deployment-local-mac-now-production-later)). |
 
 ---
 
@@ -139,7 +140,7 @@ is not passed through**. So anything running *in a container* on your Mac is
 
 | Component | Recommendation | Notes / alternatives |
 |---|---|---|
-| **Base model** | A small open-weight instruct model — **Qwen2.5-1.5B-Instruct** (Apache-2.0) as a good conversation/size balance; **0.5B** if RAM-constrained, up to **3B** if the Mac has headroom | SmolLM2 (Apache, on-device) · GPT-2-small (fully MIT, most transparent for "watch it learn"). Pick by your Mac's unified memory (8/16/32 GB). |
+| **Base model** | **Qwen2.5-3B-Instruct** (Apache-2.0) — the chosen **test-scale** default: comfortable on the 48 GB M4 Pro (~6–7 GB serve, ~10–16 GB LoRA fine-tune), quick to iterate | Lighter: 1.5B / 0.5B. Headroom for 7B (even 14B via 4-bit) exists but is overkill for a test. SmolLM2 · GPT-2-small (most transparent for "watch it learn"). |
 | **Fine-tune (local, Mac)** | **MLX-LM LoRA** (`mlx_lm.lora`) — Metal-native, fast, adapter *is* "our model" | The R1 first-cut runs here. |
 | **Serve (local, Mac)** | **MLX-LM server** (OpenAI-style) host-native; **Ollama** for a quick base-model start | Reached from the engine via `host.docker.internal`. |
 | **Fine-tune / serve (prod)** | **PyTorch + PEFT/LoRA** on CUDA, served by **vLLM/TGI** — same `LanguageModelPort` | Local-Mac → prod is an endpoint swap. |
@@ -233,15 +234,14 @@ ask it grounded, cited questions that blend what it read with what it knows. R8
 1. **Mac toolchain.** OK to standardize local on **MLX-LM** (Metal-native
    fine-tune *and* serve), with **Ollama** as a quick serve-only fallback — or a
    preference?
-2. **Base model / RAM.** Roughly how much unified memory does the Mac have? That
-   sets the default base size (**Qwen2.5-0.5B** safe everywhere; **1.5B** good on
-   16 GB+; **3B** on 32 GB+).
-3. **Teacher for training data.** For consolidation/QA pairs, is **Claude at build
+2. **Teacher for training data.** For consolidation/QA pairs, is **Claude at build
    time only** acceptable to synthesize the dataset from your docs (runtime stays
    100% ours/local), or keep it hand-authored?
-4. **Consolidation cadence.** Run consolidation **on demand** (`make consolidate`),
+3. **Consolidation cadence.** Run consolidation **on demand** (`make consolidate`),
    or **automatically** after N new documents / on a "sleep" tick?
-5. **Conversation modality.** Typed questions with **spoken + text** answers to
+4. **Conversation modality.** Typed questions with **spoken + text** answers to
    start (voice via R8), or full voice-in/voice-out later?
-6. **Cut cards?** Want the orchestrator to mint the Trello cards for R1→R4 (+R8)
+5. **Cut cards?** Want the orchestrator to mint the Trello cards for R1→R4 (+R8)
    next, or keep planning first?
+
+_Resolved: base model & hardware → **Qwen2.5-3B-Instruct** on the 48 GB M4 Pro._

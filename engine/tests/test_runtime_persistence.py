@@ -28,11 +28,13 @@ import os
 from typing import Dict
 
 import pytest
+from sqlalchemy import text
 
 from app.bootstrap import build_simulation
 from app.config_service import ConfigService
 from app.db import models
 from app.db.migrate import create_all, drop_all
+from app.db.models import Base
 from app.db.session import create_db_engine, session_factory
 from app.ml.encode_features import Example
 from app.repositories import (
@@ -82,21 +84,21 @@ def test_the_bootstrap_wires_repos_and_records_events_examples_and_predictions()
     examples = InMemoryTrainingExampleRepository()
     predictions = InMemoryPredictionRecordRepository()
 
-    sim = build_simulation(
+    with build_simulation(
         config,
         env={},
         event_repo=events,
         training_repo=examples,
         prediction_repository=predictions,
         predictor=_fake_predictor(),
-    )
-    for _ in range(80):
-        sim.tick()
+    ) as sim:
+        for _ in range(80):
+            sim.tick()
 
-    assert len(sim.interactions()) > 0, "the being should have acted at least once"
-    assert len(events.all()) == len(sim.interactions())
-    assert len(examples.all()) > 0, "an affordance interaction should derive an example"
-    assert len(predictions.all()) == len(sim.predictions()) > 0
+        assert len(sim.interactions()) > 0, "the being should have acted at least once"
+        assert len(events.all()) == len(sim.interactions())
+        assert len(examples.all()) > 0, "an affordance interaction should derive an example"
+        assert len(predictions.all()) == len(sim.predictions()) > 0
 
 
 def test_without_a_database_url_the_engine_runs_in_memory_with_no_persistence():
@@ -104,12 +106,12 @@ def test_without_a_database_url_the_engine_runs_in_memory_with_no_persistence():
     # in memory, nothing raises, and with no predictor loaded shadow mode is off.
     config = ConfigService.from_files(_CONFIG_ROOT)
 
-    sim = build_simulation(config, env={})
-    for _ in range(20):
-        sim.tick()
+    with build_simulation(config, env={}) as sim:
+        for _ in range(20):
+            sim.tick()
 
-    assert len(sim.interactions()) > 0
-    assert sim.predictions() == []
+        assert len(sim.interactions()) > 0
+        assert sim.predictions() == []
 
 
 # --- live Postgres round-trip (skipped when unreachable, never faked) --------
@@ -138,23 +140,71 @@ def test_a_configured_engine_persists_events_examples_predictions_to_postgres():
     # object parent rows, and wires the Postgres adapters. A fake predictor turns
     # shadow mode on so prediction records are written too.
     config = ConfigService.from_files(_CONFIG_ROOT)
-    sim = build_simulation(
+    built = build_simulation(
         config,
         env={"DATABASE_URL": os.environ["DATABASE_URL"]},
         predictor=_fake_predictor(),
     )
-    for _ in range(80):
-        sim.tick()
-
-    session = session_factory(engine)()
+    sim = built.simulation
     try:
-        event_count = session.query(models.InteractionEvent).count()
-        example_count = session.query(models.TrainingExample).count()
-        prediction_count = session.query(models.PredictionRecord).count()
+        for _ in range(80):
+            sim.tick()
 
-        assert event_count == len(sim.interactions()) > 0
-        assert example_count > 0
-        assert prediction_count == len(sim.predictions()) > 0
+        session = session_factory(engine)()
+        try:
+            event_count = session.query(models.InteractionEvent).count()
+            example_count = session.query(models.TrainingExample).count()
+            prediction_count = session.query(models.PredictionRecord).count()
+
+            assert event_count == len(sim.interactions()) > 0
+            assert example_count > 0
+            assert prediction_count == len(sim.predictions()) > 0
+        finally:
+            session.close()
     finally:
-        session.close()
+        # Close the runtime's own session so its read transaction (and locks) is
+        # released before the next test's schema teardown — the regression this
+        # bug fixed.
+        built.close()
         engine.dispose()
+
+
+@pytest.mark.integration
+def test_a_finished_run_releases_its_session_so_schema_teardown_never_blocks():
+    # Regression (bug: bootstrap session leak). The runtime bootstrap opened a
+    # session that no one closed; once a finished run read its interactions back,
+    # that session sat idle-in-transaction holding ACCESS SHARE locks, so a later
+    # `drop_all` (which needs ACCESS EXCLUSIVE) blocked forever and the whole
+    # integration suite hung. Closing the built handle must release the session so
+    # schema teardown proceeds. The DROP below is bounded by a `lock_timeout`, so a
+    # regression fails fast here instead of hanging the suite.
+    engine = _reachable_postgres_or_skip()
+    drop_all(engine)
+    create_all(engine)
+
+    config = ConfigService.from_files(_CONFIG_ROOT)
+    built = build_simulation(
+        config,
+        env={"DATABASE_URL": os.environ["DATABASE_URL"]},
+        predictor=_fake_predictor(),
+    )
+    sim = built.simulation
+    for _ in range(20):
+        sim.tick()
+    # the reads that used to strand the runtime's session idle-in-transaction
+    assert len(sim.interactions()) > 0
+    _ = sim.predictions()
+
+    built.close()  # must release the runtime's session (and any locks it held)
+
+    # A fresh, independent connection must now be able to take ACCESS EXCLUSIVE and
+    # drop the tables. Bound the wait so a leak regression errors in seconds rather
+    # than hanging the run.
+    guard = create_db_engine(os.environ["DATABASE_URL"])
+    try:
+        with guard.connect() as conn:
+            conn.execute(text("SET lock_timeout = '5s'"))
+            Base.metadata.drop_all(bind=conn)
+            conn.commit()
+    finally:
+        guard.dispose()

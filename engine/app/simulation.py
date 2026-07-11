@@ -408,7 +408,7 @@ class Simulation:
         # Advance object motion one tick and raise an approach stimulus for any
         # object now closing on the body — a world/perception side effect that
         # never bends the decision below.
-        self._stimulus.observe(perceived=perceived, tick=tick)
+        self._stimulus.observe(perceived=perceived, tick=tick, sound=self._room.sound)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 

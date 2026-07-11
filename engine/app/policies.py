@@ -1253,3 +1253,25 @@ class OllamaServePolicy:
         """The full path to the exported GGUF (the Modelfile `FROM`): the GGUF file
         inside the fused-model directory."""
         return f"{self.fused_path.rstrip('/')}/{self.gguf_file}"
+
+
+@dataclass(frozen=True)
+class KnowledgeRetrievalPolicy:
+    """How the being retrieves from its GROWING KNOWLEDGE STORE (reading R3, ADR
+    0038), from the `retrieval:` block of ``config/language.yaml``. `embedder`
+    selects how a passage becomes a vector -- ``"hashing"`` (the deterministic,
+    OFFLINE bag-of-words embedder, the default) or ``"sentence-transformers"`` (the
+    real semantic embedder, gated on the optional library). `dim` is the hashing
+    embedder's vector dimension; `k` is how many passages a query retrieves by
+    default; `model` is the sentence-transformers model to load (only when that
+    embedder is selected). Distinct from the memory-recall `RetrievalPolicy` (card
+    v6): this is the reading faculty's DOCUMENT store, not memory recall. The
+    defaults are fully offline, so a config with no `retrieval:` block still
+    retrieves; retuning what/how the being retrieves is a config change only --
+    never a code one.
+    """
+
+    embedder: str = "hashing"
+    dim: int = 256
+    k: int = 4
+    model: str = "BAAI/bge-small-en-v1.5"

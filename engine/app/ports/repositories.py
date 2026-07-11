@@ -31,6 +31,7 @@ from app.domain.prediction_record import PredictionRecord
 from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
 from app.domain.event_log import EventLogEntry
+from app.domain.knowledge import KnowledgeChunk
 from app.domain.instinct import (
     InstinctPrediction,
     InstinctReaction,
@@ -303,4 +304,22 @@ class InstinctTrainingExampleRepository(Protocol):
 
     def all(self) -> List[InstinctTrainingExample]:
         """Every stored instinct training example, oldest first."""
+        ...
+
+
+class KnowledgeChunkRepository(Protocol):
+    """Stores the being's GROWING KNOWLEDGE STORE — the embedded passages of every
+    document it has read (reading R3, ADR 0038). Append-only and CUMULATIVE, like
+    the other learned-fact ports: each ingested document `add`s its chunks (staged
+    in one unit of work, ADR 0017) and never replaces what came before, and `all`
+    reads them back for a retrieval to rank. The in-memory fake (`app.repositories`)
+    is the seam the behavior suite drives; a Postgres-backed adapter onto the
+    `knowledge_chunks` table serves the runtime (pgvector-ready — roadmap v11)."""
+
+    def add(self, chunk: KnowledgeChunk) -> None:
+        """Append one embedded passage to the store."""
+        ...
+
+    def all(self) -> List[KnowledgeChunk]:
+        """Every stored passage, oldest first."""
         ...

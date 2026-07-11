@@ -149,6 +149,8 @@ def test_the_migration_defines_the_schema_tables():
         "instinct_predictions",
         "instinct_reactions",
         "instinct_training_examples",
+        # the growing knowledge store the reading faculty adds (R3, ADR 0038)
+        "knowledge_chunks",
     }
 
 

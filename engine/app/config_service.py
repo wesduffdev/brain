@@ -28,6 +28,7 @@ from app.policies import (
     InstinctModelPolicy,
     InstinctConsumePolicy,
     InstinctRuntimePolicy,
+    KnowledgeRetrievalPolicy,
     LocalModelPolicy,
     LoRAFinetunePolicy,
     MemoryPriorityPolicy,
@@ -744,6 +745,25 @@ class ConfigService:
                     "encountered anything like that.",
                 )
             ),
+        )
+
+    def knowledge_retrieval_policy(self) -> KnowledgeRetrievalPolicy:
+        """How the being retrieves from its GROWING KNOWLEDGE STORE (reading R3, ADR
+        0038), from the `retrieval:` block of ``config/language.yaml``: which
+        `embedder` turns a passage into a vector (``"hashing"`` -- the deterministic
+        offline default -- or the gated ``"sentence-transformers"``), the hashing
+        embedder's `dim`, the default number of passages `k` a query retrieves, and
+        the sentence-transformers `model`. Absent config yields the safe OFFLINE
+        defaults, so retuning what/how the being retrieves is a config change only.
+        Distinct from `retrieval_policy` (card v6 memory recall) -- this is the
+        reading faculty's document store."""
+        retrieval = self._language.get("retrieval", {}) or {}
+        defaults = KnowledgeRetrievalPolicy()
+        return KnowledgeRetrievalPolicy(
+            embedder=str(retrieval.get("embedder", defaults.embedder)),
+            dim=int(retrieval.get("dim", defaults.dim)),
+            k=int(retrieval.get("k", defaults.k)),
+            model=str(retrieval.get("model", defaults.model)),
         )
 
     def local_model_policy(self) -> LocalModelPolicy:

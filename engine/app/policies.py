@@ -1275,3 +1275,37 @@ class KnowledgeRetrievalPolicy:
     dim: int = 256
     k: int = 4
     model: str = "BAAI/bge-small-en-v1.5"
+
+
+@dataclass(frozen=True)
+class ReadingQAPolicy:
+    """How the being answers a question about what it has READ (reading R4, ADR
+    0039), from the `reading_qa:` block of ``config/language.yaml``. Retrieval
+    finds the top-`k` passages; a passage scoring below `min_relevance` is treated
+    as not relevant, so a query that matches nothing the being has read yields the
+    honest unread answer rather than a forced, ungrounded one. The rest are the
+    VOCABULARY the answer is composed from (config-driven, never hard-coded):
+
+    - `read_label` prefixes a grounded answer, and the retrieved passages' source
+      document(s) are appended via `cite_template` (`{sources}` slot) -- so a
+      grounded answer always says WHERE it read the fact.
+    - `unread_response` (`{topic}` slot) is the honest line for a topic the being
+      has not read about; `topic_markers` are the connective(s) after which the
+      asked-about topic begins ("about" in "what do you know *about* dinosaurs").
+    - `blend_base_knowledge` toggles whether an unread answer ALSO offers a
+      base-knowledge answer (from the model, WITHOUT any retrieved context, so it
+      can carry no citation), labelled with `base_label` so what the being READ is
+      always distinguished from what it already KNEW.
+
+    Absent config yields safe defaults, so retuning how the being answers -- and how
+    honestly it declines the unread -- is a config change only. Distinct from
+    `KnowledgeRetrievalPolicy` (that tunes the STORE; this tunes the ANSWER)."""
+
+    k: int = 4
+    min_relevance: float = 0.05
+    unread_response: str = "I haven't read anything about {topic} yet."
+    blend_base_knowledge: bool = True
+    read_label: str = "From what I read"
+    base_label: str = "From what I already knew"
+    cite_template: str = "(source: {sources})"
+    topic_markers: Tuple[str, ...] = ("about",)

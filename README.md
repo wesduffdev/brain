@@ -126,6 +126,7 @@ flowchart TB
         Ingest["Reading ingest: read → clean → chunk into training-ready text (reading R1)"]
         Embed["Embedder: passage → vector (deterministic hashing offline default; sentence-transformers gated) (reading R3)"]
         Store["RetrievalPort / KnowledgeStore: growing, persistent, cumulative knowledge store; top-k cosine, cites source (reading R3; pgvector-ready)"]
+        ReadingQA["ReadingQAService: RetrievalPort top-k -> grounded prompt (only retrieved passages + question) -> LanguageModelPort -> cited answer; unread declined honestly + labelled base knowledge (reading R4)"]
         Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
         Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
         Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
@@ -216,6 +217,10 @@ flowchart TB
     Ingest -->|chunks| Embed
     Embed -->|embeddings| Store
     Store -->|persist chunks + embeddings| PG
+    Store -->|top-k relevant passages| ReadingQA
+    ReadingQA -->|grounded prompt| LMPort
+    API -->|"/ask/reading"| ReadingQA
+    ReadingQA -->|grounded, cited answer| API
     Finetune -.->|host-native LoRA fine-tune| Adapter
     Adapter -.->|fuse → GGUF → ollama create| Serve
     Serve -.->|Ollama :11434 (host.docker.internal)| Local

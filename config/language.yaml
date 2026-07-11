@@ -179,3 +179,36 @@ retrieval:
   # `sentence-transformers`. bge-small-en-v1.5 / all-MiniLM-L6-v2 are good small
   # local open embedders (READING_VOICEBOX §6).
   model: BAAI/bge-small-en-v1.5
+
+# How the being ANSWERS a question about what it has READ (reading R4, ADR 0039).
+# Retrieval (the `retrieval:` block above) finds the passages; this block tunes the
+# ANSWER: it grounds the reply in the retrieved passages and CITES the source
+# document, or -- when nothing read is relevant -- declines honestly and (optionally)
+# offers a clearly-labelled base-knowledge answer. The model only ever sees the
+# retrieved passages + the question, so it cannot invent grounding, and the citation
+# is taken from the retrieval result, never the model. Only ConfigService reads this;
+# retuning how the being answers is a change HERE, never in Python.
+reading_qa:
+  # How many passages a question retrieves (top-k).
+  k: 4
+  # A retrieved passage scoring below this (cosine) is treated as NOT relevant, so a
+  # question matching nothing the being has read declines honestly instead of forcing
+  # an ungrounded answer. 0.0 would accept anything the store returns.
+  min_relevance: 0.05
+  # The honest line for a topic the being has not read about ({topic} is filled from
+  # the question). It NEVER carries a citation -- there is nothing read to cite.
+  unread_response: "I haven't read anything about {topic} yet."
+  # The connective(s) after which the asked-about topic begins ("about" in "what do
+  # you know about dinosaurs" -> "dinosaurs"); a question with none uses the whole
+  # (trimmed) question as the topic.
+  topic_markers: [about]
+  # When true, an unread answer ALSO offers a base-knowledge answer -- the model
+  # answering from its own knowledge WITHOUT any retrieved context (so it can carry no
+  # citation) -- clearly labelled so what the being READ is distinguished from what it
+  # already KNEW. Requires a generative model; with the offline template narrator there
+  # is no base knowledge to draw on, so this is simply skipped.
+  blend_base_knowledge: true
+  # The VOCABULARY an answer is composed from (config-driven, never hard-coded).
+  read_label: "From what I read"          # prefixes a grounded, cited answer
+  base_label: "From what I already knew"  # prefixes the blended base-knowledge answer
+  cite_template: "(source: {sources})"    # how the source document(s) are cited

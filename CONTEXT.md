@@ -316,6 +316,33 @@ How alike two objects are by the overlap of their perceived properties (0 =
 nothing shared, 1 = perceived identically).
 _Avoid_: distance, closeness, match.
 
+**Concept graph**:
+The being's learned knowledge as a walkable network — object/property/outcome
+nodes joined by typed, confidence-bearing edges — projected from its concepts,
+beliefs, and similarities.
+_Avoid_: knowledge base, ontology, semantic net, database.
+
+**Graph node**:
+One object, perceived property, or observed outcome in the concept graph, keyed
+on a perceived token (never a developer label).
+_Avoid_: vertex, entity, record.
+
+**Graph edge**:
+A typed, directed link between two nodes (HAS_PROPERTY, PREDICTS, PRODUCED,
+SIMILAR_TO) carrying an edge confidence, an evidence count, and the memories
+behind it.
+_Avoid_: relation, link, connection, arc.
+
+**Explanation path**:
+The object → property → outcome walk through the graph that justifies a
+prediction — the reason the being expects an outcome.
+_Avoid_: trace, proof, chain, reasoning.
+
+**Edge confidence**:
+How strongly the being holds a graph edge, 0..1, rising with confirming evidence
+on the same saturating curve as concept confidence but tuned independently.
+_Avoid_: weight, probability, similarity, score.
+
 **Shadow mode**:
 Running the outcome predictor alongside the being's rule layer so its predictions
 are recorded and compared, but do **not** control what the being does. The model
@@ -391,6 +418,26 @@ _Avoid_: threshold (generic), assertion.
 **Scenario result**:
 The verdict of one run — before/after/delta/threshold and whether it passed.
 _Avoid_: report, outcome.
+
+**Milestone**:
+A named developmental capability the being grows into, read via one learning
+metric and defined as an ordered ladder of stages.
+_Avoid_: level, achievement, badge.
+
+**Milestone stage**:
+One rung of a milestone, gated by a metric floor; the being sits on the highest
+stage its metric has reached.
+_Avoid_: tier, rank.
+
+**Developmental progression**:
+A run moving the being up at least one milestone stage — the observable "it grew
+up a little".
+_Avoid_: level-up, XP.
+
+**Regression scenario**:
+A scenario run judged pass/fail against its metric floor + expected milestone
+stages; passes on learning, FAILS when it is absent.
+_Avoid_: unit test, assertion.
 
 ## Not in the language
 

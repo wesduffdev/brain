@@ -1,0 +1,49 @@
+# Developmental MILESTONES — the being's growing-up ladder (card v10).
+#
+# A MILESTONE is a named developmental capability the being grows into (e.g.
+# "round things roll when pushed"). Each milestone reads ONE learning metric — the
+# confidence of a named PERCEIVED concept (feature + action + outcome, card v2;
+# never a developer label, ADR 0002) — and defines an ordered ladder of STAGES,
+# each gated by a `min_value` floor. The being sits on the highest stage whose
+# floor its metric has reached; as a run drives the metric up it CROSSES stages,
+# and that crossing is developmental progress the ScenarioRunner records and
+# RegressionEvaluationService checks against a scenario's expected end stage.
+#
+# This file is a HARNESS input, parsed directly by MilestoneService via PyYAML —
+# NOT a ConfigService section, like config/scenarios/*.yaml. Retuning a stage
+# ladder (its floors or stage names) is a change HERE, never in service code. See
+# docs/BRIEF.md §16.
+
+milestones:
+  round_objects_roll:
+    description: >
+      The being grasps that round things roll when pushed — measured by the
+      confidence of the round -> push -> rolls concept.
+    concept:
+      feature: round
+      action: push
+      outcome: rolls
+    # Ordered low -> high; the being is on the highest stage it has reached.
+    stages:
+      - name: unaware
+        min_value: 0.0
+      - name: emerging
+        min_value: 0.2
+      - name: established
+        min_value: 0.6
+
+  hard_objects_make_noise:
+    description: >
+      The being grasps that hard things make noise when pushed — measured by the
+      confidence of the hard -> push -> makes_noise concept.
+    concept:
+      feature: hard
+      action: push
+      outcome: makes_noise
+    stages:
+      - name: unaware
+        min_value: 0.0
+      - name: emerging
+        min_value: 0.2
+      - name: established
+        min_value: 0.6

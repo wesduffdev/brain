@@ -32,3 +32,12 @@ learning_target:
 # with no learning (e.g. zero interactions) cannot clear it — that is the point.
 success_condition:
   min_confidence_delta: 0.5
+
+# The developmental MILESTONES this scenario exercises and the stage the being is
+# expected to have reached by the end — the regression bar checked by
+# RegressionEvaluationService (milestones defined in config/milestones.yaml, card
+# v10). A run with no interaction leaves the milestone on its floor, so the
+# regression check FAILS: no development, no pass.
+milestones:
+  - name: round_objects_roll
+    expect_stage: established

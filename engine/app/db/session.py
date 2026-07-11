@@ -19,11 +19,12 @@ surface. Defaults live in the named constants below, not as literals in the loop
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import sessionmaker
@@ -55,10 +56,32 @@ def database_url(env: Optional[Mapping[str, str]] = None) -> str:
     return url
 
 
+@event.listens_for(Engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
+    """Turn on foreign-key enforcement for every SQLite connection.
+
+    SQLite ships with ``PRAGMA foreign_keys=OFF``, so a referential-integrity
+    violation that a live Postgres rejects would pass silently through the
+    SQLite test path — the gap that once hid a ``training_examples`` FK bug.
+    Registered once on the ``Engine`` class (not a single engine) so it fires on
+    *every* SQLite connection the app or the suite opens — engines built by
+    :func:`create_db_engine` and the in-memory engines tests build directly
+    alike. Guarded by the DBAPI connection type, so Postgres (psycopg)
+    connections are left untouched: this is SQLite-only and a no-op elsewhere."""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 def create_db_engine(url: Optional[str] = None, **kwargs) -> Engine:
     """Build a SQLAlchemy engine for ``url`` (or ``DATABASE_URL`` when omitted).
     ``pool_pre_ping`` keeps pooled connections from going stale; extra kwargs
-    (e.g. ``connect_args``) pass straight through for callers that need them."""
+    (e.g. ``connect_args``) pass straight through for callers that need them.
+
+    Every SQLite engine this returns enforces foreign keys, via the class-level
+    ``connect`` listener above (Postgres is unaffected) — so referential-integrity
+    violations fail in the SQLite test path exactly as they do against Postgres."""
     resolved = url or database_url()
     kwargs.setdefault("pool_pre_ping", True)
     kwargs.setdefault("future", True)

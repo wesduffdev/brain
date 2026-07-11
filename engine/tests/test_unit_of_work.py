@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import create_engine
 
+from app.db import models
 from app.db.migrate import create_all
 from app.db.session import session_factory
 from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
@@ -53,10 +54,24 @@ def _example(event_id: str) -> TrainingExample:
 def sql_session():
     """A real session over an in-memory SQLite database with the v0 schema — a
     real collaborator below the seam, so the unit-of-work's transaction behavior
-    is exercised without Docker or Postgres."""
+    is exercised without Docker or Postgres.
+
+    The being + object parent rows the interaction_events foreign keys require
+    are seeded first (as the runtime bootstrap does), so the units below stage
+    FK-correct writes — SQLite now enforces foreign keys like Postgres (TEST-FK)."""
     engine = create_engine("sqlite+pysqlite:///:memory:")
     create_all(engine)
     session = session_factory(engine)()
+    session.add(models.Being(being_id="being_001", needs={}, emotion="calm"))
+    session.add(
+        models.ObjectRecord(
+            object_id="obj_soft",
+            developer_label="Soft",
+            properties=["soft"],
+            affordances=["touch"],
+        )
+    )
+    session.commit()
     try:
         yield session
     finally:

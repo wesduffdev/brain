@@ -773,6 +773,28 @@ served behind the language-model port. Learning from a document means fine-tunin
 on it (immediately, or later during consolidation).
 _Avoid_: train-from-scratch, retrain, pretrain, tune (a config value), calibrate.
 
+**Serve (a model)**:
+To make the being's fine-tuned model answerable at runtime — fuse its LoRA adapter
+into the base, export GGUF, and register it with a local model server (Ollama) that
+answers prompts on an endpoint the language-model port reaches. Serving turns the
+trained artifact into a running voice; it produces no new knowledge, only
+availability, and drives nothing. One fuse-and-export step per fine-tune.
+_Avoid_: deploy, host (the machine), run, expose, publish.
+
+**GGUF**:
+The single-file model format the fused model is exported to so a local model server
+(Ollama) can load and run it. It is the being's fine-tuned weights packaged to
+serve — the base with the LoRA adapter baked in — not a new model.
+_Avoid_: checkpoint, safetensors, the adapter (what is fused in), quantization.
+
+**Model server**:
+The host-native process (Ollama, on :11434) that loads the GGUF model and answers
+prompts over an HTTP endpoint, reached by the local language-model adapter. On the
+Mac it runs host-native because the Metal GPU is not passed into the container; in
+production it becomes a GPU container behind the SAME port — local→prod is an
+endpoint swap. The server serves words; it never decides anything.
+_Avoid_: sidecar (the deployment shape), backend, LLM, the adapter, endpoint (the URL).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

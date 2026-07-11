@@ -1216,3 +1216,40 @@ class LoRAFinetunePolicy:
     # sampling
     sample_prompt: str = "Tell me, in your own words, what you just read about:"
     sample_max_tokens: int = 200
+
+
+@dataclass(frozen=True)
+class OllamaServePolicy:
+    """How OUR fine-tuned model is SERVED locally and reached behind the
+    `LanguageModelPort` (reading R2, ADR 0037), from the `serve:` block of
+    ``config/language.yaml`` — the host-native Mac pipeline that fuses R1's LoRA
+    into the base, exports GGUF, and `ollama create`s a named model Ollama serves
+    on :11434. `base_model` and `adapter_path` are REUSED from the `finetune:`
+    block (one source of truth — R1's artifacts, never re-declared); this policy
+    adds only the serving surface: `model_name` (the Ollama model created — it MUST
+    equal `narrator.local.model`, so the `local` narrator calls our model),
+    `fused_path` / `gguf_file` (the fuse + GGUF artifact locations, `gguf_path`
+    joining them for the Modelfile `FROM`), `port` (Ollama's serve port, for the
+    informative message), and the config-driven Ollama Modelfile knobs `params`
+    (baked-in generation PARAMETERs) and `system` (an optional SYSTEM preamble) — so
+    no generation value is hard-coded. The model is served only on a Mac with MLX +
+    Ollama (the runner refuses loudly off-host); the defaults match
+    READING_VOICEBOX §6, so the policy is usable before the config carries a
+    `serve` block. Retuning what/how the being's voice is served is a config change
+    only.
+    """
+
+    model_name: str = "jarvis-reader"
+    base_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    adapter_path: str = "models/language/adapter"
+    fused_path: str = "models/language/fused"
+    gguf_file: str = "jarvis-reader-f16.gguf"
+    port: int = 11434
+    params: Mapping[str, object] = field(default_factory=dict)
+    system: str = ""
+
+    @property
+    def gguf_path(self) -> str:
+        """The full path to the exported GGUF (the Modelfile `FROM`): the GGUF file
+        inside the fused-model directory."""
+        return f"{self.fused_path.rstrip('/')}/{self.gguf_file}"

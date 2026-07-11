@@ -27,8 +27,13 @@ narrator:
   # URL is overridden at deploy time by the env var named in base_url_env (a deploy
   # detail, like DATABASE_URL). Inert until `kind: local` and R1/R2 serve a model.
   local:
+    # base_url is the authored default for a HOST-NATIVE engine (localhost); from the
+    # engine CONTAINER set OLLAMA_BASE_URL=http://host.docker.internal:11434 to reach
+    # Ollama on the Mac host (READING_VOICEBOX §5). `model` is OUR served, fine-tuned
+    # model — it MUST match serve.model_name below, so `kind: local` answers from the
+    # model reading R2 creates (not the raw base).
     base_url: http://localhost:11434
-    model: qwen2.5:3b-instruct
+    model: jarvis-reader
     base_url_env: OLLAMA_BASE_URL
     timeout_seconds: 30.0
 
@@ -122,3 +127,31 @@ finetune:
   sample:
     prompt: "Tell me, in your own words, what you just read about:"
     max_tokens: 200
+
+# How OUR fine-tuned model is SERVED locally and reached behind the LanguageModelPort
+# (reading R2, ADR 0037). After R1 saves the LoRA adapter, `make serve-language`
+# (host-native Mac) fuses it into the base, exports GGUF, and `ollama create`s a named
+# model that Ollama serves on :11434 — reached by the `local` narrator above (from the
+# engine container via host.docker.internal:11434). base_model + adapter_path are
+# REUSED from the finetune block above (one source of truth — R1's artifacts); this
+# block adds only the serving surface. Inert off-host (Mac + Ollama + mlx_lm required);
+# only ConfigService reads it — retuning how the being's voice is served is a change HERE.
+serve:
+  # The Ollama model this pipeline creates. MUST match narrator.local.model above, so
+  # the `local` narrator calls exactly the model we serve.
+  model_name: jarvis-reader
+  # Where the fused (base + LoRA) model and its exported GGUF land; gguf_file is the
+  # GGUF filename inside fused_path (the Modelfile FROM = fused_path/gguf_file).
+  fused_path: models/language/fused
+  gguf_file: jarvis-reader-f16.gguf
+  # Ollama's serve port (for the informative message; the engine reaches it via
+  # narrator.local.base_url / OLLAMA_BASE_URL).
+  port: 11434
+  # Generation PARAMETERs baked into the created model via the Modelfile — config-
+  # driven, so nothing about how our model generates is hard-coded in Python.
+  params:
+    temperature: 0.7
+    top_p: 0.9
+    num_ctx: 4096
+  # Optional Modelfile SYSTEM preamble baked into the served model; empty = none.
+  system: ""

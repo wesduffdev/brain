@@ -91,6 +91,42 @@ No `make`? The equivalent is `python3 -m venv engine/.venv`, install
 `PYTHONPATH=.` (e.g. `python -m app.demo 300`, `python -m pytest`,
 `python -m app.auth_token`).
 
+## Run with Postgres
+
+Persistence uses Postgres (V0-7, [ADR 0007](docs/adr/0007-persistence-repository-port-and-schema-seam.md)).
+Start the database on its own, point `DATABASE_URL` at it, and create the schema:
+
+```bash
+make db-up                                  # start Postgres, wait until it accepts connections
+export DATABASE_URL=postgresql+psycopg://sim:sim@localhost:5432/being_sim
+make migrate                                # create the v0 tables (retries until the DB is ready)
+```
+
+`make db-up` runs `docker compose up -d --wait postgres`, so it returns only once
+the container reports healthy. `make migrate` (and any connect through
+`app.db.session`) also **waits for the database to accept connections** with
+bounded backoff, so running `make migrate` immediately after `docker compose up`
+no longer races Postgres' first-boot init — it retries until the DB is ready and
+otherwise **fails with a clear error after a configurable timeout**.
+
+Tune the wait with these optional environment variables (deploy/ops config, same
+category as `DATABASE_URL`; defaults in parentheses):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_CONNECT_TIMEOUT_SECONDS` | `30` | total budget before giving up with a clear error |
+| `DB_CONNECT_BACKOFF_SECONDS` | `0.5` | initial wait between attempts |
+| `DB_CONNECT_BACKOFF_MAX_SECONDS` | `5` | cap on the (geometrically growing) wait |
+| `DB_CONNECT_BACKOFF_MULTIPLIER` | `2` | growth factor applied to the wait each retry |
+
+With `DATABASE_URL` reachable, the persistence integration tests (the `[postgres]`
+variants marked `integration`) run the real round-trip; with it unset or
+unreachable they **skip cleanly** with a reason — the database is never faked:
+
+```bash
+DATABASE_URL=postgresql+psycopg://sim:sim@localhost:5432/being_sim make test
+```
+
 ## Roadmap (vertical slices)
 
 Delivered in parallel **waves** (see

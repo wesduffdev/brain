@@ -47,6 +47,10 @@ Three capabilities, one faculty:
 | Knowledge stance | **Learn-and-grow** — base knowledge **+** everything you teach it, accumulating over time | Evolved from the earlier "closed world / knows only what I give it." No refusal machinery to blind the base model; instead a **growing knowledge store** (see [§3](#3-knowledge-stance-learn-and-grow)). |
 | First thing to see run | **Watch our own model train & generate** | Slice **R1**: LoRA fine-tune on the Mac's GPU (MLX), watch loss drop, sample generations in the document's style. |
 | Where it runs | **Locally on a 48 GB M4 Pro MacBook** (Rancher + Docker) now; robust production model later | Model runs **host-native** for the Apple GPU (~30 GB usable when the Mac is otherwise idle); the engine container calls it behind `LanguageModelPort` ([§5](#5-runtime--deployment-local-mac-now-production-later)). |
+| Local toolchain | **MLX-LM to fine-tune · Ollama to serve** | `mlx_lm.lora` trains (R1); fuse LoRA → GGUF → `ollama create`; Ollama serves on `:11434`; engine calls `host.docker.internal:11434`. One convert step per re-fine-tune. |
+| Training data | **Claude at build-time only** | Claude synthesizes QA + consolidation pairs FROM your docs at build time; runtime inference is 100% our local model. R1 trains on raw text and needs none. |
+| Consolidation cadence | **On a simulated 'sleep' tick** | The being's sleep cycle triggers an **async** host-native consolidation LoRA pass (minutes-long — never blocks the sim); `make consolidate` stays as a dev override. |
+| Conversation modality | **Type questions → text + spoken answers** | Typed input; answers in text and read aloud via the voicebox (R8, TTS). No speech-to-text model needed. |
 
 ---
 
@@ -108,24 +112,25 @@ is not passed through**. So anything running *in a container* on your Mac is
 ```
   ┌───────────────────────── your MacBook (host) ─────────────────────────┐
   │                                                                        │
-  │   host-native model server (Metal GPU) ── MLX-LM  (fine-tune + serve)  │
-  │        ▲  OpenAI-style HTTP on localhost:PORT     └ or Ollama (serve)  │
+  │   host-native (Metal GPU):  MLX-LM fine-tunes → fuse → GGUF →          │
+  │        ▲                    Ollama serves (OpenAI-style) on :11434     │
   │        │                                                               │
   │   ┌────┴─────────── Rancher / Docker (Linux VM, CPU) ──────────────┐   │
   │   │  engine container ── LocalLanguageModel adapter                │   │
-  │   │      calls host.docker.internal:PORT   (LanguageModelPort)     │   │
+  │   │      calls host.docker.internal:11434  (LanguageModelPort)     │   │
   │   │  postgres · retrieval/embeddings (CPU, in-container is fine)    │   │
   │   └────────────────────────────────────────────────────────────────┘  │
   └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Serving + fine-tuning (GPU work):** host-native on Metal. Recommend **MLX-LM**
-  (`mlx_lm.lora` for LoRA fine-tuning, `mlx_lm.server` for OpenAI-style inference)
-  — one Metal-native toolchain for both R1 (train) and R2 (serve). **Ollama** is
-  the zero-fine-tune quick-start for serving a base model. (PyTorch-MPS also works
-  but is rougher for training than MLX.)
+- **Fine-tuning (GPU work):** host-native on Metal via **MLX-LM** (`mlx_lm.lora`) —
+  drives R1's live "watch it train" view and produces the LoRA adapter.
+- **Serving:** host-native **Ollama** on `:11434` (Metal, OpenAI-style HTTP). After
+  each fine-tune, **fuse the LoRA into the base, convert to GGUF, and `ollama
+  create`** the model; Ollama then serves it. (One convert step per re-fine-tune —
+  the accepted trade for Ollama's model management/UX.)
 - **The engine stays containerized** and reaches the model over
-  `host.docker.internal:PORT` via a `LocalLanguageModel` adapter behind the
+  `host.docker.internal:11434` via a `LocalLanguageModel` adapter behind the
   existing `LanguageModelPort`.
 - **Embeddings/retrieval are cheap** — they run CPU-in-container fine; only the LLM
   needs the host GPU.
@@ -142,12 +147,12 @@ is not passed through**. So anything running *in a container* on your Mac is
 |---|---|---|
 | **Base model** | **Qwen2.5-3B-Instruct** (Apache-2.0) — the chosen **test-scale** default: comfortable on the 48 GB M4 Pro (~6–7 GB serve, ~10–16 GB LoRA fine-tune), quick to iterate | Lighter: 1.5B / 0.5B. Headroom for 7B (even 14B via 4-bit) exists but is overkill for a test. SmolLM2 · GPT-2-small (most transparent for "watch it learn"). |
 | **Fine-tune (local, Mac)** | **MLX-LM LoRA** (`mlx_lm.lora`) — Metal-native, fast, adapter *is* "our model" | The R1 first-cut runs here. |
-| **Serve (local, Mac)** | **MLX-LM server** (OpenAI-style) host-native; **Ollama** for a quick base-model start | Reached from the engine via `host.docker.internal`. |
+| **Serve (local, Mac)** | **Ollama** on `:11434` (Metal, OpenAI-style) — serves the **fused + GGUF** fine-tuned model | Reached from the engine via `host.docker.internal:11434`. One fuse→GGUF→`ollama create` step per fine-tune. |
 | **Fine-tune / serve (prod)** | **PyTorch + PEFT/LoRA** on CUDA, served by **vLLM/TGI** — same `LanguageModelPort` | Local-Mac → prod is an endpoint swap. |
 | **Embeddings (retrieval)** | **bge-small-en-v1.5** or **all-MiniLM-L6-v2** (sentence-transformers), CPU-in-container | any small local open embedder |
 | **Knowledge store** | Start **SQLite / in-memory**, **pgvector-ready** behind a `RetrievalPort` | pgvector is roadmap **v11**; the store is **persistent + cumulative** across docs |
 | **TTS (voicebox)** | **espeak-ng** first (offline, deterministic), then **Piper** (neural, offline, MIT) | can run CPU-in-container or host; Kokoro/Coqui as upgrades |
-| **Consolidation/QA training data** | hand-authored + templates; **optionally** a teacher model (Claude) at **build time only** to synthesize QA pairs from your docs | runtime stays 100% our own/local — see open question |
+| **Consolidation/QA training data** | **Claude at build time only** — synthesize QA + consolidation pairs FROM your docs (a one-off dataset step) | runtime inference stays 100% our own/local; R1 trains on raw doc text and needs none |
 
 ---
 
@@ -159,10 +164,10 @@ Ordered so the **first observable is the model training** (director's first cut)
 | # | Slice (outcome) | New/changed seams | Observable | ADR? | Parallel |
 |---|---|---|---|---|---|
 | **R1** ⭐ | **Ingest a doc → LoRA-fine-tune our own model on the Mac's GPU → watch it train & generate** | `language/` module, `ingest` (chunk/clean), MLX-LM LoRA fine-tune, host-native run (§5), `make train-language DOC=path` | loss curve + sampled generations in the doc's style; adapter artifact saved | **Yes** — "Our own language model (open base + LoRA, host-native on Mac)" | independent (first) |
-| **R2** | **Local LLM adapter behind `LanguageModelPort`** — our model answers offline | `adapters/local_language_model.py` (calls the host model server via `host.docker.internal`); config selects the adapter/endpoint | `complete(prompt)` returns text from **our** model, no network beyond the host | update ADR 0022 (local adapter) | after R1 |
+| **R2** | **Serve our model via Ollama + local adapter behind `LanguageModelPort`** — our model answers offline | fuse R1's LoRA → GGUF → `ollama create`; `adapters/local_language_model.py` calls `host.docker.internal:11434`; config selects adapter/endpoint | `complete(prompt)` returns text from **our** model via Ollama, no network beyond the host | update ADR 0022 (local adapter) | after R1 |
 | **R3** | **Growing knowledge store** — everything read accumulates and is retrievable | `ingest` → embeddings → **persistent, cumulative** vector store behind a `RetrievalPort` (SQLite/in-mem, pgvector-ready) | after ingesting several docs, retrieval spans **all** of them | **Yes** — retrieval port + growing knowledge store | after R1, parallel w/ R2 |
 | **R4** | **Grounded, cited answers (blend read + base)** | `ReadingQAService`: retrieve → grounded prompt → our model → answer citing the source; if unread, say so and optionally reason from base knowledge | test: read topic → cited grounded answer; unread topic → "I haven't read about that" (+ optional base answer), clearly distinguished | reuse R3 ADR | after R2, R3 |
-| **R5** | **Knowledge consolidation ("sleep") fine-tune** — bake accumulated docs into weights | periodic LoRA fine-tune over the accumulated store; a `make consolidate` (or a consolidation tick) | after consolidation, the model recalls consolidated facts **without** retrieval | note in R1 ADR | after R3 (data) |
+| **R5** | **Knowledge consolidation ("sleep") fine-tune** — bake accumulated docs into weights | the being's **sleep cycle triggers an async** host-native LoRA pass (never blocks the tick) over Claude-synthesized consolidation pairs; `make consolidate` dev override; re-fuse → GGUF → `ollama create` | after a sleep/consolidation, the model recalls consolidated facts **without** retrieval | note in R1 ADR + reading-as-perception ADR | after R3 (data) + sleep signal |
 | **R6** | **Multi-turn conversation** — a real back-and-forth | `ConversationService` (history-aware, grounded each turn); `POST /chat` | a several-turn dialogue that stays grounded and cites sources | — | after R4 |
 | **R7** | **Reading becomes a learning event in cognition** — the doc *changes* the being via the validated perception door (not the LM) | route ingested sections through `PerceptionService`/`ActionValidationService` → `MemoryService`/`ConceptService` | after reading, `memories()`/`concepts()` reflect it; curiosity updates | **Yes** — reading-as-perception | after R4 |
 | **R8** | **Voicebox — read aloud + speak answers** | `VoicePort` (`synthesize`), `espeak_voice` then `piper_voice`, `FakeVoice` in tests; renderer "speaking" pose | hear the document read; hear answers spoken; `POST /read`, `POST /speak` (JWT) | **Yes** — "Voice synthesis port + open-source TTS" | after R2 (independent of QA) |
@@ -229,19 +234,16 @@ ask it grounded, cited questions that blend what it read with what it knows. R8
 
 ---
 
-## 11. Open questions for the director
+## 11. Decisions — all resolved (director, 2026-07-11)
 
-1. **Mac toolchain.** OK to standardize local on **MLX-LM** (Metal-native
-   fine-tune *and* serve), with **Ollama** as a quick serve-only fallback — or a
-   preference?
-2. **Teacher for training data.** For consolidation/QA pairs, is **Claude at build
-   time only** acceptable to synthesize the dataset from your docs (runtime stays
-   100% ours/local), or keep it hand-authored?
-3. **Consolidation cadence.** Run consolidation **on demand** (`make consolidate`),
-   or **automatically** after N new documents / on a "sleep" tick?
-4. **Conversation modality.** Typed questions with **spoken + text** answers to
-   start (voice via R8), or full voice-in/voice-out later?
-5. **Cut cards?** Want the orchestrator to mint the Trello cards for R1→R4 (+R8)
-   next, or keep planning first?
+Every open question is settled; tickets are cut from the §7 slices. **No code
+starts yet** — the work lands on its own branch after the cards exist.
 
-_Resolved: base model & hardware → **Qwen2.5-3B-Instruct** on the 48 GB M4 Pro._
+| Question | Decision |
+|---|---|
+| Base model & hardware | **Qwen2.5-3B-Instruct** (test-scale) on the 48 GB M4 Pro |
+| Mac toolchain | **MLX-LM** fine-tunes (`mlx_lm.lora`); **Ollama** serves the fused + GGUF model on `:11434` |
+| Training data | **Claude at build time only** (runtime 100% local; R1 needs none — trains on raw text) |
+| Consolidation cadence | on a **simulated 'sleep' tick** → async host-native job; `make consolidate` dev override |
+| Conversation modality | **type questions → text + spoken answers** (voicebox R8; no speech-to-text) |
+| Cut cards | **now** — mint the R-slice cards; do not start code |

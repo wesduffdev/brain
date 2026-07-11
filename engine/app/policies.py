@@ -7,7 +7,9 @@ one without any risk of mutating shared config.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Optional, Tuple
+from typing import ClassVar, Dict, Mapping, Optional, Tuple
+
+from app.domain.motion import Motion
 
 # Valid values for NeedTickPolicy.direction.
 INCREASE = "increase"
@@ -521,14 +523,16 @@ class ExplorationPolicy:
 class RenderHintsPolicy:
     """Resolved presentation hints for the render frame (ADR 0004): the neutral
     `intensity` to report until the emotion model carries one, the fallback
-    `default` visual, and the per-emotion visual draw hints keyed by emotion.
-    Pure presentation vocabulary — it carries no psychology; the emotion is
-    already decided before these hints are looked up.
+    `default` visual, the per-emotion visual draw hints keyed by emotion, and the
+    per-reaction draw hints keyed by instinct-reaction label (RENDER-RX). Pure
+    presentation vocabulary — it carries no psychology; the emotion and the
+    reaction are already decided before these hints are looked up.
     """
 
     intensity_default: float
     default: Mapping[str, object]
     by_emotion: Mapping[str, Mapping[str, object]]
+    by_reaction: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -635,3 +639,268 @@ class TraitPolicy:
 
     caution: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)
     curiosity: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)
+
+
+@dataclass(frozen=True)
+class InstinctModelPolicy:
+    """Trainer hyperparameters for the instinct model (ADR 0026), from the
+    `training:` block of `config/instinct.yaml`. `intensity_loss` selects how the
+    scalar reaction-intensity head is trained — ``"bce"`` (BCEWithLogits on the
+    [0, 1] target, the default) or ``"mse"`` (mean-squared error on the
+    sigmoid-activated output). The instinct feature order and reaction-label set
+    are the encode CONTRACT, read separately off the ConfigService
+    (`instinct_feature_order()`/`instinct_labels()`), so this policy carries only
+    the tuning — retuning instinct training is a config change, never a code one.
+    """
+
+    epochs: int = 400
+    hidden_size: int = 16
+    learning_rate: float = 0.05
+    seed: int = 0
+    intensity_loss: str = "bce"
+
+
+@dataclass(frozen=True)
+class EventTopicsPolicy:
+    """The being.* Kafka topic catalogue and the partition / dead-letter
+    conventions the runtime broker is provisioned with (EVT-KAFKA, ADR 0024). It
+    is the resolved answer to "which topics exist, how many partitions, and where
+    does a failed event go?" — read from ``config/events.yaml`` by
+    ``ConfigService.event_topics_policy``. Topic NAMES, the partition count, and
+    the DLQ suffix all come from config; the ``KafkaEventBus`` learns them from
+    here and never hardcodes one, so retuning the topology is a config change only.
+    (The broker URL is the lone Kafka setting that is NOT here — it is env-only
+    deploy config, ``KAFKA_BOOTSTRAP_SERVERS``, like ``DATABASE_URL``.)
+
+    ``partitions`` is sized for a SINGLE being (1): one being is a single ordered
+    stream, so one partition preserves its per-being order; scaling to many beings
+    raises it in config, never in code. ``dlq_for`` names an event topic's
+    dead-letter companion (``being.perception.events`` ->
+    ``being.perception.events.dlq``), where the consumer routes an event it cannot
+    process, so a poison message parks off to the side instead of wedging the flow.
+    ``bootstrap_topics`` is the full set the broker must be provisioned with —
+    every catalogue topic followed by its DLQ companion.
+    """
+
+    names: Tuple[str, ...] = ()
+    partitions: int = 1
+    dlq_suffix: str = ".dlq"
+
+    def dlq_for(self, topic: str) -> str:
+        """The dead-letter topic a failed ``topic`` event is routed to."""
+        return f"{topic}{self.dlq_suffix}"
+
+    def dlq_topics(self) -> Tuple[str, ...]:
+        """The DLQ companion of every catalogue topic, in authored order."""
+        return tuple(self.dlq_for(name) for name in self.names)
+
+    def bootstrap_topics(self) -> Tuple[str, ...]:
+        """Every topic the broker must be provisioned with: each being.* topic
+        followed immediately by its ``.dlq`` companion."""
+        provisioned: list = []
+        for name in self.names:
+            provisioned.append(name)
+            provisioned.append(self.dlq_for(name))
+        return tuple(provisioned)
+# The FROZEN instinct feature vector (ADR 0026), in contract order. WORLD-MOTION
+# produces exactly this vector on every ObjectApproached stimulus; reordering,
+# inserting, or renaming a slot is a contract change (a retrain), so it lives in
+# one place both the emitter (`MotionPolicy.features`) and any consumer read.
+MOTION_FEATURE_NAMES: Tuple[str, ...] = (
+    "distance",
+    "velocity",
+    "acceleration",
+    "trajectory_toward_body",
+    "time_to_contact",
+    "object_size",
+    "size_change_rate",
+    "unexpectedness",
+    "visibility_confidence",
+    "sound_spike_intensity",
+    "touch_intensity",
+    "current_focus_level",
+    "current_stability",
+    "prior_prediction_error",
+)
+
+# The features with no source in today's world (no sound/touch sensing, and the
+# being's fast-loop internal state — focus/stability/prior-error — is folded in
+# by the instinct consumer, not the world). Each defaults to 0.0 until a slice
+# supplies it, and the default is config-overridable (never hard-coded).
+_MOTION_DEFAULTED_FEATURES: Tuple[str, ...] = (
+    "unexpectedness",
+    "sound_spike_intensity",
+    "touch_intensity",
+    "current_focus_level",
+    "current_stability",
+    "prior_prediction_error",
+)
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+@dataclass(frozen=True)
+class MotionPolicy:
+    """How perceived object MOTION becomes the being's approach STIMULUS (ADR 0027)
+    — the tuning that normalizes raw kinematics (`Motion`) into the frozen 14-feature
+    instinct vector (ADR 0026), plus the authored per-object kinematic SEEDS the
+    world starts from. Both are authored in `config/motion.yaml`; like
+    `EnvironmentPolicy`, one policy bundles the table (here, the seed motions) with
+    the constants that read it.
+
+    Normalization maxima map a raw quantity onto ``[0, 1]`` (distance, velocity,
+    time-to-contact, object size) or a signed ``[-1, 1]`` rate (acceleration,
+    size-change): a value at its max reads as 1.0. `min_closing_speed` is the gate
+    on what counts as an *approach* — an object closing on the body faster than this
+    raises a stimulus; anything slower, static, or receding raises none.
+    `sensory_defaults` fills the features the world has no source for yet (0.0
+    unless overridden). Retuning any of it — or moving an object — is a config
+    change only.
+    """
+
+    max_distance: float = 10.0
+    max_speed: float = 5.0
+    max_acceleration: float = 5.0
+    max_time_to_contact: float = 10.0
+    max_size: float = 1.0
+    max_size_change_rate: float = 1.0
+    min_closing_speed: float = 0.0
+    sensory_defaults: Mapping[str, float] = field(default_factory=dict)
+    motions: Mapping[str, Motion] = field(default_factory=dict)
+
+    FEATURE_NAMES: ClassVar[Tuple[str, ...]] = MOTION_FEATURE_NAMES
+
+    def initial_motions(self) -> Dict[str, Motion]:
+        """A fresh per-object kinematic seed map — the world's starting motion,
+        copied so the caller can advance it without touching the policy."""
+        return dict(self.motions)
+
+    def is_approaching(self, motion: Motion) -> bool:
+        """Whether `motion` is an approach worth a stimulus (closing fast enough)."""
+        return motion.is_approaching(self.min_closing_speed)
+
+    def _default(self, name: str) -> float:
+        return float(self.sensory_defaults.get(name, 0.0))
+
+    def features(
+        self, motion: Motion, prior: Optional[Motion], *, visibility_confidence: float
+    ) -> Dict[str, float]:
+        """The frozen 14-feature instinct vector for `motion`, normalized — the exact
+        `MOTION_FEATURE_NAMES` keys, in order. `prior` (last tick's motion, or None on
+        the first sighting) gives the between-tick rates (acceleration, looming).
+        `visibility_confidence` is how clearly the being perceives the object (ADR
+        0002). Features with no world source fall to their config default (0.0)."""
+        speed = motion.speed()
+        prior_speed = prior.speed() if prior is not None else speed
+        acceleration = speed - prior_speed
+
+        apparent = motion.apparent_size()
+        prior_apparent = prior.apparent_size() if prior is not None else apparent
+        size_change = apparent - prior_apparent
+
+        ttc = motion.time_to_contact()
+        ttc_norm = 1.0 if ttc == float("inf") else _clamp(ttc / self.max_time_to_contact, 0.0, 1.0)
+
+        return {
+            "distance": _clamp(motion.distance() / self.max_distance, 0.0, 1.0),
+            "velocity": _clamp(speed / self.max_speed, 0.0, 1.0),
+            "acceleration": _clamp(acceleration / self.max_acceleration, -1.0, 1.0),
+            "trajectory_toward_body": _clamp(motion.trajectory_toward_body(), 0.0, 1.0),
+            "time_to_contact": ttc_norm,
+            "object_size": _clamp(motion.size / self.max_size, 0.0, 1.0),
+            "size_change_rate": _clamp(size_change / self.max_size_change_rate, -1.0, 1.0),
+            "unexpectedness": self._default("unexpectedness"),
+            "visibility_confidence": _clamp(float(visibility_confidence), 0.0, 1.0),
+            "sound_spike_intensity": self._default("sound_spike_intensity"),
+            "touch_intensity": self._default("touch_intensity"),
+            "current_focus_level": self._default("current_focus_level"),
+            "current_stability": self._default("current_stability"),
+            "prior_prediction_error": self._default("prior_prediction_error"),
+        }
+
+
+@dataclass(frozen=True)
+class InstinctRuntimePolicy:
+    """How the instinct CONSUMER (INS-RT, extends ADR 0011's shadow precedent to the
+    instinct layer) turns a per-stimulus prediction into a selected protective
+    REACTION — the reaction-selection tuning the model is forbidden to own (ADR
+    0026: the model only predicts; selection, thresholds, and cooldowns are a
+    downstream concern that can never bypass the safety floor). For each protective
+    reaction label, `thresholds[label]` is the probability at or above which that
+    reaction may fire, and `cooldowns[label]` is how many ticks must elapse after it
+    fires before it may fire again — so one stimulus stream cannot machine-gun the
+    same reaction. `shadow` is the record-only gate: ON (the default), the consumer
+    persists and publishes its prediction/reaction but changes NO simulation
+    behavior (decision / emotion / render untouched); the active integration that
+    reads a `False` here is INS-ACT's, not this slice's. Every number lives in the
+    `reaction:` block of `config/instinct.yaml`, so retuning instinct sensitivity —
+    or flipping it out of shadow — is a config change, never a code one. An empty
+    policy (no config) fires no reaction and stays in shadow: the safe default.
+    """
+
+    thresholds: Mapping[str, float] = field(default_factory=dict)
+    cooldowns: Mapping[str, int] = field(default_factory=dict)
+    shadow: bool = True
+
+    def thresholded_labels(self) -> Tuple[str, ...]:
+        """The reaction labels that CAN fire — those given a threshold, in authored
+        order. A label with no configured threshold is never a candidate."""
+        return tuple(self.thresholds.keys())
+
+    def threshold(self, label: str) -> float:
+        """The probability at or above which `label` fires; an unconfigured label
+        gets an unreachable 1.0 so it never fires by accident."""
+        return float(self.thresholds.get(label, 1.0))
+
+    def cooldown(self, label: str) -> int:
+        """How many ticks must elapse between firings of `label` (0 = no cooldown)."""
+        return int(self.cooldowns.get(label, 0))
+
+
+@dataclass(frozen=True)
+class ReactionResponsePolicy:
+    """How the being ACTS on a triggered instinct reaction (INS-ACT, ADR 0029) —
+    the active counterpart to `InstinctRuntimePolicy`'s shadow selection. Staged
+    behind two flags that BOTH default to the prior (byte-identical) behavior, so
+    activation is a config change, never code:
+
+    - `visual_only` (step 1): a triggered reaction is SURFACED in the being's state
+      (the render `reaction` field) and BIASES the being's DERIVED emotion — a
+      TRANSIENT affect signal fed into the same needs->emotion derivation (never an
+      assignment), keyed per reaction label by `emotion_bias` (`label -> {need:
+      delta}`). The stored needs are untouched; only the derivation input is nudged.
+    - `allow_interrupt` (step 2): a reaction at or above `intensity_threshold` may
+      CANCEL the current action when that action is in `interruptible_actions` AND
+      the SafetyService permits the `protective_action` on the target. The invariant
+      floor is never bypassed — an interruption the floor forbids is SUPPRESSED, not
+      forced.
+
+    Every value lives in the `reaction:` block of `config/instinct.yaml`; an empty
+    policy (no config) leaves both steps off, so a reaction changes no behavior —
+    the safe default.
+    """
+
+    visual_only: bool = False
+    allow_interrupt: bool = False
+    emotion_bias: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    intensity_threshold: float = 1.0
+    interruptible_actions: Tuple[str, ...] = ()
+    protective_action: str = "withdraw"
+
+    @property
+    def surfaces_reaction(self) -> bool:
+        """Whether an active reaction is exposed at all — true once either step is
+        on, so the `reaction` field never appears while both flags are off (the
+        byte-identical default)."""
+        return self.visual_only or self.allow_interrupt
+
+    def bias_for(self, label: str) -> Mapping[str, int]:
+        """The transient per-need affect signal a `label` reaction feeds into the
+        emotion derivation; empty (no nudge) for a label with no configured bias."""
+        return self.emotion_bias.get(label, {})
+
+    def is_interruptible(self, action: str) -> bool:
+        """Whether `action` is one the being may break off on a strong reaction."""
+        return action in self.interruptible_actions

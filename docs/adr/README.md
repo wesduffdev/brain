@@ -28,3 +28,9 @@ ADR — supersede it with a new one and update both statuses.
 | [0021](0021-graph-like-concept-network.md) | Graph-like concept network (explanation paths over Postgres node/edge tables) | Accepted |
 | [0022](0022-natural-language-layer-and-language-model-port.md) | Natural-language layer & the language-model port | Accepted |
 | [0023](0023-aversive-concept-learning-and-belief-decision-feed.md) | One-shot aversive concept learning & the belief→decision feed | Accepted |
+| [0024](0024-event-backbone-and-eventbus-port.md) | Event backbone: the `DomainEvent` envelope + EventBus port (in-memory default, Kafka runtime to follow) | Accepted |
+| [0025](0025-scheduled-events-vs-real-time-loop.md) | Scheduled events vs. the real-time tick loop | Accepted |
+| [0026](0026-instinct-neural-model-strategy.md) | Instinct neural model strategy: separate model, port, and artifact (frozen feature/label contract) | Accepted |
+| [0027](0027-perception-motion-and-approach-stimulus.md) | Perception motion & the approach-stimulus seam (extends 0002; builds on 0024 + 0026) | Accepted |
+| [0028](0028-transactional-outbox.md) | Transactional outbox for atomic event publish (stage in the unit of work; relay projects into an idempotent event log; extends 0017) | Accepted |
+| [0029](0029-instinct-reaction-emotion-and-action-interrupt.md) | Instinct reaction → emotion bias & safe action interruption (staged, config-gated; extends 0011, relates to 0009/0014/0026) | Accepted |

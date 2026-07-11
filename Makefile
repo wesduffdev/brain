@@ -9,7 +9,7 @@ ENGINE := engine
 VENV   := $(ENGINE)/.venv
 PY     := $(VENV)/bin/python
 
-.PHONY: help setup test demo run token db-up migrate train up down clean
+.PHONY: help setup test demo run token db-up migrate train up down clean kafka-up kafka-init
 
 help: ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -43,6 +43,13 @@ migrate: ## create the v0 database schema (needs DATABASE_URL set; see .env.exam
 train: ## train the outcome predictor -> models/outcome_predictor.pt (installs torch on first run; minutes)
 	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-train.txt
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.ml.train_outcome_model
+
+kafka-up: ## start the Kafka broker (KRaft) and create the being.* topics + .dlq companions
+	docker compose --profile events up -d --wait kafka
+	$(MAKE) kafka-init
+
+kafka-init: ## create/verify the being.* topics from config/events.yaml (broker at $$KAFKA_BOOTSTRAP_SERVERS, default localhost:9092)
+	cd $(ENGINE) && PYTHONPATH=. KAFKA_BOOTSTRAP_SERVERS=$${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092} .venv/bin/python -m app.kafka_bootstrap
 
 up: ## build + start the full stack (engine + postgres) via docker compose
 	docker compose up --build

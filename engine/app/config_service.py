@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
+from app.domain.motion import Motion
 from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
 from app.policies import (
@@ -21,13 +22,18 @@ from app.policies import (
     CuriosityWeights,
     EmotionRule,
     EnvironmentPolicy,
+    EventTopicsPolicy,
     ExplorationPolicy,
     GraphEdgePolicy,
+    InstinctModelPolicy,
+    InstinctRuntimePolicy,
     MemoryPriorityPolicy,
+    MotionPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
     PreferencePolicy,
+    ReactionResponsePolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -62,6 +68,9 @@ class ConfigService:
         "learning_rates",
         "decision_weights",
         "traits",
+        "instinct",
+        "events",
+        "motion",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -113,6 +122,9 @@ class ConfigService:
         learning_rates: Optional[Mapping] = None,
         decision_weights: Optional[Mapping] = None,
         traits: Optional[Mapping] = None,
+        instinct: Optional[Mapping] = None,
+        events: Optional[Mapping] = None,
+        motion: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -131,6 +143,9 @@ class ConfigService:
             learning_rates=learning_rates,
             decision_weights=decision_weights,
             traits=traits,
+            instinct=instinct,
+            events=events,
+            motion=motion,
         )
 
     @classmethod
@@ -158,6 +173,9 @@ class ConfigService:
             "learning_rates": "learning_rates.yaml",
             "decision_weights": "decision_weights.yaml",
             "traits": "traits.yaml",
+            "instinct": "instinct.yaml",
+            "events": "events.yaml",
+            "motion": "motion.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -270,6 +288,51 @@ class ConfigService:
                 affordances=affordances,
             )
         return catalog
+
+    def motion_policy(self) -> MotionPolicy:
+        """How perceived object MOTION becomes the being's approach STIMULUS (ADR
+        0027): the normalization/threshold tuning and the authored per-object
+        kinematic seeds (position, velocity, size), both from `config/motion.yaml`.
+        A motion seed must name a catalogued object — the same fail-loud vocabulary
+        discipline as the object catalog and safety rules. An absent config yields
+        an empty policy: no object moves, no stimulus is raised, and every
+        pre-motion slice behaves unchanged."""
+        motion = self._motion or {}
+        normalization = motion.get("normalization", {}) or {}
+        approach = motion.get("approach", {}) or {}
+        defaults = {
+            str(name): float(value)
+            for name, value in (motion.get("sensory_defaults", {}) or {}).items()
+        }
+        catalog = self.object_catalog()
+        motions: Dict[str, Motion] = {}
+        for object_id, spec in (motion.get("objects", {}) or {}).items():
+            object_id = str(object_id)
+            if catalog and object_id not in catalog:
+                known = ", ".join(sorted(catalog))
+                raise ValueError(
+                    f"motion seed for unknown object {object_id!r}; known objects: {known}"
+                )
+            spec = spec or {}
+            position = tuple(float(c) for c in (spec.get("position", [0.0, 0.0]) or [0.0, 0.0]))
+            velocity = tuple(float(c) for c in (spec.get("velocity", [0.0, 0.0]) or [0.0, 0.0]))
+            motions[object_id] = Motion(
+                object_id=object_id,
+                position=position,
+                velocity=velocity,
+                size=float(spec.get("size", 0.0)),
+            )
+        return MotionPolicy(
+            max_distance=float(normalization.get("max_distance", 10.0)),
+            max_speed=float(normalization.get("max_speed", 5.0)),
+            max_acceleration=float(normalization.get("max_acceleration", 5.0)),
+            max_time_to_contact=float(normalization.get("max_time_to_contact", 10.0)),
+            max_size=float(normalization.get("max_size", 1.0)),
+            max_size_change_rate=float(normalization.get("max_size_change_rate", 1.0)),
+            min_closing_speed=float(approach.get("min_closing_speed", 0.0)),
+            sensory_defaults=defaults,
+            motions=motions,
+        )
 
     def resolve_object(self, selector: str) -> str:
         """Map a human-typed selector (`ball`, `Red Ball`, `obj_red_ball`) to a
@@ -595,6 +658,10 @@ class ConfigService:
                 name: dict(hint or {})
                 for name, hint in (self._render_hints.get("emotions", {}) or {}).items()
             },
+            by_reaction={
+                name: dict(hint or {})
+                for name, hint in (self._render_hints.get("reactions", {}) or {}).items()
+            },
         )
 
     def command_specs(self) -> Dict[str, CommandSpec]:
@@ -651,6 +718,87 @@ class ConfigService:
             fallback_to_rules_on_error=bool(prediction.get("fallback_to_rules_on_error", True)),
         )
 
+
+    # --- ML: the instinct model's feature/label contract + tuning (ADR 0026) ---
+    #
+    # The instinct model is a SEPARATE net from the outcome predictor, with a
+    # disjoint input space: 14 continuous fast-sensory scalars (not the multi-hot
+    # categorical vocab above). Its `feature_order` and reaction `labels` in
+    # `config/instinct.yaml` are the fixed encode contract the
+    # InstinctFeatureEncoder is built from; the artifact carries them so a drifted
+    # `instinct.pt` is rejected on load. Reaction thresholds/cooldowns are a
+    # consumer concern (INS-RT) and live in a later config block.
+
+    def instinct_feature_order(self) -> Tuple[str, ...]:
+        return tuple(self._instinct.get("feature_order", []) or [])
+
+    def instinct_labels(self) -> Tuple[str, ...]:
+        return tuple(self._instinct.get("labels", []) or [])
+
+    def instinct_model_policy(self) -> InstinctModelPolicy:
+        """The instinct trainer's hyperparameters, config-driven with safe defaults
+        so retuning training never touches Python."""
+        training = self._instinct.get("training", {}) or {}
+        return InstinctModelPolicy(
+            epochs=int(training.get("epochs", 400)),
+            hidden_size=int(training.get("hidden_size", 16)),
+            learning_rate=float(training.get("learning_rate", 0.05)),
+            seed=int(training.get("seed", 0)),
+            intensity_loss=str(training.get("intensity_loss", "bce")),
+        )
+
+    def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
+        """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR
+        0011), from the `reaction:` block of `config/instinct.yaml`: the per-label
+        probability `thresholds` at or above which a reaction fires, the per-label
+        `cooldowns` (in ticks) between firings, and the `shadow` record-only gate
+        (default ON — the consumer persists and publishes but changes no behavior
+        until INS-ACT flips it). Absent config yields empty thresholds/cooldowns and
+        shadow ON, so no reaction ever fires and no behavior changes. Retuning
+        instinct sensitivity is a config change only."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        thresholds = {
+            str(label): float(value)
+            for label, value in (reaction.get("thresholds", {}) or {}).items()
+        }
+        cooldowns = {
+            str(label): int(value)
+            for label, value in (reaction.get("cooldowns", {}) or {}).items()
+        }
+        return InstinctRuntimePolicy(
+            thresholds=thresholds,
+            cooldowns=cooldowns,
+            shadow=bool(reaction.get("shadow", True)),
+        )
+
+    def reaction_response_policy(self) -> ReactionResponsePolicy:
+        """The ACTIVE-instinct integration tuning (INS-ACT, ADR 0029) from the
+        `reaction:` block of `config/instinct.yaml`: the `visual_only` /
+        `allow_interrupt` activation flags (both default OFF => byte-identical), the
+        per-label `emotion_bias` affect signal fed into emotion derivation, and the
+        interrupt gating (`intensity_threshold`, `interruptible_actions`,
+        `protective_action`). Absent config yields both flags off and no bias, so a
+        triggered reaction changes no behavior until a config flip — the active
+        counterpart to `instinct_runtime_policy`'s shadow selection."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        interrupt = reaction.get("interrupt", {}) or {}
+        emotion_bias = {
+            str(label): {
+                str(need): int(delta) for need, delta in (deltas or {}).items()
+            }
+            for label, deltas in (reaction.get("emotion_bias", {}) or {}).items()
+        }
+        return ReactionResponsePolicy(
+            visual_only=bool(reaction.get("visual_only", False)),
+            allow_interrupt=bool(reaction.get("allow_interrupt", False)),
+            emotion_bias=emotion_bias,
+            intensity_threshold=float(interrupt.get("intensity_threshold", 1.0)),
+            interruptible_actions=tuple(
+                str(a) for a in (interrupt.get("interruptible_actions", []) or [])
+            ),
+            protective_action=str(interrupt.get("protective_action", "withdraw")),
+        )
+
     def outcome_training_params(self) -> Dict[str, float]:
         """Trainer hyperparameters, config-driven with safe defaults so
         retuning training never touches Python."""
@@ -662,3 +810,21 @@ class ConfigService:
             "learning_rate": float(params["learning_rate"]),
             "seed": int(params["seed"]),
         }
+
+    # --- events: the Kafka topic topology (EVT-KAFKA, ADR 0024) -----------
+
+    def event_topics_policy(self) -> EventTopicsPolicy:
+        """The being.* Kafka topic catalogue and partition / DLQ conventions the
+        runtime broker is provisioned with (EVT-KAFKA), from ``config/events.yaml``.
+        Topic NAMES, the partition count, and the DLQ suffix all come from config,
+        so the KafkaEventBus never hardcodes a topic and retuning the topology is a
+        config change only; the broker URL is the lone Kafka setting read from the
+        environment instead (``KAFKA_BOOTSTRAP_SERVERS``). An absent file yields the
+        empty policy (no topics, one partition, ``.dlq`` suffix) so the broker-free
+        suite needs no events config."""
+        topics = self._events.get("topics", {}) or {}
+        return EventTopicsPolicy(
+            names=tuple(str(name) for name in topics.values()),
+            partitions=int(self._events.get("partitions", 1)),
+            dlq_suffix=str(self._events.get("dlq_suffix", ".dlq")),
+        )

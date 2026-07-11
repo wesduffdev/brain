@@ -18,7 +18,11 @@ from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
 from app.ml.encode_features import Example, FeatureEncoder
+from app.ports.events import EventConsumer, EventPublisher
 from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredictor
+from app.ports.instinct import InstinctPredictorPort
+from app.ml.instinct_encoder import InstinctFeatureEncoder
+from app.outbox_relay import drain_outbox
 from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
     BeliefRepository,
@@ -31,7 +35,14 @@ from app.ports.repositories import (
     TrainingExampleRepository,
     UnitOfWork,
 )
-from app.repositories import InMemoryPredictionRecordRepository, InMemorySimilarityRepository
+from app.repositories import (
+    InMemoryEventLogRepository,
+    InMemoryInstinctPredictionRepository,
+    InMemoryInstinctReactionRepository,
+    InMemoryOutboxRepository,
+    InMemoryPredictionRecordRepository,
+    InMemorySimilarityRepository,
+)
 from app.services.belief_service import BeliefService
 from app.services.concept_path_service import ConceptPathService
 from app.services.concept_service import ConceptService
@@ -40,6 +51,9 @@ from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.services.prediction_explanation_service import PredictionExplanationService
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
+from app.services.reaction_response_service import ReactionResponseService
+from app.services.instinct_service import InstinctService
+from app.services.model_telemetry_service import ModelTelemetryService
 from app.services.environment_service import EnvironmentService
 from app.services.exploration_policy_service import ExplorationPolicyService
 from app.services.memory_retrieval_service import MemoryRetrievalService
@@ -50,6 +64,7 @@ from app.services.prediction_service import PredictionService
 from app.services.preference_service import PreferenceService
 from app.services.safety_service import SafetyService
 from app.services.similarity_service import SimilarityService
+from app.services.stimulus_service import StimulusService
 from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
 from app.services.trait_service import TraitService
@@ -87,6 +102,9 @@ class Simulation:
         similarity_repository: Optional[SimilarityRepository] = None,
         graph_repository: Optional[GraphRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
+        event_publisher: Optional[EventPublisher] = None,
+        event_consumer: Optional[EventConsumer] = None,
+        instinct_predictor: Optional[InstinctPredictorPort] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
         # these ports as it happens, and a training example is derived per event.
@@ -208,9 +226,70 @@ class Simulation:
         self._catalog = config.object_catalog()
         self._perception = PerceptionService(self._catalog)
         self._room = config.room()
+        # Motion/approach-stimulus seam (WORLD-MOTION, ADR 0027): holds the
+        # world's live object kinematics, advances them each tick, and — for any
+        # object closing on the body — derives the frozen 14-feature approach
+        # vector (ADR 0026) and publishes `ObjectApproached` through the injected
+        # EventPublisher (ADR 0024). Absent a publisher, motion still advances and
+        # the stimulus is still exposed on `state()`; a static world raises none.
+        self._stimulus = StimulusService(
+            config.motion_policy(), being_id=being_id, publisher=event_publisher
+        )
 
         self._actions = config.action_policies()
         safety = SafetyService(config.safety_rules())
+        self._safety = safety
+        # Active-instinct integration (INS-ACT, ADR 0029): a triggered reaction on
+        # `being.instinct.reactions` may bias the being's DERIVED emotion and, at a
+        # higher rollout step, interrupt an interruptible action — always through
+        # this SafetyService, never around it. Both activation flags default OFF, so
+        # it is inert (byte-identical) until a config flip; it subscribes to the
+        # reactions topic only when an event consumer is wired.
+        self._reactions = ReactionResponseService(
+            config.reaction_response_policy(),
+            safety,
+            being_id,
+            consumer=event_consumer,
+            publisher=event_publisher,
+        )
+        # Event-instinct chain wiring (EVT-VALID): with an instinct predictor
+        # AND a shared event bus (publisher + consumer), the being's fast
+        # instinct layer runs end-to-end IN-PROCESS. The shadow InstinctService
+        # (INS-RT) consumes the StimulusService's ObjectApproached, and the
+        # relay (`_drain_instinct`, ADR 0028) drains its staged reactions onto
+        # the same bus so they reach the ReactionResponseService above (INS-ACT)
+        # — the integration this wave deferred to here. A READ-ONLY
+        # ModelTelemetryService observes the chain (prediction-vs-outcome
+        # telemetry, consumer lag, correlation trace) and never feeds back.
+        # Absent an instinct predictor (the default — no torch/artifact loaded),
+        # no chain is built, so the being is byte-identical to the pre-instinct
+        # one and the whole prior suite is untouched.
+        self._instinct_publisher = event_publisher
+        self._instinct_outbox: Optional[InMemoryOutboxRepository] = None
+        self._instinct_event_log: Optional[InMemoryEventLogRepository] = None
+        self._instinct: Optional[InstinctService] = None
+        self._telemetry: Optional[ModelTelemetryService] = None
+        if (
+            instinct_predictor is not None
+            and event_publisher is not None
+            and event_consumer is not None
+        ):
+            self._instinct_outbox = InMemoryOutboxRepository()
+            self._instinct_event_log = InMemoryEventLogRepository()
+            self._instinct = InstinctService(
+                consumer=event_consumer,
+                publisher=event_publisher,
+                predictor=instinct_predictor,
+                encoder=InstinctFeatureEncoder.from_config(config),
+                policy=config.instinct_runtime_policy(),
+                being_id=being_id,
+                predictions=InMemoryInstinctPredictionRepository(),
+                reactions=InMemoryInstinctReactionRepository(),
+                outbox=self._instinct_outbox,
+            )
+            self._telemetry = ModelTelemetryService(
+                consumer=event_consumer, publisher=event_publisher, being_id=being_id
+            )
         # Exploration (card v4): curiosity toward what the being cannot yet predict
         # (novelty + uncertainty + recent surprise − familiarity) and the recorded
         # surprise it decays. Always present — curiosity/surprise are exposed every
@@ -280,11 +359,44 @@ class Simulation:
         re-derived, and then the being decides on and performs one action toward
         an object (safety permitting). Returns the fresh state snapshot."""
         tick = self._clock.advance()
+        # INS-ACT: latch the instinct reaction (if any) received since the last
+        # tick as the one in effect for this tick; a tick with no new reaction
+        # clears it (fade).
+        self._reactions.begin_tick(tick)
         self.being.needs = self._needs.apply(self.being.needs, tick)
         self.being.needs = self._environment.apply(self.being.needs, self._room, tick)
         self.being.emotion = self._emotion.derive(self.being.needs)
         self._act(tick)
+        # EVT-VALID: publish this tick's staged instinct reactions onto the bus
+        # (the in-process outbox relay, ADR 0028), so a reaction produced this
+        # tick reaches the ReactionResponseService at the next begin_tick.
+        self._drain_instinct()
+        # INS-ACT (visual_only): re-derive the being's DISPLAYED emotion from a
+        # TRANSIENT reaction-affect overlay (never assigned) — a flinch reads as
+        # `scared` without touching the stored needs or the decision above. A
+        # no-op when visual_only is off or no reaction is active, so the default
+        # is byte-identical.
+        self.being.emotion = self._emotion.derive(self._reactions.bias_needs(self.being.needs))
         return self.state()
+
+    def _drain_instinct(self) -> None:
+        """Drain the shadow instinct layer's outbox onto the bus — the
+        in-process equivalent of the ADR 0028 relay (publication happens outside
+        any DB transaction). A no-op when no instinct chain is wired."""
+        if self._instinct is None:
+            return
+        drain_outbox(
+            outbox=self._instinct_outbox,
+            event_log=self._instinct_event_log,
+            publisher=self._instinct_publisher,
+        )
+
+    def instinct_lag(self) -> int:
+        """The instinct chain's consumer-lag gauge (EVT-VALID): how many instinct
+        predictions are still awaiting their reaction on the telemetry observer.
+        Settles to zero once each tick's chain has drained, and is always zero
+        when no instinct chain is wired."""
+        return self._telemetry.lag() if self._telemetry is not None else 0
 
     def _act(self, tick: int) -> None:
         """Decide on one action from the current perception and state, obey the
@@ -293,6 +405,10 @@ class Simulation:
         action. Nothing selectable (no object, or all blocked/resting) leaves the
         being idle this tick."""
         perceived = self._perception.perceive(self._room)["objects"]
+        # Advance object motion one tick and raise an approach stimulus for any
+        # object now closing on the body — a world/perception side effect that
+        # never bends the decision below.
+        self._stimulus.observe(perceived=perceived, tick=tick)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 
@@ -319,6 +435,19 @@ class Simulation:
             (obj["properties"] for obj in perceived if obj["objectId"] == decision.target_id),
             (),
         )
+        # INS-ACT (allow_interrupt): a high-intensity active reaction may break
+        # off this action, validated through the SafetyService — instinct
+        # proposes, the invariant floor disposes. An interruption the floor
+        # forbids is SUPPRESSED (the action completes below); a no-op when
+        # allow_interrupt is off, so the default is byte-identical.
+        if self._reactions.interrupt(
+            action=decision.action,
+            target_id=decision.target_id,
+            target_properties=perceived_props,
+            tick=tick,
+        ):
+            self._current_action = None
+            return
         true_props = self._catalog[decision.target_id].properties
         observed_outcome = policy.outcomes_for(true_props)
 
@@ -630,12 +759,22 @@ class Simulation:
         reason}); it is absent at birth and on any idle tick. `curiosity` and
         `surprise` carry, per perceived object, how strongly the being wants to
         explore it and how recently it surprised the being (card v4) — empty until
-        the first tick and on a tick with nothing to perceive."""
+        the first tick and on a tick with nothing to perceive. `reaction` carries
+        the being's active instinct reaction this tick — `{type, intensity}`, the
+        render contract RENDER-RX consumes (INS-ACT, ADR 0029) — and is absent while
+        the instinct activation flags are off or no reaction is in effect."""
         snapshot = self.being.snapshot(self._clock.current_tick)
         snapshot["perceived"] = self._perception.perceive(self._room)
+        snapshot["stimuli"] = self._stimulus.stimuli()
         snapshot["curiosity"] = dict(self._curiosity_view)
         snapshot["surprise"] = dict(self._surprise_view)
         snapshot["traits"] = self._traits.levels()
         if self._current_action is not None:
             snapshot["currentAction"] = dict(self._current_action)
+        # INS-ACT: the active instinct reaction the being is showing this tick —
+        # `{type, intensity}`, the render contract RENDER-RX consumes. Absent when
+        # no reaction is active or the activation flags are off (byte-identical).
+        reaction = self._reactions.active_reaction()
+        if reaction is not None:
+            snapshot["reaction"] = reaction
         return snapshot

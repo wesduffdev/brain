@@ -30,6 +30,13 @@ from app.domain.model_run import ModelRun
 from app.domain.prediction_record import PredictionRecord
 from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
+from app.domain.event_log import EventLogEntry
+from app.domain.instinct import (
+    InstinctPrediction,
+    InstinctReaction,
+    InstinctTrainingExample,
+)
+from app.domain.outbox import OutboxEntry
 
 
 class UnitOfWork(Protocol):
@@ -219,4 +226,81 @@ class GraphRepository(Protocol):
 
     def edges(self) -> List[GraphEdge]:
         """Every stored edge."""
+        ...
+
+
+class OutboxRepository(Protocol):
+    """Stages domain events for atomic publication — the transactional-outbox seam
+    (ADR 0028). ``add`` stages one `OutboxEntry` inside the *same* unit of work as
+    the DB writes it accompanies (ADR 0017), so the event queues atomically with
+    its data; ``all`` reads the queue back for the relay to drain. Append-only:
+    the relay (`app.outbox_relay`) treats the ``event_log`` as its idempotency
+    ledger rather than mutating outbox rows, so there is no ``published`` state to
+    flip here. The in-memory fake (`app.repositories`) is the seam the behavior
+    suite drives; a Postgres-backed adapter follows for the runtime."""
+
+    def add(self, entry: OutboxEntry) -> None:
+        """Stage one outbox entry, to commit with the current unit of work."""
+        ...
+
+    def all(self) -> List[OutboxEntry]:
+        """Every staged outbox entry, oldest first."""
+        ...
+
+
+class EventLogRepository(Protocol):
+    """Stores the durable projection of published domain events (ADR 0028).
+
+    ``add`` is **idempotent on ``event_id``**: projecting the same envelope twice
+    leaves the log at one entry, which is what lets the relay use the log as its
+    delivery ledger. ``all`` reads the log back (the relay reads it to know which
+    events are already delivered, and callers query it as the audit trail). The
+    in-memory fake (`app.repositories`) is the seam the behavior suite drives; a
+    Postgres-backed adapter follows for the runtime."""
+
+    def add(self, entry: EventLogEntry) -> None:
+        """Project one event into the log, idempotent on its ``event_id``."""
+        ...
+
+    def all(self) -> List[EventLogEntry]:
+        """Every logged event, oldest first."""
+        ...
+
+
+class InstinctPredictionRepository(Protocol):
+    """Stores per-stimulus instinct inferences (append-only, ADR 0026) and reads
+    them back — one row per prediction the instinct model makes."""
+
+    def add(self, prediction: InstinctPrediction) -> None:
+        """Append one instinct prediction to the store."""
+        ...
+
+    def all(self) -> List[InstinctPrediction]:
+        """Every stored prediction, oldest first."""
+        ...
+
+
+class InstinctReactionRepository(Protocol):
+    """Stores the reactions the being had to stimuli (append-only, ADR 0026):
+    which reaction, at what intensity, triggered or suppressed."""
+
+    def add(self, reaction: InstinctReaction) -> None:
+        """Append one instinct reaction to the store."""
+        ...
+
+    def all(self) -> List[InstinctReaction]:
+        """Every stored reaction, oldest first."""
+        ...
+
+
+class InstinctTrainingExampleRepository(Protocol):
+    """Stores model-ready instinct training rows (append-only, ADR 0026): the
+    stimulus features paired with the observed reaction labels, for the trainer."""
+
+    def add(self, example: InstinctTrainingExample) -> None:
+        """Append one instinct training example to the store."""
+        ...
+
+    def all(self) -> List[InstinctTrainingExample]:
+        """Every stored instinct training example, oldest first."""
         ...

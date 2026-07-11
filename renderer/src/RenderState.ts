@@ -14,11 +14,25 @@
  * rule #1).
  */
 
+/** An ACTIVE instinct reaction (RENDER-RX), decided engine-side (INS-ACT) and
+ * presented as draw hints stamped with the reaction `type` and `intensity`.
+ * Present only while a reaction is active; absent otherwise. */
+export interface ReactionVisual {
+  type: string;
+  intensity: number;
+  mouth?: string;
+  eyes?: string;
+  effects?: string[];
+  thought?: string;
+}
+
 export interface VisualHints {
   mouth?: string;
   eyes?: string;
   effects?: string[];
   thought?: string;
+  /** Present only while an instinct reaction is active (RENDER-RX). */
+  reaction?: ReactionVisual;
 }
 
 export interface RenderState {
@@ -69,17 +83,66 @@ function parseNeeds(value: unknown): Record<string, number> {
   return needs;
 }
 
-function parseVisual(value: unknown): VisualHints {
-  if (!isRecord(value)) return {};
-  const effects = Array.isArray(value.effects)
-    ? value.effects.filter((e): e is string => typeof e === "string")
+function parseStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((e): e is string => typeof e === "string")
     : undefined;
+}
+
+function parseReaction(value: unknown): ReactionVisual | undefined {
+  // Only surface a reaction the engine actually decided (a `type` is present);
+  // anything else is treated as "no reaction active".
+  if (!isRecord(value) || typeof value.type !== "string") return undefined;
   return {
+    type: value.type,
+    intensity: asNumber(value.intensity, 0),
     mouth: typeof value.mouth === "string" ? value.mouth : undefined,
     eyes: typeof value.eyes === "string" ? value.eyes : undefined,
-    effects,
+    effects: parseStringArray(value.effects),
     thought: typeof value.thought === "string" ? value.thought : undefined,
   };
+}
+
+function parseVisual(value: unknown): VisualHints {
+  if (!isRecord(value)) return {};
+  const visual: VisualHints = {
+    mouth: typeof value.mouth === "string" ? value.mouth : undefined,
+    eyes: typeof value.eyes === "string" ? value.eyes : undefined,
+    effects: parseStringArray(value.effects),
+    thought: typeof value.thought === "string" ? value.thought : undefined,
+  };
+  const reaction = parseReaction(value.reaction);
+  if (reaction) visual.reaction = reaction;
+  return visual;
+}
+
+/** The face the being currently SHOWS: an active instinct reaction (RENDER-RX)
+ * takes over the mouth / eyes / effects / thought; otherwise the emotion's hints
+ * apply. This is a pure selection between two engine-supplied faces — the
+ * renderer decides nothing (BRIEF §17, rule #1). A reaction that omits a token
+ * falls back to the emotion's for that slot. */
+export interface FaceHints {
+  mouth?: string;
+  eyes?: string;
+  effects: string[];
+  thought: string;
+}
+
+export function activeFace(visual: VisualHints): FaceHints {
+  const r = visual.reaction;
+  return {
+    mouth: r?.mouth ?? visual.mouth,
+    eyes: r?.eyes ?? visual.eyes,
+    effects: r?.effects ?? visual.effects ?? [],
+    thought: r?.thought ?? visual.thought ?? "",
+  };
+}
+
+/** The debug-overlay readout for an active reaction — its type and intensity —
+ * or the empty string when no reaction is active. Presentation only. */
+export function reactionOverlayText(visual: VisualHints): string {
+  const r = visual.reaction;
+  return r ? `reaction: ${r.type} (${r.intensity.toFixed(2)})` : "";
 }
 
 /**

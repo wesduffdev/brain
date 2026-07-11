@@ -16,6 +16,11 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``object_similarity_records`` — perceived-property similarity between objects.
 - ``graph_nodes``         — object/property/outcome nodes of the concept graph.
 - ``graph_edges``         — typed, confidence-bearing edges of the concept graph.
+- ``event_outbox``        — domain events staged for atomic publication (ADR 0028).
+- ``event_log``           — the durable, idempotent projection of published events.
+- ``instinct_predictions``       — per-stimulus instinct inferences (ADR 0026).
+- ``instinct_reactions``         — the reaction triggered/suppressed per stimulus.
+- ``instinct_training_examples`` — model-ready instinct rows for training.
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -301,3 +306,120 @@ class GraphEdge(Base):
     source_memory_ids = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# --- event backbone: transactional outbox + durable log projection (ADR 0028) ---
+#
+# FK discipline (like ``beliefs`` and ``concept_evidence.concept_id``, ADR 0019):
+# an event is a self-contained, replayable *fact*, not a catalog relationship, so
+# ``being_id`` here is a plain **indexed** column, not a DB foreign key. Coupling
+# the log's separate-unit projection write to the ``beings`` catalog would force a
+# brittle cross-unit insert ordering without adding integrity the envelope's own
+# ``event_id`` identity does not already carry. Envelope timestamps are stored as
+# ISO-8601 strings (the same wire form ``DomainEvent.snapshot`` uses), so an event
+# round-trips through ``from_snapshot`` re-validation identically off any dialect.
+
+
+class EventOutbox(Base):
+    """A domain event staged for publication, committed in the *same* unit of work
+    as the DB writes it accompanies (ADR 0017/0028) — the producer half of the
+    transactional outbox. Append-only: the relay (`app.outbox_relay`) drains it
+    and uses the ``event_log`` as its idempotency ledger, so no ``published`` flag
+    is mutated here. The scalar envelope fields are kept queryable; ``payload`` is
+    the free-form body and ``occurred_at``/``produced_at`` are ISO-8601 strings."""
+
+    __tablename__ = "event_outbox"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, nullable=False, index=True)
+    topic = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    event_version = Column(Integer, nullable=False, default=1)
+    being_id = Column(String, nullable=True, index=True)
+    correlation_id = Column(String, nullable=True, index=True)
+    causation_id = Column(String, nullable=True)
+    source_service = Column(String, nullable=True)
+    occurred_at = Column(String, nullable=False)
+    produced_at = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EventLog(Base):
+    """The durable projection of every published domain event (ADR 0028) — the
+    consumer/relay half of the outbox. ``event_id`` is the primary key, so the
+    projection is **idempotent**: a replayed or duplicated envelope upserts in
+    place and the log never grows a second row for it. Stores the full envelope so
+    the log is replayable, with the scalar fields queryable in their own columns."""
+
+    __tablename__ = "event_log"
+
+    event_id = Column(String, primary_key=True)
+    topic = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    event_version = Column(Integer, nullable=False, default=1)
+    being_id = Column(String, nullable=True, index=True)
+    correlation_id = Column(String, nullable=True, index=True)
+    causation_id = Column(String, nullable=True)
+    source_service = Column(String, nullable=True)
+    occurred_at = Column(String, nullable=False)
+    produced_at = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- instinct capture: predictions, reactions, and derived training rows --------
+#
+# ``event_id`` on each is the id of the perception/approach ``DomainEvent`` that
+# prompted the instinct (ADR 0024/0026/0027), which lives on the event backbone
+# rather than in ``interaction_events`` — so it is a plain indexed link, not a DB
+# foreign key (the outcome model's ``training_examples.event_id`` FK points at
+# ``interaction_events`` and would be the wrong parent here).
+
+
+class InstinctPredictionRecord(Base):
+    """One instinct inference (ADR 0026): the being's ``features`` for a stimulus,
+    the per-reaction ``reaction_probabilities`` (in the frozen label order), and
+    the scalar ``reaction_intensity``. Append-only, one row per prediction."""
+
+    __tablename__ = "instinct_predictions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, nullable=True, index=True)
+    being_id = Column(String, nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    features = Column(JSON, nullable=False, default=list)
+    reaction_probabilities = Column(JSON, nullable=False, default=list)
+    reaction_intensity = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InstinctReactionRecord(Base):
+    """The reaction the being had to a stimulus (ADR 0026): which ``reaction`` at
+    what ``intensity``, and whether it was ``triggered`` (past threshold) or
+    suppressed. Append-only, one row per reaction decision."""
+
+    __tablename__ = "instinct_reactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, nullable=True, index=True)
+    being_id = Column(String, nullable=True, index=True)
+    tick = Column(Integer, nullable=True)
+    reaction = Column(String, nullable=False)
+    intensity = Column(Float, nullable=True)
+    triggered = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InstinctTrainingExampleRecord(Base):
+    """A model-ready instinct row (ADR 0026): the ``input_features`` the model saw
+    paired with the ``output_labels`` the being actually reacted with, linked to
+    the perception ``event_id`` it was derived from. Append-only."""
+
+    __tablename__ = "instinct_training_examples"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, nullable=True, index=True)
+    input_features = Column(JSON, nullable=False, default=list)
+    output_labels = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

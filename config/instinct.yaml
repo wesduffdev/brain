@@ -1,0 +1,107 @@
+# The instinct model's frozen input/output contract and training tuning (ADR 0026).
+#
+# The instinct layer is the being's SECOND neural network (event-instinct wave):
+# a tiny net that maps fast-sensory/kinematic stimulus features to pre-conceptual
+# protective REACTIONS. Unlike the outcome predictor's multi-hot categorical
+# vector, every input slot here is a single continuous, normalized scalar. This
+# file is the single source of truth for:
+#
+#   - `feature_order` : the 14 stimulus features, IN ORDER — the frozen encode
+#                       contract the InstinctFeatureEncoder reproduces and the
+#                       artifact carries (reordering/inserting one is a contract
+#                       change → retrain; a drifted artifact is rejected on load).
+#   - `labels`        : the 5 reactions the model predicts (its output slots),
+#                       independent sigmoid probabilities (multi-label, not
+#                       softmax) — a stimulus can score high on several at once.
+#   - `training`      : trainer hyperparameters (config-driven tuning — the
+#                       trainer reads these, never hard-codes them).
+#
+# The model also emits one scalar `reaction_intensity` in [0, 1] (a separate
+# regression head), so no label slot is needed for it.
+
+feature_order:
+  - distance
+  - velocity
+  - acceleration
+  - trajectory_toward_body
+  - time_to_contact
+  - object_size
+  - size_change_rate
+  - unexpectedness
+  - visibility_confidence
+  - sound_spike_intensity
+  - touch_intensity
+  - current_focus_level
+  - current_stability
+  - prior_prediction_error
+
+labels:
+  - flinch
+  - freeze
+  - orient
+  - withdraw
+  - ignore
+
+# Trainer tuning. Retuning training is a config change, not a code change.
+#   intensity_loss : how the scalar reaction_intensity head is trained —
+#                    "bce" (BCEWithLogits on the [0,1] target, the default) or
+#                    "mse" (mean-squared error on the sigmoid-activated output).
+training:
+  epochs: 400
+  hidden_size: 16
+  learning_rate: 0.05
+  seed: 0
+  intensity_loss: bce
+
+# Reaction SELECTION — the instinct CONSUMER's concern (INS-RT, extends ADR 0011),
+# read into a typed InstinctRuntimePolicy. The model only predicts; it never
+# selects an action and never bypasses the safety floor. Selection turns a
+# per-stimulus prediction into one protective reaction:
+#   - `thresholds` : per label, the probability at or above which that reaction may
+#                    fire (a label with no threshold can never fire). `ignore` has
+#                    none — it is the explicit no-reaction outcome.
+#   - `cooldowns`  : per label, how many TICKS must elapse after a reaction fires
+#                    before it may fire again, so one approach stream cannot
+#                    machine-gun the same reaction.
+#   - `shadow`     : the record-only gate. ON (the default) the consumer persists
+#                    and publishes its prediction/reaction but changes NO simulation
+#                    behavior; flipping it False (active integration) is INS-ACT's,
+#                    not INS-RT's. Retuning any of this is a config change only.
+reaction:
+  shadow: true
+  thresholds:
+    flinch: 0.5
+    freeze: 0.5
+    orient: 0.4
+    withdraw: 0.6
+  cooldowns:
+    flinch: 5
+    freeze: 5
+    orient: 3
+    withdraw: 8
+  # ACTIVE-instinct integration (INS-ACT, ADR 0029), staged behind two flags that
+  # BOTH default to the prior (byte-identical) behavior — activation is a config
+  # flip, never code. A triggered reaction proposes; the SafetyService floor always
+  # disposes (never bypassed).
+  #   visual_only     : step 1 — SURFACE the reaction in the being's state (the
+  #                     render `reaction` field) and BIAS the being's DERIVED
+  #                     emotion (via `emotion_bias`, fed into needs->emotion
+  #                     derivation — never assigned). No action interruption.
+  #   allow_interrupt : step 2 — a reaction at/above `interrupt.intensity_threshold`
+  #                     may CANCEL an interruptible current action, but only when the
+  #                     floor permits the protective response; otherwise SUPPRESSED.
+  visual_only: false
+  allow_interrupt: false
+  # The TRANSIENT affect a triggered reaction feeds into emotion derivation, per
+  # label (`need: delta`). A flinch drops the felt safety used for derivation below
+  # the `scared` threshold, so the being reads as afraid — the stored needs are left
+  # untouched. Retuning how a reaction colours emotion is a change here only.
+  emotion_bias:
+    flinch:   { safety: -60 }
+    freeze:   { safety: -40 }
+    withdraw: { safety: -50 }
+    orient:   { safety: -20 }
+  interrupt:
+    intensity_threshold: 0.7          # a reaction must be this intense to interrupt
+    interruptible_actions: [observe, approach, touch, grab, push]
+    protective_action: withdraw       # the response the floor is asked to permit

@@ -36,11 +36,16 @@ from app.db import models
 from app.db.migrate import create_all, drop_all
 from app.db.models import Base
 from app.db.session import create_db_engine, session_factory
+from app.db.unit_of_work import SessionUnitOfWork
+from app.domain.interaction_event import InteractionEvent
+from app.domain.training_example import TrainingExample
 from app.ml.encode_features import Example
 from app.repositories import (
     InMemoryInteractionEventRepository,
     InMemoryPredictionRecordRepository,
     InMemoryTrainingExampleRepository,
+    PostgresInteractionEventRepository,
+    PostgresTrainingExampleRepository,
 )
 
 _CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
@@ -208,3 +213,80 @@ def test_a_finished_run_releases_its_session_so_schema_teardown_never_blocks():
             conn.commit()
     finally:
         guard.dispose()
+
+
+# --- atomic unit of work: commit-together / rollback-whole (ADR 0017) --------
+
+
+def _touch_event(tick: int) -> InteractionEvent:
+    return InteractionEvent(
+        being_id="being_001",
+        tick=tick,
+        object_id="obj_soft",
+        action="touch",
+        expected_outcome=("pleasant",),
+        observed_outcome=("pleasant",),
+        emotion_before="calm",
+        emotion_after="calm",
+    )
+
+
+def _derived_example(event_id: str) -> TrainingExample:
+    return TrainingExample(event_id=event_id, input_features=(1.0,), output_labels=(1.0,))
+
+
+@pytest.mark.integration
+def test_a_unit_commits_together_and_a_failed_unit_leaves_no_orphan_rows_in_postgres():
+    # The atomic-write invariant against a real database: a completed unit
+    # persists an interaction_event and its derived training_example together;
+    # a unit that fails mid-way persists neither — no orphan parent, no orphan
+    # child. A fresh, independent session reads the committed state, so this
+    # observes real transaction boundaries, not the writer's identity map.
+    engine = _reachable_postgres_or_skip()
+    drop_all(engine)
+    create_all(engine)
+
+    seed = session_factory(engine)()
+    try:
+        seed.add(models.Being(being_id="being_001", needs={}, emotion="calm"))
+        seed.add(
+            models.ObjectRecord(
+                object_id="obj_soft",
+                developer_label="Soft",
+                properties=["soft"],
+                affordances=["touch"],
+            )
+        )
+        seed.commit()
+    finally:
+        seed.close()
+
+    session = session_factory(engine)()
+    events = PostgresInteractionEventRepository(session)
+    examples = PostgresTrainingExampleRepository(session)
+    uow = SessionUnitOfWork(session)
+    try:
+        # a complete unit: parent event + child example commit together
+        with uow.begin():
+            events.add(_touch_event(1))
+            examples.add(_derived_example("being_001:1"))
+
+        # a failed unit: both staged rows roll back as one
+        with pytest.raises(RuntimeError):
+            with uow.begin():
+                events.add(_touch_event(2))
+                examples.add(_derived_example("being_001:2"))
+                raise RuntimeError("boom mid-unit")
+    finally:
+        session.close()
+
+    verify = session_factory(engine)()
+    try:
+        assert verify.query(models.InteractionEvent).count() == 1
+        assert verify.query(models.TrainingExample).count() == 1
+        # the surviving rows are the committed unit's, not the rolled-back one's
+        assert verify.query(models.InteractionEvent).one().tick == 1
+        assert verify.query(models.TrainingExample).one().event_id == "being_001:1"
+    finally:
+        verify.close()
+        engine.dispose()

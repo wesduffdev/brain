@@ -18,6 +18,7 @@ from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
 from app.ml.encode_features import Example, FeatureEncoder
+from app.ports.events import EventPublisher
 from app.ports.predictor import EnsemblePredictor, PredictorPort, RuleBasedPredictor
 from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
@@ -50,6 +51,7 @@ from app.services.prediction_service import PredictionService
 from app.services.preference_service import PreferenceService
 from app.services.safety_service import SafetyService
 from app.services.similarity_service import SimilarityService
+from app.services.stimulus_service import StimulusService
 from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
 from app.services.trait_service import TraitService
@@ -87,6 +89,7 @@ class Simulation:
         similarity_repository: Optional[SimilarityRepository] = None,
         graph_repository: Optional[GraphRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
+        event_publisher: Optional[EventPublisher] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
         # these ports as it happens, and a training example is derived per event.
@@ -208,6 +211,15 @@ class Simulation:
         self._catalog = config.object_catalog()
         self._perception = PerceptionService(self._catalog)
         self._room = config.room()
+        # Motion/approach-stimulus seam (WORLD-MOTION, ADR 0027): holds the
+        # world's live object kinematics, advances them each tick, and — for any
+        # object closing on the body — derives the frozen 14-feature approach
+        # vector (ADR 0026) and publishes `ObjectApproached` through the injected
+        # EventPublisher (ADR 0024). Absent a publisher, motion still advances and
+        # the stimulus is still exposed on `state()`; a static world raises none.
+        self._stimulus = StimulusService(
+            config.motion_policy(), being_id=being_id, publisher=event_publisher
+        )
 
         self._actions = config.action_policies()
         safety = SafetyService(config.safety_rules())
@@ -293,6 +305,10 @@ class Simulation:
         action. Nothing selectable (no object, or all blocked/resting) leaves the
         being idle this tick."""
         perceived = self._perception.perceive(self._room)["objects"]
+        # Advance object motion one tick and raise an approach stimulus for any
+        # object now closing on the body — a world/perception side effect that
+        # never bends the decision below.
+        self._stimulus.observe(perceived=perceived, tick=tick)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 
@@ -633,6 +649,7 @@ class Simulation:
         the first tick and on a tick with nothing to perceive."""
         snapshot = self.being.snapshot(self._clock.current_tick)
         snapshot["perceived"] = self._perception.perceive(self._room)
+        snapshot["stimuli"] = self._stimulus.stimuli()
         snapshot["curiosity"] = dict(self._curiosity_view)
         snapshot["surprise"] = dict(self._surprise_view)
         snapshot["traits"] = self._traits.levels()

@@ -28,8 +28,11 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 
+from app.adapters.in_memory_event_bus import InMemoryEventBus
 from app.bootstrap import build_simulation
 from app.config_service import ConfigService
+from app.domain.event import DomainEvent
+from app.services.stimulus_service import PERCEPTION_TOPIC
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
@@ -92,7 +95,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     # examples, and shadow predictions land in Postgres); with no DB it is the
     # same in-memory being the demo has always shown. The `with` closes the being's
     # DB session when the run finishes, so the demo never leaks one.
-    with build_simulation(config.with_room_contents([object_id])) as sim:
+    # Put the being's perception on the event bus so we can SEE the approach
+    # stimuli it raises as the object moves toward it (WORLD-MOTION, ADR 0027).
+    bus = InMemoryEventBus()
+    approaches: List[DomainEvent] = []
+    bus.subscribe(PERCEPTION_TOPIC, approaches.append)
+    with build_simulation(
+        config.with_room_contents([object_id]), event_publisher=bus
+    ) as sim:
         darken_at = 10
         print(f"--- a curious explorer decides what to do each tick, for {ticks} ticks ---")
         for _ in range(ticks):
@@ -105,6 +115,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         on_object = [e for e in events if e["objectId"] == object_id]
         print(f"\nfinished at tick {sim.current_tick}; dominant emotion: {sim.state()['emotion']}")
         print(f"actions taken: {len(events)}  (on {label}: {len(on_object)})")
+        if approaches:
+            nearest = min(
+                approaches, key=lambda e: e.payload["features"]["time_to_contact"]
+            )
+            f = nearest.payload["features"]
+            print(
+                f"approach stimuli on the bus: {len(approaches)} "
+                f"`ObjectApproached` event(s) — nearest had "
+                f"trajectory_toward_body={f['trajectory_toward_body']:.2f}, "
+                f"time_to_contact={f['time_to_contact']:.2f}."
+            )
+        else:
+            print("approach stimuli on the bus: none (nothing moved toward the being).")
 
         if is_hot:
             harmful = [e for e in on_object if e["action"] in {"touch", "grab"}]

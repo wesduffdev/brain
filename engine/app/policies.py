@@ -7,7 +7,9 @@ one without any risk of mutating shared config.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Optional, Tuple
+from typing import ClassVar, Dict, Mapping, Optional, Tuple
+
+from app.domain.motion import Motion
 
 # Valid values for NeedTickPolicy.direction.
 INCREASE = "increase"
@@ -698,3 +700,120 @@ class EventTopicsPolicy:
             provisioned.append(name)
             provisioned.append(self.dlq_for(name))
         return tuple(provisioned)
+# The FROZEN instinct feature vector (ADR 0026), in contract order. WORLD-MOTION
+# produces exactly this vector on every ObjectApproached stimulus; reordering,
+# inserting, or renaming a slot is a contract change (a retrain), so it lives in
+# one place both the emitter (`MotionPolicy.features`) and any consumer read.
+MOTION_FEATURE_NAMES: Tuple[str, ...] = (
+    "distance",
+    "velocity",
+    "acceleration",
+    "trajectory_toward_body",
+    "time_to_contact",
+    "object_size",
+    "size_change_rate",
+    "unexpectedness",
+    "visibility_confidence",
+    "sound_spike_intensity",
+    "touch_intensity",
+    "current_focus_level",
+    "current_stability",
+    "prior_prediction_error",
+)
+
+# The features with no source in today's world (no sound/touch sensing, and the
+# being's fast-loop internal state — focus/stability/prior-error — is folded in
+# by the instinct consumer, not the world). Each defaults to 0.0 until a slice
+# supplies it, and the default is config-overridable (never hard-coded).
+_MOTION_DEFAULTED_FEATURES: Tuple[str, ...] = (
+    "unexpectedness",
+    "sound_spike_intensity",
+    "touch_intensity",
+    "current_focus_level",
+    "current_stability",
+    "prior_prediction_error",
+)
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+@dataclass(frozen=True)
+class MotionPolicy:
+    """How perceived object MOTION becomes the being's approach STIMULUS (ADR 0027)
+    — the tuning that normalizes raw kinematics (`Motion`) into the frozen 14-feature
+    instinct vector (ADR 0026), plus the authored per-object kinematic SEEDS the
+    world starts from. Both are authored in `config/motion.yaml`; like
+    `EnvironmentPolicy`, one policy bundles the table (here, the seed motions) with
+    the constants that read it.
+
+    Normalization maxima map a raw quantity onto ``[0, 1]`` (distance, velocity,
+    time-to-contact, object size) or a signed ``[-1, 1]`` rate (acceleration,
+    size-change): a value at its max reads as 1.0. `min_closing_speed` is the gate
+    on what counts as an *approach* — an object closing on the body faster than this
+    raises a stimulus; anything slower, static, or receding raises none.
+    `sensory_defaults` fills the features the world has no source for yet (0.0
+    unless overridden). Retuning any of it — or moving an object — is a config
+    change only.
+    """
+
+    max_distance: float = 10.0
+    max_speed: float = 5.0
+    max_acceleration: float = 5.0
+    max_time_to_contact: float = 10.0
+    max_size: float = 1.0
+    max_size_change_rate: float = 1.0
+    min_closing_speed: float = 0.0
+    sensory_defaults: Mapping[str, float] = field(default_factory=dict)
+    motions: Mapping[str, Motion] = field(default_factory=dict)
+
+    FEATURE_NAMES: ClassVar[Tuple[str, ...]] = MOTION_FEATURE_NAMES
+
+    def initial_motions(self) -> Dict[str, Motion]:
+        """A fresh per-object kinematic seed map — the world's starting motion,
+        copied so the caller can advance it without touching the policy."""
+        return dict(self.motions)
+
+    def is_approaching(self, motion: Motion) -> bool:
+        """Whether `motion` is an approach worth a stimulus (closing fast enough)."""
+        return motion.is_approaching(self.min_closing_speed)
+
+    def _default(self, name: str) -> float:
+        return float(self.sensory_defaults.get(name, 0.0))
+
+    def features(
+        self, motion: Motion, prior: Optional[Motion], *, visibility_confidence: float
+    ) -> Dict[str, float]:
+        """The frozen 14-feature instinct vector for `motion`, normalized — the exact
+        `MOTION_FEATURE_NAMES` keys, in order. `prior` (last tick's motion, or None on
+        the first sighting) gives the between-tick rates (acceleration, looming).
+        `visibility_confidence` is how clearly the being perceives the object (ADR
+        0002). Features with no world source fall to their config default (0.0)."""
+        speed = motion.speed()
+        prior_speed = prior.speed() if prior is not None else speed
+        acceleration = speed - prior_speed
+
+        apparent = motion.apparent_size()
+        prior_apparent = prior.apparent_size() if prior is not None else apparent
+        size_change = apparent - prior_apparent
+
+        ttc = motion.time_to_contact()
+        ttc_norm = 1.0 if ttc == float("inf") else _clamp(ttc / self.max_time_to_contact, 0.0, 1.0)
+
+        return {
+            "distance": _clamp(motion.distance() / self.max_distance, 0.0, 1.0),
+            "velocity": _clamp(speed / self.max_speed, 0.0, 1.0),
+            "acceleration": _clamp(acceleration / self.max_acceleration, -1.0, 1.0),
+            "trajectory_toward_body": _clamp(motion.trajectory_toward_body(), 0.0, 1.0),
+            "time_to_contact": ttc_norm,
+            "object_size": _clamp(motion.size / self.max_size, 0.0, 1.0),
+            "size_change_rate": _clamp(size_change / self.max_size_change_rate, -1.0, 1.0),
+            "unexpectedness": self._default("unexpectedness"),
+            "visibility_confidence": _clamp(float(visibility_confidence), 0.0, 1.0),
+            "sound_spike_intensity": self._default("sound_spike_intensity"),
+            "touch_intensity": self._default("touch_intensity"),
+            "current_focus_level": self._default("current_focus_level"),
+            "current_stability": self._default("current_stability"),
+            "prior_prediction_error": self._default("prior_prediction_error"),
+        }

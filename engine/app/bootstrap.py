@@ -47,6 +47,7 @@ from app.db.migrate import create_all
 from app.db.session import create_db_engine, session_factory
 from app.db.unit_of_work import NullUnitOfWork, SessionUnitOfWork
 from app.ml.inference import load_predictor
+from app.ports.events import EventPublisher
 from app.ports.predictor import PredictorPort
 from app.ports.repositories import (
     BeliefRepository,
@@ -125,6 +126,7 @@ def build_simulation(
     similarity_repository: Optional[SimilarityRepository] = None,
     graph_repository: Optional[GraphRepository] = None,
     predictor: Optional[PredictorPort] = None,
+    event_publisher: Optional[EventPublisher] = None,
 ) -> BuiltSimulation:
     """Build a runtime `Simulation`, wiring persistence when configured.
 
@@ -184,6 +186,7 @@ def build_simulation(
         similarity_repository=similarity_repository,
         graph_repository=graph_repository,
         unit_of_work=unit_of_work,
+        event_publisher=event_publisher,
     )
     return BuiltSimulation(simulation, close)
 

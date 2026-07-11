@@ -1,0 +1,41 @@
+# Scenario: Hard Object Intro (card v10) — a second "watch it learn".
+#
+# A HARNESS input for the ScenarioRunner, NOT a ConfigService section: the service
+# parses it directly (PyYAML). It seeds the room with one hard object (a wooden
+# block), lets the being explore for `ticks`, and checks that a LEARNING METRIC
+# rose — the confidence of the concept "a hard thing, pushed, makes noise" (card
+# v2) — and that the hard_objects_make_noise developmental milestone advanced. It
+# proves the scenario system is not single-milestone. See docs/BRIEF.md §16.
+
+name: hard_object_intro
+description: >
+  The being wakes alone with a hard wooden block. Repeated pushes teach it that
+  hard things make noise; the hard->push->makes_noise concept's confidence climbs
+  from nothing and the hard_objects_make_noise milestone reaches "established".
+
+# The room's contents: human-typed selectors resolved to catalogued object ids by
+# ConfigService.resolve_object (so `block` -> obj_wooden_block).
+room:
+  objects:
+    - block
+
+# How many ticks the being lives before the metrics are read.
+ticks: 120
+
+# The headline LEARNING METRIC: the concept whose confidence is tracked before vs
+# after. Keyed on a PERCEIVED property + action + observed outcome (never a label).
+learning_target:
+  feature: hard
+  action: push
+  outcome: makes_noise
+
+# The run PASSES (headline metric) when the rise (after - before) meets this floor.
+success_condition:
+  min_confidence_delta: 0.5
+
+# The developmental MILESTONES this scenario exercises and the stage the being is
+# expected to have reached by the end — the regression bar checked by
+# RegressionEvaluationService (milestones defined in config/milestones.yaml).
+milestones:
+  - name: hard_objects_make_noise
+    expect_stage: established

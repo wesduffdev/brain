@@ -291,10 +291,14 @@ def test_config_reads_the_two_activation_flags():
     assert policy.allow_interrupt is True
 
 
-def test_the_shipped_config_defaults_both_activation_flags_off():
+def test_the_shipped_config_activates_visual_only_and_keeps_interrupt_off():
+    # VISUAL-ON: the shipped being SURFACES reactions and biases its DERIVED
+    # emotion (visual_only ON), but no action is ever interrupted (allow_interrupt
+    # stays OFF this slice). The flags-off SAFE DEFAULT for an unset reaction block
+    # is covered by test_config_yields_the_reaction_response_policy_defaulting_off.
     import os
 
     root = os.path.join(os.path.dirname(__file__), "..", "..", "config")
     policy = ConfigService.from_files(root).reaction_response_policy()
-    assert policy.visual_only is False
+    assert policy.visual_only is True
     assert policy.allow_interrupt is False

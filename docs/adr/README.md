@@ -27,3 +27,4 @@ ADR — supersede it with a new one and update both statuses.
 | [0020](0020-curiosity-surprise-and-exploration-policy.md) | Curiosity, surprise, and exploration policy | Accepted |
 | [0021](0021-graph-like-concept-network.md) | Graph-like concept network (explanation paths over Postgres node/edge tables) | Accepted |
 | [0022](0022-natural-language-layer-and-language-model-port.md) | Natural-language layer & the language-model port | Accepted |
+| [0023](0023-aversive-concept-learning-and-belief-decision-feed.md) | One-shot aversive concept learning & the belief→decision feed | Accepted |

@@ -23,6 +23,7 @@ from typing import ContextManager, List, Optional, Protocol
 from app.domain.being_state import BeingState
 from app.domain.belief import Belief
 from app.domain.concept import ConceptEvidence, ConceptSchema
+from app.domain.concept_graph import GraphEdge, GraphNode
 from app.domain.interaction_event import InteractionEvent
 from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
@@ -184,4 +185,38 @@ class SimilarityRepository(Protocol):
 
     def all(self) -> List[ObjectSimilarityRecord]:
         """Every stored similarity record, oldest first."""
+        ...
+
+
+class GraphRepository(Protocol):
+    """Stores the being's CONCEPT GRAPH — its nodes and edges (card v7).
+
+    Both nodes and edges are *upserted*: a node is saved by ``node_id`` and an
+    edge by ``edge_id``, so the same object/property/outcome or the same typed
+    relationship is strengthened in place across interactions rather than
+    duplicated. ``get_edge`` reads an edge's current state so the
+    KnowledgeGraphService can reinforce its confidence and evidence; ``nodes`` and
+    ``edges`` read the whole graph back for traversal (`ConceptPathService`). All
+    writes stage inside the interaction's unit of work (ADR 0017). The in-memory
+    fake (`app.repositories`) is the seam the behavior suite drives; a
+    Postgres-backed adapter follows for the runtime."""
+
+    def save_node(self, node: GraphNode) -> None:
+        """Persist ``node``, replacing any existing one with the same ``node_id``."""
+        ...
+
+    def save_edge(self, edge: GraphEdge) -> None:
+        """Persist ``edge``, replacing any existing one with the same ``edge_id``."""
+        ...
+
+    def get_edge(self, edge_id: str) -> Optional[GraphEdge]:
+        """The stored edge with ``edge_id``, or ``None`` if there is none."""
+        ...
+
+    def nodes(self) -> List[GraphNode]:
+        """Every stored node."""
+        ...
+
+    def edges(self) -> List[GraphEdge]:
+        """Every stored edge."""
         ...

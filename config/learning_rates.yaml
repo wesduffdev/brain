@@ -43,3 +43,20 @@ concept:
     #   confidence_next = confidence + reinforce_rate * (1 - confidence)
     # Higher = the being commits to a pattern faster (with diminishing returns).
     reinforce_rate: 0.2
+
+# Concept-graph edge confidence (card v7).
+#
+# The being's concepts, beliefs, and similarities are projected into a GRAPH of
+# object/property/outcome nodes joined by typed EDGES (HAS_PROPERTY, PREDICTS,
+# PRODUCED, SIMILAR_TO). Each EDGE carries a CONFIDENCE that strengthens the more
+# evidence confirms it, on the same saturating curve concept confidence uses but
+# tuned independently. This is the single place that tuning lives: retuning how
+# boldly the graph commits to a relationship is a change here, never in service
+# code (ConfigService.graph_edge_policy).
+graph:
+  edge:
+    # An edge's confidence the first time the being lays it down.
+    seed_confidence: 0.3
+    # How far each confirming interaction moves an edge's confidence toward full
+    # certainty (1.0):  confidence_next = confidence + reinforce_rate*(1 - confidence)
+    reinforce_rate: 0.2

@@ -29,6 +29,7 @@ from app.db.models import Being
 from app.domain.being_state import BeingState
 from app.domain.belief import Belief
 from app.domain.concept import ConceptEvidence, ConceptSchema
+from app.domain.concept_graph import GraphEdge, GraphNode
 from app.domain.interaction_event import InteractionEvent
 from app.domain.memory import Memory
 from app.domain.model_run import ModelRun
@@ -480,6 +481,96 @@ class PostgresSimilarityRepository:
             )
             for row in rows
         ]
+
+
+def _node_from_row(row) -> GraphNode:
+    return GraphNode(being_id=row.being_id, kind=row.kind, label=row.label)
+
+
+def _edge_from_row(row) -> GraphEdge:
+    return GraphEdge(
+        being_id=row.being_id,
+        kind=row.kind,
+        source_id=row.source_id,
+        target_id=row.target_id,
+        confidence=row.confidence or 0.0,
+        evidence_count=row.evidence_count or 0,
+        last_updated_tick=row.last_updated_tick or 0,
+        source_memory_ids=tuple(row.source_memory_ids or ()),
+    )
+
+
+class InMemoryGraphRepository:
+    """A concept-graph store held in dicts keyed by ``node_id`` / ``edge_id`` — the
+    seam the behavior suite drives, no database required. Nodes and edges are
+    immutable value objects that upsert in place (``save_*`` replaces by id)."""
+
+    def __init__(self) -> None:
+        self._nodes: Dict[str, GraphNode] = {}
+        self._edges: Dict[str, GraphEdge] = {}
+
+    def save_node(self, node: GraphNode) -> None:
+        self._nodes[node.node_id] = node
+
+    def save_edge(self, edge: GraphEdge) -> None:
+        self._edges[edge.edge_id] = edge
+
+    def get_edge(self, edge_id: str) -> Optional[GraphEdge]:
+        return self._edges.get(edge_id)
+
+    def nodes(self) -> List[GraphNode]:
+        return list(self._nodes.values())
+
+    def edges(self) -> List[GraphEdge]:
+        return list(self._edges.values())
+
+
+class PostgresGraphRepository:
+    """A concept-graph store backed by Postgres via a SQLAlchemy ``Session``. A
+    node is upserted by ``node_id`` and an edge by ``edge_id`` (``merge``), so both
+    strengthen in place across interactions; ``get_edge`` reads an edge back so the
+    service can reinforce it, and ``nodes``/``edges`` read the whole graph for
+    traversal. Staged only — the caller's unit of work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save_node(self, node: GraphNode) -> None:
+        self._session.merge(  # insert-or-update by node_id
+            models.GraphNode(
+                node_id=node.node_id,
+                being_id=node.being_id,
+                kind=node.kind,
+                label=node.label,
+            )
+        )
+
+    def save_edge(self, edge: GraphEdge) -> None:
+        self._session.merge(  # insert-or-update by edge_id, so an edge strengthens in place
+            models.GraphEdge(
+                edge_id=edge.edge_id,
+                being_id=edge.being_id,
+                kind=edge.kind,
+                source_id=edge.source_id,
+                target_id=edge.target_id,
+                confidence=edge.confidence,
+                evidence_count=edge.evidence_count,
+                last_updated_tick=edge.last_updated_tick,
+                source_memory_ids=list(edge.source_memory_ids),
+            )
+        )
+
+    def get_edge(self, edge_id: str) -> Optional[GraphEdge]:
+        row = self._session.get(models.GraphEdge, edge_id)
+        return _edge_from_row(row) if row is not None else None
+
+    def nodes(self) -> List[GraphNode]:
+        rows = self._session.query(models.GraphNode).order_by(models.GraphNode.node_id).all()
+        return [_node_from_row(row) for row in rows]
+
+    def edges(self) -> List[GraphEdge]:
+        rows = self._session.query(models.GraphEdge).order_by(models.GraphEdge.edge_id).all()
+        return [_edge_from_row(row) for row in rows]
 
 
 class InMemoryModelRunRepository:

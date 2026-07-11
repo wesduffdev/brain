@@ -21,6 +21,7 @@ from app.policies import (
     EmotionRule,
     EnvironmentPolicy,
     ExplorationPolicy,
+    GraphEdgePolicy,
     MemoryPriorityPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
@@ -463,6 +464,20 @@ class ConfigService:
         return ConceptLearningPolicy(
             seed_confidence=float(learning.get("seed_confidence", 0.3)),
             reinforce_rate=float(learning.get("reinforce_rate", 0.2)),
+        )
+
+    def graph_edge_policy(self) -> GraphEdgePolicy:
+        """How the being's CONCEPT-GRAPH EDGES form and strengthen (card v7), from
+        the `graph.edge` block of `learning_rates.yaml`. `seed_confidence` is an
+        edge's confidence the first time it is laid down; `reinforce_rate` is how
+        far each confirming interaction moves it toward full certainty. Absent
+        config yields the neutral default (seed 0.3, rate 0.2), so a sim with no
+        learning-rates file still builds a strengthening graph. Retuning how boldly
+        the graph commits to a relationship is a config change only."""
+        edge = (self._learning_rates.get("graph", {}) or {}).get("edge", {}) or {}
+        return GraphEdgePolicy(
+            seed_confidence=float(edge.get("seed_confidence", 0.3)),
+            reinforce_rate=float(edge.get("reinforce_rate", 0.2)),
         )
 
     # --- decision weights: curiosity / surprise / exploration (card v4) ---

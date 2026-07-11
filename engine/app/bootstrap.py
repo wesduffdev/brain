@@ -17,13 +17,14 @@ block a later schema teardown. The handle is also a context manager, so
 
 When `DATABASE_URL` is set it opens a live session, ensures the schema, seeds the
 being + object parent rows the interaction/object foreign keys require, and wires
-the Postgres event / training-example / prediction-record adapters (ADR
-0007/0011/0012) — plus the shadow-mode outcome predictor when a trained artifact
-is present (graceful `None` otherwise, ADR 0011). It also builds the unit of work
-that owns the transaction boundary (ADR 0017): a session-backed unit on the DB
-path, the no-op unit in memory. The seed is one unit; then a running engine
-writes `interaction_events`, `training_examples`, and `prediction_records` a unit
-per interaction, so an interaction's rows commit together or not at all.
+the Postgres event / training-example / prediction-record / memory adapters (ADR
+0007/0011/0012, card v1) — plus the shadow-mode outcome predictor when a trained
+artifact is present (graceful `None` otherwise, ADR 0011). It also builds the unit
+of work that owns the transaction boundary (ADR 0017): a session-backed unit on
+the DB path, the no-op unit in memory. The seed is one unit; then a running engine
+writes `interaction_events`, `training_examples`, `prediction_records`, and
+`memories` a unit per interaction, so an interaction's rows commit together or not
+at all.
 
 When `DATABASE_URL` is unset (and nothing is injected) it returns a plain
 in-memory `Simulation` — no database, no shadow mode, behavior unchanged. There
@@ -49,12 +50,14 @@ from app.ml.inference import load_predictor
 from app.ports.predictor import PredictorPort
 from app.ports.repositories import (
     InteractionEventRepository,
+    MemoryRepository,
     PredictionRecordRepository,
     TrainingExampleRepository,
     UnitOfWork,
 )
 from app.repositories import (
     PostgresInteractionEventRepository,
+    PostgresMemoryRepository,
     PostgresPredictionRecordRepository,
     PostgresTrainingExampleRepository,
 )
@@ -108,6 +111,7 @@ def build_simulation(
     event_repo: Optional[InteractionEventRepository] = None,
     training_repo: Optional[TrainingExampleRepository] = None,
     prediction_repository: Optional[PredictionRecordRepository] = None,
+    memory_repository: Optional[MemoryRepository] = None,
     predictor: Optional[PredictorPort] = None,
 ) -> BuiltSimulation:
     """Build a runtime `Simulation`, wiring persistence when configured.
@@ -130,6 +134,7 @@ def build_simulation(
         event_repo is not None
         or training_repo is not None
         or prediction_repository is not None
+        or memory_repository is not None
     )
 
     close: Callable[[], None] = _noop
@@ -141,6 +146,7 @@ def build_simulation(
         event_repo = PostgresInteractionEventRepository(session)
         training_repo = PostgresTrainingExampleRepository(session)
         prediction_repository = PostgresPredictionRecordRepository(session)
+        memory_repository = PostgresMemoryRepository(session)
         if predictor is None:
             predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
@@ -152,6 +158,7 @@ def build_simulation(
         training_repo=training_repo,
         predictor=predictor,
         prediction_repository=prediction_repository,
+        memory_repository=memory_repository,
         unit_of_work=unit_of_work,
     )
     return BuiltSimulation(simulation, close)

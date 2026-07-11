@@ -1,0 +1,29 @@
+# Learning rates and salience tuning (card v1).
+#
+# The being writes one durable MEMORY per interaction (ADR 0007/0012 persistence
+# seam). Each memory carries a PRIORITY — its salience — which decides how
+# strongly later learning (replay, curiosity, trait drift) attends to it. This is
+# the single place that tuning lives: retuning what the being holds onto is a
+# change here, never in service code (ConfigService.memory_priority_policy).
+
+memory:
+  priority:
+    # Salience = baseline
+    #          + prediction_error_weight * prediction_error    (how surprised it was)
+    #          + emotion_intensity_weight * emotional_intensity (how much it was felt)
+    baseline: 0.0
+    prediction_error_weight: 1.0
+    emotion_intensity_weight: 1.0
+
+    # How intensely each emotion is felt, 0 (flat) .. 1 (maximal). The stronger of
+    # the emotion before / after the action sets the memory's emotional intensity.
+    # An emotion not listed here contributes no intensity. Keys are the emotions
+    # the being can reach (config/emotions.yaml); `scared` (fear) is the most
+    # salient, `calm` the least.
+    emotion_intensity:
+      calm: 0.0
+      curious: 0.3
+      sleepy: 0.4
+      hungry: 0.5
+      frustrated: 0.7
+      scared: 1.0

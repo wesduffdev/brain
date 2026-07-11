@@ -635,3 +635,22 @@ class TraitPolicy:
 
     caution: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)
     curiosity: TraitDriftPolicy = field(default_factory=TraitDriftPolicy)
+
+
+@dataclass(frozen=True)
+class InstinctModelPolicy:
+    """Trainer hyperparameters for the instinct model (ADR 0026), from the
+    `training:` block of `config/instinct.yaml`. `intensity_loss` selects how the
+    scalar reaction-intensity head is trained — ``"bce"`` (BCEWithLogits on the
+    [0, 1] target, the default) or ``"mse"`` (mean-squared error on the
+    sigmoid-activated output). The instinct feature order and reaction-label set
+    are the encode CONTRACT, read separately off the ConfigService
+    (`instinct_feature_order()`/`instinct_labels()`), so this policy carries only
+    the tuning — retuning instinct training is a config change, never a code one.
+    """
+
+    epochs: int = 400
+    hidden_size: int = 16
+    learning_rate: float = 0.05
+    seed: int = 0
+    intensity_loss: str = "bce"

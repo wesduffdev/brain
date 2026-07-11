@@ -523,14 +523,16 @@ class ExplorationPolicy:
 class RenderHintsPolicy:
     """Resolved presentation hints for the render frame (ADR 0004): the neutral
     `intensity` to report until the emotion model carries one, the fallback
-    `default` visual, and the per-emotion visual draw hints keyed by emotion.
-    Pure presentation vocabulary — it carries no psychology; the emotion is
-    already decided before these hints are looked up.
+    `default` visual, the per-emotion visual draw hints keyed by emotion, and the
+    per-reaction draw hints keyed by instinct-reaction label (RENDER-RX). Pure
+    presentation vocabulary — it carries no psychology; the emotion and the
+    reaction are already decided before these hints are looked up.
     """
 
     intensity_default: float
     default: Mapping[str, object]
     by_emotion: Mapping[str, Mapping[str, object]]
+    by_reaction: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -33,7 +33,13 @@ async function main(): Promise<void> {
   });
   stageEl.appendChild(app.canvas);
 
-  const view = new BeingView(app.stage);
+  // Reaction debug overlay (RENDER-RX): on with `?debug` in the URL, toggled with
+  // the `d` key. Presentation only — it reads the frame, it decides nothing.
+  const debugOn = new URLSearchParams(window.location.search).has("debug");
+  const view = new BeingView(app.stage, 480, 460, debugOn);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "d" || event.key === "D") view.toggleDebug();
+  });
 
   if (!config.token) {
     setStatus(

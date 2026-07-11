@@ -104,3 +104,106 @@ describe("parseRenderState", () => {
     expect(parseRenderState(42)).toBeNull();
   });
 });
+
+import { activeFace, reactionOverlayText } from "./RenderState";
+
+// Behaviour of the reaction visuals (RENDER-RX). INS-ACT surfaces an active
+// instinct reaction; RenderStateService folds it into `visual.reaction`. The
+// renderer selects that face over the emotion face while it is active and can
+// show a debug overlay of the reaction — it decides nothing, it presents.
+describe("reaction visuals", () => {
+  const frameWithReaction = {
+    type: "being_state_update",
+    beingId: "being_001",
+    tick: 5,
+    emotion: "calm",
+    needs: { safety: 40 },
+    visual: {
+      mouth: "neutral",
+      eyes: "soft",
+      effects: [],
+      thought: "",
+      reaction: {
+        type: "flinch",
+        intensity: 0.75,
+        mouth: "open",
+        eyes: "wide",
+        effects: ["recoil"],
+        thought: "!",
+      },
+    },
+  };
+
+  it("parses the reaction visual off a frame that carries one", () => {
+    const state = parseRenderState(frameWithReaction);
+
+    expect(state!.visual.reaction).toEqual({
+      type: "flinch",
+      intensity: 0.75,
+      mouth: "open",
+      eyes: "wide",
+      effects: ["recoil"],
+      thought: "!",
+    });
+  });
+
+  it("has no reaction on the visual when the frame carries none", () => {
+    const state = parseRenderState({
+      type: "being_state_update",
+      beingId: "b",
+      tick: 1,
+      emotion: "calm",
+      needs: {},
+      visual: { mouth: "neutral" },
+    });
+
+    expect(state!.visual.reaction).toBeUndefined();
+  });
+
+  it("selects the reaction face over the emotion face while a reaction is active", () => {
+    const state = parseRenderState(frameWithReaction)!;
+
+    const face = activeFace(state.visual);
+
+    expect(face.mouth).toBe("open");
+    expect(face.eyes).toBe("wide");
+    expect(face.effects).toEqual(["recoil"]);
+    expect(face.thought).toBe("!");
+  });
+
+  it("falls back to the emotion face when no reaction is active", () => {
+    const state = parseRenderState({
+      type: "being_state_update",
+      beingId: "b",
+      tick: 1,
+      emotion: "curious",
+      needs: {},
+      visual: { mouth: "small_open", eyes: "wide", effects: ["head_tilt"], thought: "?" },
+    })!;
+
+    const face = activeFace(state.visual);
+
+    expect(face.mouth).toBe("small_open");
+    expect(face.eyes).toBe("wide");
+    expect(face.effects).toEqual(["head_tilt"]);
+  });
+
+  it("builds a debug overlay string of the reaction type + intensity", () => {
+    const state = parseRenderState(frameWithReaction)!;
+
+    expect(reactionOverlayText(state.visual)).toBe("reaction: flinch (0.75)");
+  });
+
+  it("has an empty overlay string when no reaction is active", () => {
+    const state = parseRenderState({
+      type: "being_state_update",
+      beingId: "b",
+      tick: 1,
+      emotion: "calm",
+      needs: {},
+      visual: {},
+    })!;
+
+    expect(reactionOverlayText(state.visual)).toBe("");
+  });
+});

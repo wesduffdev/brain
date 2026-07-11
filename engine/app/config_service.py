@@ -658,6 +658,10 @@ class ConfigService:
                 name: dict(hint or {})
                 for name, hint in (self._render_hints.get("emotions", {}) or {}).items()
             },
+            by_reaction={
+                name: dict(hint or {})
+                for name, hint in (self._render_hints.get("reactions", {}) or {}).items()
+            },
         )
 
     def command_specs(self) -> Dict[str, CommandSpec]:

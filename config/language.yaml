@@ -155,3 +155,27 @@ serve:
     num_ctx: 4096
   # Optional Modelfile SYSTEM preamble baked into the served model; empty = none.
   system: ""
+
+# The being's GROWING KNOWLEDGE STORE (reading R3, ADR 0038). Everything it reads
+# is chunked (reading R1's ingest), embedded, and folded into a PERSISTENT,
+# CUMULATIVE store it retrieves from at answer time (grounded/cited answering
+# follows in R4). Only ConfigService reads this; retuning what/how it retrieves is
+# a change HERE, never in Python.
+retrieval:
+  # Which EMBEDDER turns a passage into a vector for similarity search:
+  #   hashing               -> a deterministic, OFFLINE bag-of-words embedder (no
+  #                            model, no network, no heavy dep); the default so the
+  #                            whole faculty runs offline and reproducibly.
+  #   sentence-transformers -> the real semantic embedder (bge-small / MiniLM),
+  #                            gated on the optional `sentence-transformers` lib —
+  #                            it refuses loudly if the library is absent.
+  embedder: hashing
+  # The hashing embedder's vector dimension (bigger -> fewer token collisions).
+  dim: 256
+  # How many passages a query retrieves by default (top-k). Brute-force cosine
+  # today; pgvector-ready for an ANN index later (roadmap v11).
+  k: 4
+  # The sentence-transformers model to load — only used when embedder is
+  # `sentence-transformers`. bge-small-en-v1.5 / all-MiniLM-L6-v2 are good small
+  # local open embedders (READING_VOICEBOX §6).
+  model: BAAI/bge-small-en-v1.5

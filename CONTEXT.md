@@ -765,6 +765,40 @@ learns from, and touches no model or GPU. The same document always ingests the
 same way.
 _Avoid_: parse, tokenize, preprocess, load, index (the retrieval store).
 
+**Chunk**:
+An ordered slice of a document's cleaned text — the unit reading works in. Ingest
+splits a document into chunks; each chunk is embedded and folded into the
+knowledge store as one retrievable passage, tagged with its source document.
+_Avoid_: token, segment, fragment, shard, paragraph.
+
+**Embedding**:
+A fixed-dimension vector that stands for a chunk's (or a query's) meaning, so
+similarity is a distance between vectors. The default embedder is deterministic
+and offline (a bag-of-words hash); a real semantic embedder is an optional, gated
+alternative. Distinct from the outcome/instinct models' feature vectors.
+_Avoid_: encoding, feature vector, representation, token.
+
+**Knowledge store**:
+The being's persistent, CUMULATIVE store of embedded chunks, spanning every
+document it has ever read. A newly read document ADDS to it and never replaces
+what came before, so knowledge grows over time. It is retrieved from to ground
+answers; it sits on top of the simulation and drives nothing. Distinct from the
+being's memories (its lived interactions).
+_Avoid_: memory, database, index, cache, vector DB, corpus.
+
+**Retrieval**:
+Finding the chunks in the knowledge store most relevant to a query — the top-k
+passages by embedding similarity, each carrying its source document. It is how a
+question reaches what the being has read (grounded, cited answering builds on it).
+Distinct from memory retrieval (recalling a lived interaction).
+_Avoid_: search, recall, lookup, query, ranking.
+
+**Citation**:
+The source document a retrieved passage came from, carried with it so an answer
+can say WHERE a fact was read. Every retrieved passage is attributable to the
+document that was ingested.
+_Avoid_: reference, provenance, footnote, source (bare).
+
 **Fine-tune**:
 To adapt the being's OWN open base model to what it has read by training a small
 LoRA adapter on the ingested text — host-native on the Mac's GPU. The trained

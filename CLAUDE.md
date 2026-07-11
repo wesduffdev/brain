@@ -184,6 +184,10 @@ git worktree** so agents never share a working tree:
   and the sub-agent still returns one completion report. Keep the fan-out
   proportional — a small slice needs no workflow.
 
+### Orchestrator delegates to sub-agents by default
+
+The orchestrator keeps its own context minimal and pushes every delegable unit of work to sub-agents — maximizing parallel throughput and keeping the long-lived orchestrator session small. Inline (orchestrator-only) acts are just those a sub-agent is forbidden or unsuited to do: create worktrees/branches, merge a slice into its wave branch, open and roll up PRs, delete merged branches, and all board/Trello writes. Everything else is delegated: implementation; verification runs (a fresh sub-agent — never the implementer — runs the suite/demo/integration and returns a pass/fail verdict, so "Done means verified" still holds); shared-file reconciliation at roll-up (CONTEXT.md, the ADR index); doc and plan authoring; and code investigation (an Explore agent returns the conclusion, not file dumps). The orchestrator reads sub-agents' verdicts and reports — not raw file or test output.
+
 ### Bugs found during a wave — ticket, hotfix, merge back into the PR
 
 **Intent: the codebase is self-diagnosing and self-healing.** Continuous

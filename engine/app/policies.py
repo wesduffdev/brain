@@ -1351,3 +1351,71 @@ class ConversationPolicy:
         if self.history_window <= 0:
             return turns
         return turns[-self.history_window:]
+
+
+@dataclass(frozen=True)
+class ReadingPerceptionPolicy:
+    """How a READ section becomes a validated perceptual OBSERVATION (reading R7,
+    ADR 0040), from the `reading_perception:` block of ``config/language.yaml``.
+
+    Reading changes the being only through the SAME perception/cognition door a
+    lived interaction goes through -- never by letting language-model output write
+    state (the language-on-top invariant, ADR 0022). This policy governs the
+    deterministic, model-free bridge from a document's text to that door:
+
+    - SECTIONING -- `section_max_chars` / `section_overlap` / `min_section_chars`
+      chunk a document into the sections the being reads one at a time (reusing the
+      R1 ingest chunker), so a long document is MANY observations, not one.
+    - PERCEPTION -- from a section's text the being perceives its salient CONTENT
+      TOKENS: lowercased word tokens at least `min_token_length` long, minus the
+      `stopwords`, the `max_tokens` most frequent (ties broken by first appearance,
+      so extraction is order-stable and deterministic). These are the perceived
+      properties the memory/concept key on; the source/developer label is never
+      among them (ADR 0002).
+    - COGNITION -- `action` is the reading action the observation is VALIDATED as
+      (through the ActionValidationService), and `outcome` is the reading outcome a
+      read section yields, so a token that recurs across sections builds a
+      (token -> outcome) concept exactly as repeated interactions strengthen one.
+
+    Absent config yields safe defaults, so retuning what the being takes from a
+    document is a config change only -- never a code one."""
+
+    action: str = "read"
+    outcome: str = "informs"
+    max_tokens: int = 6
+    min_token_length: int = 4
+    section_max_chars: int = 120
+    section_overlap: int = 0
+    min_section_chars: int = 1
+    stopwords: Tuple[str, ...] = (
+        "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "for",
+        "with", "from", "by", "as", "is", "are", "was", "were", "be", "been",
+        "being", "it", "its", "this", "that", "these", "those", "they", "them",
+        "their", "when", "then", "than", "so", "if", "we", "you", "your", "he",
+        "she", "his", "her", "do", "does", "did", "has", "have", "had", "will",
+        "would", "can", "could", "not", "no", "yes", "there", "here", "what",
+        "which", "who", "whom", "into", "over", "under", "about",
+    )
+
+    def salient_tokens(self, text: str) -> Tuple[str, ...]:
+        """The content tokens the being PERCEIVES of `text` -- a deterministic,
+        model-free reading of the section into its most-frequent meaningful words.
+
+        Lowercased word tokens shorter than `min_token_length` or in `stopwords` are
+        dropped; the rest are ranked by frequency (ties broken by first appearance),
+        and the top `max_tokens` are returned in that order. No model, no network --
+        so what the being takes from a section is fixed by the text, never invented.
+        """
+        words = re.findall(r"[a-z0-9]+", str(text).lower())
+        stops = {word.lower() for word in self.stopwords}
+        counts: Dict[str, int] = {}
+        first_index: Dict[str, int] = {}
+        for index, word in enumerate(words):
+            if len(word) < self.min_token_length or word in stops:
+                continue
+            if word not in counts:
+                counts[word] = 0
+                first_index[word] = index
+            counts[word] += 1
+        ranked = sorted(counts, key=lambda word: (-counts[word], first_index[word]))
+        return tuple(ranked[: self.max_tokens])

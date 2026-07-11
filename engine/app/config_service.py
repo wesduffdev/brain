@@ -42,6 +42,7 @@ from app.policies import (
     PreferencePolicy,
     ReactionResponsePolicy,
     ReactionTemperamentPolicy,
+    ReadingPerceptionPolicy,
     ReadingQAPolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
@@ -795,6 +796,35 @@ class ConfigService:
             topic_markers=tuple(
                 str(m).lower()
                 for m in (block.get("topic_markers", list(defaults.topic_markers)) or [])
+            ),
+        )
+
+    def reading_perception_policy(self) -> ReadingPerceptionPolicy:
+        """How a READ section becomes a validated perceptual OBSERVATION (reading R7,
+        ADR 0040), from the `reading_perception:` block of ``config/language.yaml``:
+        the reading `action` a section is validated as and the `outcome` it yields,
+        how a section is chunked (`section_max_chars` / `section_overlap` /
+        `min_section_chars`), and how its salient CONTENT TOKENS are perceived
+        (`max_tokens` / `min_token_length` / `stopwords`). Absent config yields the
+        safe defaults, so retuning what the being takes from a document is a config
+        change only. This is the reading faculty's cognition bridge -- distinct from
+        `reading_qa_policy` (how it ANSWERS) and `knowledge_retrieval_policy` (its
+        document STORE); reading here changes the being, never the language model."""
+        block = self._language.get("reading_perception", {}) or {}
+        defaults = ReadingPerceptionPolicy()
+        stopwords = block.get("stopwords")
+        return ReadingPerceptionPolicy(
+            action=str(block.get("action", defaults.action)),
+            outcome=str(block.get("outcome", defaults.outcome)),
+            max_tokens=int(block.get("max_tokens", defaults.max_tokens)),
+            min_token_length=int(block.get("min_token_length", defaults.min_token_length)),
+            section_max_chars=int(block.get("section_max_chars", defaults.section_max_chars)),
+            section_overlap=int(block.get("section_overlap", defaults.section_overlap)),
+            min_section_chars=int(block.get("min_section_chars", defaults.min_section_chars)),
+            stopwords=(
+                tuple(str(word).lower() for word in stopwords)
+                if stopwords is not None
+                else defaults.stopwords
             ),
         )
 

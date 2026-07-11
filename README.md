@@ -128,6 +128,8 @@ flowchart TB
         Store["RetrievalPort / KnowledgeStore: growing, persistent, cumulative knowledge store; top-k cosine, cites source (reading R3; pgvector-ready)"]
         ReadingQA["ReadingQAService: RetrievalPort top-k -> grounded prompt (only retrieved passages + question) -> LanguageModelPort -> cited answer; unread declined honestly + labelled base knowledge (reading R4)"]
         Convo["ConversationService: multi-turn grounded conversation over ReadingQA + conversation-turn history; folds prior turns so a follow-up resolves to the earlier subject; a new unread topic still declined honestly (reading R6)"]
+        AValid["ActionValidationService: the validated action door — an allowed action on a currently-perceived object (its analogue of CommandService, over the being's action vocabulary)"]
+        ReadPerc["ReadingPerceptionService: a read section → perceived content tokens (deterministic, model-free) → validated observation → the SAME Memory/Concept + curiosity a lived interaction forms; holds NO LanguageModelPort in the write path (reading R7)"]
         Finetune["LoRA fine-tune runner: host-native MLX-LM on the Mac GPU; gated + lazy import (reading R1)"]
         Adapter[("LoRA adapter artifact: our own fine-tuned model (reading R1 → served R2)")]
         Serve["Serve pipeline: fuse LoRA → GGUF → ollama create → Ollama serves :11434 (reading R2; host-native Mac, gated)"]
@@ -227,6 +229,16 @@ flowchart TB
     Convo -->|persist conversation turns| PG
     API -->|"/chat"| Convo
     Convo -->|grounded, cited multi-turn answer| API
+
+    %% ---- Reading-as-perception: a document changes the being ONLY through the validated perception/cognition door, never the LM (reading R7, ADR 0040) ----
+    Ingest -->|sections| ReadPerc
+    ReadPerc -->|section as a perceivable object| Perc
+    ReadPerc ==>|gated by the action door| AValid
+    ReadPerc -->|forms a memory keyed on perceived tokens| Mem
+    ReadPerc -->|strengthens a concept where a token recurs| Concepts
+    ReadPerc -->|new material updates curiosity| Curio
+    LCmd ==>|gated by the action door| AValid
+    %% NOTE: no edge from LanguageModelPort to Memory/Concept — language never writes state (ADR 0022/0040)
     Finetune -.->|host-native LoRA fine-tune| Adapter
     Adapter -.->|fuse → GGUF → ollama create| Serve
     Serve -.->|Ollama :11434 (host.docker.internal)| Local

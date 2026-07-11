@@ -14,6 +14,8 @@ from dataclasses import replace
 from typing import Dict, List, Optional
 
 from app.config_service import ConfigService
+from app.language.ingest import ingest_text
+from app.policies import ActionPolicy
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
@@ -60,6 +62,8 @@ from app.services.memory_retrieval_service import MemoryRetrievalService
 from app.services.memory_service import MemoryService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
+from app.services.action_validation_service import ActionValidationService
+from app.services.reading_perception_service import ReadingPerceptionService
 from app.services.prediction_service import PredictionService
 from app.services.preference_service import PreferenceService
 from app.services.safety_service import SafetyService
@@ -324,6 +328,42 @@ class Simulation:
             config.exploration_policy(),
             CuriosityService(config.curiosity_weights()),
             SurpriseService(config.surprise_policy()),
+        )
+        # Reading-as-perception (reading R7, ADR 0040): a document CHANGES the being
+        # only through the validated perception/cognition door -- each read section
+        # becomes a perceptual observation routed through PerceptionService ->
+        # ActionValidationService -> the SAME MemoryService/ConceptService a lived
+        # interaction uses, never by letting the language model write state
+        # (language-on-top, ADR 0022). Wired only when a memory store is present (the
+        # cognition `read()` folds into); concepts are folded in when a concept store
+        # is too. The reading action has its OWN one-word vocabulary validated through
+        # the same ActionValidationService the language layer uses -- so reading is a
+        # validated learning event without joining the being's physical action loop.
+        self._reading_policy = config.reading_perception_policy()
+        self._reading = (
+            ReadingPerceptionService(
+                memory=self._memory,
+                concepts=self._concepts,
+                exploration=self._exploration,
+                validation=ActionValidationService(
+                    {
+                        self._reading_policy.action: ActionPolicy(
+                            name=self._reading_policy.action,
+                            affordance=self._reading_policy.action,
+                            base=0.0,
+                            need_weights={},
+                            emotion_bonuses={},
+                            expected_outcomes=(),
+                            property_outcomes={},
+                            reason="reading a section",
+                        )
+                    }
+                ),
+                policy=self._reading_policy,
+                unit_of_work=self._uow,
+            )
+            if self._memory is not None
+            else None
         )
         # Per-object curiosity / recent surprise for the render frame, refreshed
         # each tick from the being's perception.
@@ -757,6 +797,37 @@ class Simulation:
         if self._prediction_repo is None:
             return []
         return [record.snapshot() for record in self._prediction_repo.all()]
+
+    def read(self, text: str, *, source: str) -> List[Dict]:
+        """Read `text` (a document you hand the being) as a VALIDATED learning event:
+        each section becomes a perceptual observation routed through the SAME
+        perception/cognition door a lived interaction uses (PerceptionService ->
+        ActionValidationService -> MemoryService/ConceptService), so `memories()` and
+        `concepts()` come to reflect the reading and curiosity updates from the new
+        material -- never by letting the language model write state (language-on-top,
+        ADR 0040). The being's clock advances one step per section (reading takes
+        time), so each memory keeps a distinct identity. Requires a memory store
+        (inject a `memory_repository`); returns one observation snapshot per section
+        read (its perceived tokens, the reading action, and the curiosity it felt)."""
+        if self._reading is None:
+            raise RuntimeError(
+                "reading requires a memory store; construct the Simulation with a "
+                "memory_repository"
+            )
+        document = ingest_text(
+            text,
+            source=source,
+            max_chars=self._reading_policy.section_max_chars,
+            overlap=self._reading_policy.section_overlap,
+            min_chunk_chars=self._reading_policy.min_section_chars,
+        )
+        observations = self._reading.read(
+            document,
+            being_id=self.being.being_id,
+            emotion=self.being.emotion,
+            tick_source=self._clock.advance,
+        )
+        return [observation.snapshot() for observation in observations]
 
     def memories(self) -> List[Dict]:
         """The durable memories the being has formed, oldest first, as plain

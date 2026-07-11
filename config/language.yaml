@@ -229,3 +229,36 @@ conversation:
   # a message with NONE of these stands alone, so a new topic -- even one the being
   # has not read about -- is judged on its own words and declined honestly.
   followup_cues: [that, it, this, they, them, those, these, more, else, again, another]
+
+# How a READ document CHANGES the being (reading R7, ADR 0040). Reading is a
+# validated learning event: each section becomes a perceptual OBSERVATION routed
+# through the SAME perception/cognition door a lived interaction goes through
+# (PerceptionService -> ActionValidationService -> Memory/Concept), never by
+# letting the language model write state (the language-on-top invariant, ADR 0022).
+# Only ConfigService reads this; retuning what the being takes from a document is a
+# change HERE, never in Python.
+reading_perception:
+  # The reading ACTION each section is validated as (through ActionValidationService)
+  # and the reading OUTCOME a read section yields -- so a token that recurs across
+  # sections builds a (token -> outcome) concept, exactly as repeated interactions do.
+  action: read
+  outcome: informs
+  # PERCEPTION: from a section's text the being perceives its salient CONTENT TOKENS
+  # -- the `max_tokens` most frequent word tokens at least `min_token_length` long,
+  # minus `stopwords` (deterministic, model-free). These become the perceived
+  # properties the memory/concept key on; the source/developer label is never among
+  # them (ADR 0002).
+  max_tokens: 6
+  min_token_length: 4
+  # SECTIONING: how a document is chunked into the sections read one at a time
+  # (reuses the R1 ingest chunker), so a long document is many observations, not one.
+  section_max_chars: 120
+  section_overlap: 0
+  min_section_chars: 1
+  # The words dropped before ranking a section's tokens -- function words that carry
+  # no subject. A word here can never become a perceived token.
+  stopwords: [the, a, an, and, or, but, of, to, in, on, at, for, with, from, by, as,
+              is, are, was, were, be, been, being, it, its, this, that, these, those,
+              they, them, their, when, then, than, so, if, we, you, your, he, she,
+              his, her, do, does, did, has, have, had, will, would, can, could, not,
+              no, yes, there, here, what, which, who, whom, into, over, under, about]

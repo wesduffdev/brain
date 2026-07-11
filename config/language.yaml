@@ -90,3 +90,35 @@ phrasing:
     happy: happy
     excited: excited
     comforted: comforted
+
+# The being's OWN language model (reading R1, ADR 0036). It LEARNS from documents
+# you give it by LoRA-fine-tuning an open-source base model, host-native on the
+# Mac's Metal GPU via MLX-LM, producing a LoRA ADAPTER that IS "our model". Only
+# ConfigService reads this; retuning training is a change HERE, never in Python.
+finetune:
+  # The open base to fine-tune (Apache-2.0, test-scale per READING_VOICEBOX §6),
+  # and where the trained LoRA adapter — the being's learned voice — is saved.
+  base_model: Qwen/Qwen2.5-3B-Instruct
+  adapter_path: models/language/adapter
+  # Document ingestion: how a read document is cleaned + chunked into training
+  # text (pure/deterministic), and the held-out validation share.
+  ingest:
+    max_chars: 1000       # target size of a training chunk
+    overlap: 100          # characters shared between adjacent split chunks
+    min_chunk_chars: 1    # chunks shorter than this are dropped
+    valid_fraction: 0.1   # share of chunks held out for validation
+  # MLX-LM LoRA hyperparameters (host-native; watch the loss drop as it trains).
+  lora:
+    iters: 200            # training iterations
+    batch_size: 4
+    learning_rate: 0.00001  # 1e-5
+    num_layers: 8         # transformer layers LoRA is applied to
+    rank: 8               # LoRA rank
+    scale: 20.0           # LoRA scale (alpha/rank)
+    dropout: 0.0
+    max_seq_length: 512
+    seed: 0
+  # After training, sample a generation so you can read it in the doc's style.
+  sample:
+    prompt: "Tell me, in your own words, what you just read about:"
+    max_tokens: 200

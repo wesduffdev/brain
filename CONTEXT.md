@@ -750,6 +750,29 @@ produces the words.
 _Avoid_: speak (the act itself), generate, narrate/render (the narrator's words),
 TTS (as a verb).
 
+**Reading**:
+The faculty by which the being takes in a document you hand it and LEARNS from
+it — growing its knowledge from what you give it. Reading sits ON TOP of the
+simulation like narration and voice: it adds to what the being knows, it does not
+drive its needs, emotion, or decisions.
+_Avoid_: parsing, loading, importing, scanning.
+
+**Ingest**:
+To turn a document the being reads into training-ready text — reading it,
+cleaning it (uniform whitespace and line endings), and chunking it into ordered
+passages. Ingest is pure and deterministic: it produces the corpus a fine-tune
+learns from, and touches no model or GPU. The same document always ingests the
+same way.
+_Avoid_: parse, tokenize, preprocess, load, index (the retrieval store).
+
+**Fine-tune**:
+To adapt the being's OWN open base model to what it has read by training a small
+LoRA adapter on the ingested text — host-native on the Mac's GPU. The trained
+adapter IS "our model": the being's learned voice, saved as an artifact and later
+served behind the language-model port. Learning from a document means fine-tuning
+on it (immediately, or later during consolidation).
+_Avoid_: train-from-scratch, retrain, pretrain, tune (a config value), calibrate.
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

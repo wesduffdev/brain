@@ -29,6 +29,7 @@ from app.policies import (
     InstinctConsumePolicy,
     InstinctRuntimePolicy,
     LocalModelPolicy,
+    LoRAFinetunePolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
     NarrationPhrasing,
@@ -759,6 +760,41 @@ class ConfigService:
             model=str(local.get("model", "")),
             base_url_env=str(local.get("base_url_env", "OLLAMA_BASE_URL")),
             timeout_seconds=float(local.get("timeout_seconds", 30.0)),
+        )
+
+    def finetune_policy(self) -> LoRAFinetunePolicy:
+        """How the being LEARNS from a document it reads (reading R1, ADR 0036),
+        from the `finetune:` block of ``config/language.yaml``: the open `base_model`
+        to LoRA-fine-tune and where its `adapter_path` is saved, the ingest chunking
+        (`max_chars`/`overlap`/`min_chunk_chars`) and `valid_fraction`, the MLX-LM LoRA
+        hyperparameters (`iters`/`batch_size`/`learning_rate`/`num_layers`/`rank`/
+        `scale`/`dropout`/`max_seq_length`/`seed`), and the post-train `sample` prompt/
+        length. Absent config yields the READING_VOICEBOX §6 test-scale defaults
+        (Qwen2.5-3B-Instruct), so retuning what the being reads and how it trains is a
+        config change only — never a code one."""
+        finetune = self._language.get("finetune", {}) or {}
+        ingest = finetune.get("ingest", {}) or {}
+        lora = finetune.get("lora", {}) or {}
+        sample = finetune.get("sample", {}) or {}
+        defaults = LoRAFinetunePolicy()
+        return LoRAFinetunePolicy(
+            base_model=str(finetune.get("base_model", defaults.base_model)),
+            adapter_path=str(finetune.get("adapter_path", defaults.adapter_path)),
+            max_chars=int(ingest.get("max_chars", defaults.max_chars)),
+            overlap=int(ingest.get("overlap", defaults.overlap)),
+            min_chunk_chars=int(ingest.get("min_chunk_chars", defaults.min_chunk_chars)),
+            valid_fraction=float(ingest.get("valid_fraction", defaults.valid_fraction)),
+            iters=int(lora.get("iters", defaults.iters)),
+            batch_size=int(lora.get("batch_size", defaults.batch_size)),
+            learning_rate=float(lora.get("learning_rate", defaults.learning_rate)),
+            num_layers=int(lora.get("num_layers", defaults.num_layers)),
+            rank=int(lora.get("rank", defaults.rank)),
+            scale=float(lora.get("scale", defaults.scale)),
+            dropout=float(lora.get("dropout", defaults.dropout)),
+            max_seq_length=int(lora.get("max_seq_length", defaults.max_seq_length)),
+            seed=int(lora.get("seed", defaults.seed)),
+            sample_prompt=str(sample.get("prompt", defaults.sample_prompt)),
+            sample_max_tokens=int(sample.get("max_tokens", defaults.sample_max_tokens)),
         )
 
     def voice_policy(self) -> VoicePolicy:

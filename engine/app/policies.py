@@ -1173,3 +1173,46 @@ class VoicePolicy:
             rate=int(override.get("rate", self.rate)),
             pitch=int(override.get("pitch", self.pitch)),
         )
+
+
+@dataclass(frozen=True)
+class LoRAFinetunePolicy:
+    """How the being LEARNS from a document it reads — the config for a host-native
+    MLX-LM LoRA fine-tune of OUR OWN open-source base model (reading R1, ADR 0036),
+    from the `finetune:` block of ``config/language.yaml``. It bundles three groups,
+    all config-driven so retuning training never touches Python:
+
+    - the MODEL: `base_model` (the open base to fine-tune, Qwen2.5-3B-Instruct by
+      default) and `adapter_path` (where the trained LoRA adapter — "our model" — is
+      saved);
+    - INGEST: `max_chars` / `overlap` / `min_chunk_chars` shape the document into
+      training-ready chunks, and `valid_fraction` is the held-out validation share;
+    - LoRA TRAINING: `iters`, `batch_size`, `learning_rate`, `num_layers`, `rank`,
+      `scale`, `dropout`, `max_seq_length`, `seed` — the MLX-LM LoRA hyperparameters.
+
+    Plus SAMPLING: `sample_prompt` / `sample_max_tokens` drive the post-train
+    generation so you can watch the model write in the corpus's style. The defaults
+    match READING_VOICEBOX §6's test-scale choice, so the policy is usable even
+    before the config file carries a `finetune` block.
+    """
+
+    base_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    adapter_path: str = "models/language/adapter"
+    # ingest
+    max_chars: int = 1000
+    overlap: int = 100
+    min_chunk_chars: int = 1
+    valid_fraction: float = 0.1
+    # LoRA training
+    iters: int = 200
+    batch_size: int = 4
+    learning_rate: float = 1e-5
+    num_layers: int = 8
+    rank: int = 8
+    scale: float = 20.0
+    dropout: float = 0.0
+    max_seq_length: int = 512
+    seed: int = 0
+    # sampling
+    sample_prompt: str = "Tell me, in your own words, what you just read about:"
+    sample_max_tokens: int = 200

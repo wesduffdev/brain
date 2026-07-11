@@ -726,6 +726,30 @@ affect ("afterwards I felt VERY scared").
 _Avoid_: priority-as-queue-order, importance, weight, relevance (the recall
 signal).
 
+**Voicebox**:
+The faculty that turns the being's self-report into audible SPEECH — a voice port
+behind which an open-source TTS engine (espeak-ng) renders the report text to
+audio, exposed at `/speak`. Like narration it sits ON TOP of the simulation: it
+gives the words sound, never new words, and controls nothing. Voice is an upgrade,
+not a dependency — a host with no engine degrades to a clear no-op and the being
+still answers in text.
+_Avoid_: voice assistant, speech agent, TTS-as-feature, speaker, mouth.
+
+**Utterance**:
+One thing the being is asked to speak — the self-report text handed to the
+voicebox, together with the voice parameters (rate, pitch, voice) it is spoken
+with. The being can only utter what it can report, so an utterance is as grounded
+as the self-report behind it.
+_Avoid_: message, phrase, line, dialogue, sound clip.
+
+**Synthesize**:
+To render an utterance into audio through the voice port — deterministic given the
+text and parameters, producing WAV bytes, or nothing when no engine is available on
+the host. Synthesis adds sound to words the being already produced; it never
+produces the words.
+_Avoid_: speak (the act itself), generate, narrate/render (the narrator's words),
+TTS (as a verb).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

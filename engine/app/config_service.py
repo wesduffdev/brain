@@ -46,6 +46,7 @@ from app.policies import (
     SurprisePolicy,
     TraitDriftPolicy,
     TraitPolicy,
+    VoicePolicy,
 )
 
 # Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
@@ -78,6 +79,7 @@ class ConfigService:
         "events",
         "motion",
         "language",
+        "voice",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -133,6 +135,7 @@ class ConfigService:
         events: Optional[Mapping] = None,
         motion: Optional[Mapping] = None,
         language: Optional[Mapping] = None,
+        voice: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -155,6 +158,7 @@ class ConfigService:
             events=events,
             motion=motion,
             language=language,
+            voice=voice,
         )
 
     @classmethod
@@ -186,6 +190,7 @@ class ConfigService:
             "events": "events.yaml",
             "motion": "motion.yaml",
             "language": "language.yaml",
+            "voice": "voice.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -754,6 +759,25 @@ class ConfigService:
             model=str(local.get("model", "")),
             base_url_env=str(local.get("base_url_env", "OLLAMA_BASE_URL")),
             timeout_seconds=float(local.get("timeout_seconds", 30.0)),
+        )
+
+    def voice_policy(self) -> VoicePolicy:
+        """How the being SPEAKS its self-report aloud (S4, ADR 0035), from
+        ``config/voice.yaml``: which `engine` backs the `VoicePort`, the neutral
+        `voice`/`rate`/`pitch`, and the optional per-emotion `rate`/`pitch` overrides
+        so the being's voice tracks how it feels. Absent config yields the safe
+        espeak-ng defaults, so retuning the voice is a config change only."""
+        voice = self._voice or {}
+        emotion_params = {
+            str(name): {str(k): int(v) for k, v in (spec or {}).items()}
+            for name, spec in (voice.get("emotion", {}) or {}).items()
+        }
+        return VoicePolicy(
+            engine=str(voice.get("engine", "espeak-ng")),
+            voice=str(voice.get("voice", "en")),
+            rate=int(voice.get("rate", 175)),
+            pitch=int(voice.get("pitch", 50)),
+            emotion_params=emotion_params,
         )
 
     # --- render / commands ------------------------------------------------

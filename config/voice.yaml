@@ -1,0 +1,36 @@
+# The VOICEBOX (S4, ADR 0035; the voicebox reading R8 reuses) — how the being
+# SPEAKS its self-report aloud. This file tunes the voice: which open-source TTS
+# engine renders it, the neutral rate/pitch it speaks with, and the optional
+# per-emotion overrides so what the being SOUNDS like tracks how it FEELS.
+# Retuning the voice — or switching engines — is a change HERE, never in Python
+# (the config-driven-tuning rule). Only ConfigService reads this file.
+
+# Which ENGINE sits behind the one VoicePort seam.
+#   espeak-ng -> the open-source, offline TTS binary (default; host-gated — a host
+#                without it degrades to a clear no-op, voice being an upgrade not a
+#                dependency). `espeak` is the plain alias.
+#   fake      -> the in-memory deterministic voice (demo/tests; no engine needed)
+# (Piper joins as another engine at reading R8 — a new branch, not a new port.)
+engine: espeak-ng
+
+# The being's neutral voice, before any emotion override.
+#   voice  -> the espeak-ng voice name (language/variant)
+#   rate   -> speaking rate in words per minute
+#   pitch  -> pitch, 0 (low) .. 99 (high)
+voice: en
+rate: 170
+pitch: 50
+
+# Optional emotion -> voice override: the rate/pitch a being feeling this emotion
+# speaks with (an unmapped emotion falls back to the neutral voice above). Keyed by
+# the same derived-emotion vocabulary the narrator's `feeling` table uses.
+emotion:
+  scared:     { rate: 210, pitch: 75 }
+  excited:    { rate: 200, pitch: 70 }
+  happy:      { rate: 185, pitch: 65 }
+  curious:    { rate: 175, pitch: 60 }
+  hungry:     { rate: 160, pitch: 50 }
+  comforted:  { rate: 150, pitch: 52 }
+  calm:       { rate: 150, pitch: 45 }
+  frustrated: { rate: 190, pitch: 40 }
+  sleepy:     { rate: 120, pitch: 35 }

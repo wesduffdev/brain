@@ -124,6 +124,10 @@ flowchart TB
         Claude["ClaudeLanguageModel: fluent narrator (env-gated)"]
         Local["LocalLanguageModel: local model (S2 = reading R2; Ollama, client-only)"]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
+        VBuild["build_voice: config engine selection (S4 = reading R8)"]
+        VPort["VoicePort seam: synthesize self-report → speech"]
+        Espeak["EspeakVoice: espeak-ng TTS (host-gated; no-op if binary absent)"]
+        FakeV["FakeVoice: in-memory (tests)"]
     end
 
     PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct tables")]
@@ -203,6 +207,12 @@ flowchart TB
     LCmd --> LMPort
     API -->|"/ask"| Self
     Self -->|self-report| API
+    API -->|"/speak"| Self
+    Self -->|self-report text| VPort
+    VPort --> VBuild
+    VBuild --> Espeak
+    VBuild -.-> FakeV
+    VPort -->|audio| API
     Emo --> API
     Dec --> API
     React --> API

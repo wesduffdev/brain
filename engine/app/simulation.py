@@ -23,6 +23,7 @@ from app.db.unit_of_work import NullUnitOfWork
 from app.ports.repositories import (
     BeliefRepository,
     ConceptRepository,
+    GraphRepository,
     InteractionEventRepository,
     MemoryRepository,
     PredictionRecordRepository,
@@ -32,8 +33,11 @@ from app.ports.repositories import (
 )
 from app.repositories import InMemoryPredictionRecordRepository, InMemorySimilarityRepository
 from app.services.belief_service import BeliefService
+from app.services.concept_path_service import ConceptPathService
 from app.services.concept_service import ConceptService
 from app.services.curiosity_service import CuriosityService
+from app.services.knowledge_graph_service import KnowledgeGraphService
+from app.services.prediction_explanation_service import PredictionExplanationService
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
@@ -65,6 +69,7 @@ class Simulation:
         concept_repository: Optional[ConceptRepository] = None,
         belief_repository: Optional[BeliefRepository] = None,
         similarity_repository: Optional[SimilarityRepository] = None,
+        graph_repository: Optional[GraphRepository] = None,
         unit_of_work: Optional[UnitOfWork] = None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
@@ -134,6 +139,25 @@ class Simulation:
         self._similarity = (
             SimilarityService(similarity_repository)
             if similarity_repository is not None
+            else None
+        )
+        # Graph seam (card v7, ADR 0021): when a graph port is injected, every
+        # interaction PROJECTS the concepts it formed, the object it perceived, the
+        # outcomes it observed, and its similarities into a CONCEPT GRAPH — object/
+        # property/outcome nodes joined by typed edges whose confidence strengthens
+        # with evidence. The projection stages inside the interaction's unit of work
+        # below (side effect of living, never read into this tick's decision). The
+        # payoff is read-only: `explanations()` walks the graph for each prediction's
+        # object -> property -> outcome path.
+        self._graph_repo = graph_repository
+        self._graph = (
+            KnowledgeGraphService(graph_repository, config.graph_edge_policy())
+            if graph_repository is not None
+            else None
+        )
+        self._explanations = (
+            PredictionExplanationService(ConceptPathService(graph_repository))
+            if graph_repository is not None
             else None
         )
         # Transaction boundary (ADR 0017): one interaction's writes — its event,
@@ -315,7 +339,7 @@ class Simulation:
             # Concept learning (card v2): distil the interaction into concept
             # schemas keyed on perceived properties, form beliefs about the object
             # from them, and record its similarity to the other perceived objects.
-            if self._concepts is not None:
+            concepts_formed = (
                 self._concepts.observe(
                     being_id=self.being.being_id,
                     tick=tick,
@@ -324,6 +348,9 @@ class Simulation:
                     perceived_properties=perceived_props,
                     observed_outcomes=observed_outcome,
                 )
+                if self._concepts is not None
+                else []
+            )
             if self._beliefs is not None:
                 self._beliefs.believe(
                     being_id=self.being.being_id,
@@ -332,7 +359,7 @@ class Simulation:
                     perceived_properties=perceived_props,
                     action=decision.action,
                 )
-            if self._similarity is not None:
+            similarities_recorded = (
                 self._similarity.record(
                     being_id=self.being.being_id,
                     tick=tick,
@@ -343,6 +370,23 @@ class Simulation:
                         for obj in perceived
                         if obj["objectId"] != decision.target_id
                     ],
+                )
+                if self._similarity is not None
+                else []
+            )
+            # Concept graph (card v7): project this interaction's concepts, the
+            # object, its observed outcomes, and its similarities into the graph,
+            # linking each edge back to the interaction's memory (being:tick).
+            if self._graph is not None:
+                self._graph.witness(
+                    being_id=self.being.being_id,
+                    tick=tick,
+                    object_id=decision.target_id,
+                    perceived_properties=perceived_props,
+                    observed_outcomes=observed_outcome,
+                    concepts=concepts_formed,
+                    similarities=similarities_recorded,
+                    source_memory_ids=(event.event_id,),
                 )
         self._cooldown_until[decision.action] = (
             tick + policy.duration_ticks + policy.cooldown_ticks
@@ -484,6 +528,20 @@ class Simulation:
         if self._similarity_repo is None:
             return []
         return [record.snapshot() for record in self._similarity_repo.all()]
+
+    def explanations(self) -> List[Dict]:
+        """The being's predictions with the EXPLANATION PATH that justifies each
+        (card v7), drawn from the concept graph — one per (object, outcome) the
+        graph supports, kept at the strongest supporting property. Each names the
+        object, the perceived property that bridges it to a predicted outcome, the
+        ordered path (``object → property → outcome``), and the path's aggregate
+        confidence. Empty when no graph port is injected."""
+        if self._explanations is None:
+            return []
+        return [
+            explanation.snapshot()
+            for explanation in self._explanations.explanations(being_id=self.being.being_id)
+        ]
 
     def state(self) -> Dict:
         """A snapshot of the being plus what it currently perceives of its room.

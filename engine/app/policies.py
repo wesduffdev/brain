@@ -344,6 +344,36 @@ class ConceptLearningPolicy:
 
 
 @dataclass(frozen=True)
+class GraphEdgePolicy:
+    """How a CONCEPT-GRAPH EDGE's confidence forms and strengthens (card v7). An
+    edge starts at `seed_confidence` the first time the being lays it down, and
+    each later confirming interaction moves its confidence a fraction
+    `reinforce_rate` of the way toward full certainty (1.0):
+
+        confidence_next = confidence + reinforce_rate * (1 - confidence)
+
+    So an edge's confidence rises monotonically with the evidence behind it and
+    asymptotes at 1.0 — the more often the being sees ``round → rolls``, the surer
+    that edge is, with diminishing returns. Both numbers live in
+    `config/learning_rates.yaml` (`graph.edge`), so retuning how boldly the graph
+    commits to a relationship is a config change, never a code one. The default
+    (seed 0.3, rate 0.2) strengthens edges even with no learning-rates file. It
+    mirrors `ConceptLearningPolicy`'s curve but is a distinct seam so graph tuning
+    moves independently of concept tuning."""
+
+    seed_confidence: float = 0.3
+    reinforce_rate: float = 0.2
+
+    def reinforce(self, current: "float | None") -> float:
+        """The confidence of an edge after one more confirming interaction.
+        ``None`` is the first sighting (returns the seed); otherwise the current
+        confidence is nudged toward 1.0 by `reinforce_rate`."""
+        if current is None:
+            return float(self.seed_confidence)
+        return float(current) + float(self.reinforce_rate) * (1.0 - float(current))
+
+
+@dataclass(frozen=True)
 class CuriosityWeights:
     """How the being's CURIOSITY toward a perceived object is composed from four
     cognitive signals (card v4). The being is drawn to what it cannot yet predict:

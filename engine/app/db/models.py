@@ -14,6 +14,8 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``concept_evidence``    — append-only interactions that reinforced a concept.
 - ``beliefs``             — per-object predictions inherited from concepts.
 - ``object_similarity_records`` — perceived-property similarity between objects.
+- ``graph_nodes``         — object/property/outcome nodes of the concept graph.
+- ``graph_edges``         — typed, confidence-bearing edges of the concept graph.
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -250,3 +252,52 @@ class ObjectSimilarityRecord(Base):
     other_object_id = Column(String, nullable=True, index=True)
     similarity = Column(Float, nullable=False, default=0.0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphNode(Base):
+    """One node of the being's CONCEPT GRAPH (card v7): a ``kind``
+    (OBJECT/PROPERTY/OUTCOME) and the perceived ``label`` it stands for.
+    ``node_id`` (``being|kind|label``) is the primary key, so a node the being
+    meets again is upserted in place rather than duplicated. Keyed on perceived
+    tokens — there is deliberately no developer_label column (ADR 0002)."""
+
+    __tablename__ = "graph_nodes"
+
+    node_id = Column(String, primary_key=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    kind = Column(String, nullable=False, index=True)
+    label = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GraphEdge(Base):
+    """One typed, directed edge of the concept graph (card v7): a ``kind``
+    (``HAS_PROPERTY``/``PREDICTS``/``PRODUCED``/``SIMILAR_TO``) from ``source_id``
+    to ``target_id`` (graph_node ids), with a ``confidence`` that rises as
+    ``evidence_count`` interactions confirm it, the ``last_updated_tick`` it last
+    strengthened, and ``source_memory_ids`` — the interactions (``being:tick``)
+    behind it, so the edge is reconcilable to the memories that formed it (card
+    v1). ``edge_id`` (``being|kind|source|target``) is the primary key, so an edge
+    strengthens in place across interactions.
+
+    ``source_id``/``target_id`` are plain indexed logical links to
+    ``graph_nodes`` (its own aggregate), deliberately *not* DB foreign keys: node
+    and edge are staged together in one unit of work, and a natural-key FK between
+    them only forces a brittle intra-unit insert ordering without adding integrity
+    the unit does not already guarantee (the same reasoning as
+    ``concept_evidence.concept_id``, ADR 0019)."""
+
+    __tablename__ = "graph_edges"
+
+    edge_id = Column(String, primary_key=True)
+    being_id = Column(String, ForeignKey("beings.being_id"), nullable=True, index=True)
+    kind = Column(String, nullable=False, index=True)
+    source_id = Column(String, nullable=False, index=True)
+    target_id = Column(String, nullable=False, index=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+    evidence_count = Column(Integer, nullable=False, default=0)
+    last_updated_tick = Column(Integer, nullable=True)
+    source_memory_ids = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

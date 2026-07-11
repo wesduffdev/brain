@@ -654,6 +654,9 @@ class InstinctModelPolicy:
     learning_rate: float = 0.05
     seed: int = 0
     intensity_loss: str = "bce"
+
+
+@dataclass(frozen=True)
 class EventTopicsPolicy:
     """The being.* Kafka topic catalogue and the partition / dead-letter
     conventions the runtime broker is provisioned with (EVT-KAFKA, ADR 0024). It

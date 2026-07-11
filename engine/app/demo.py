@@ -28,8 +28,8 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 
+from app.bootstrap import build_simulation
 from app.config_service import ConfigService
-from app.simulation import Simulation
 
 _DEFAULT_CONFIG_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 
@@ -80,7 +80,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     obj = config.object_catalog()[object_id]
     is_hot = "hot" in obj.properties
 
-    sim = Simulation(config.with_room_contents([object_id]))
+    # The bootstrap persists the run when DATABASE_URL is set (events, derived
+    # examples, and shadow predictions land in Postgres); with no DB it is the
+    # same in-memory being the demo has always shown.
+    sim = build_simulation(config.with_room_contents([object_id]))
 
     label = obj.developer_label or object_id
     props = ", ".join(obj.properties) or "no notable properties"

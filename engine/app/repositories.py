@@ -62,6 +62,57 @@ class InMemoryPredictionRecordRepository:
         return list(self._records)
 
 
+class PostgresPredictionRecordRepository:
+    """A shadow-mode prediction store backed by Postgres via a SQLAlchemy
+    ``Session``. Append-only, like the event/example adapters: each interaction
+    adds one row on the `prediction_records` table (ADR 0011), and ``all`` reads
+    them back oldest-first as immutable `PredictionRecord` value objects. The row
+    links to the interaction it shadowed by ``event_id`` (``being:tick``)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, record: PredictionRecord) -> None:
+        self._session.add(
+            models.PredictionRecord(
+                event_id=f"{record.being_id}:{record.tick}",
+                being_id=record.being_id,
+                tick=record.tick,
+                object_id=record.object_id,
+                action=record.action,
+                predicted=list(record.model_outcome),
+                probabilities=dict(record.probabilities),
+                rule_expected=list(record.rule_expected),
+                actual=list(record.actual_observed),
+                correct=record.correct,
+                prediction_error=record.prediction_error,
+            )
+        )
+        self._session.commit()
+
+    def all(self) -> List[PredictionRecord]:
+        rows = (
+            self._session.query(models.PredictionRecord)
+            .order_by(models.PredictionRecord.id)
+            .all()
+        )
+        return [
+            PredictionRecord(
+                being_id=row.being_id,
+                tick=row.tick,
+                object_id=row.object_id,
+                action=row.action,
+                probabilities=dict(row.probabilities or {}),
+                model_outcome=tuple(row.predicted or ()),
+                rule_expected=tuple(row.rule_expected or ()),
+                actual_observed=tuple(row.actual or ()),
+                correct=bool(row.correct),
+                prediction_error=row.prediction_error or 0.0,
+            )
+            for row in rows
+        ]
+
+
 class PostgresBeingRepository:
     """A being store backed by Postgres via a SQLAlchemy ``Session``."""
 

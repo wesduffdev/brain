@@ -14,13 +14,20 @@ outcomes (`OutcomeEffectPolicy.anticipated_cost`) is subtracted from the action'
 utility — so the being can learn to avoid an action it predicts will hurt. With
 no predictor, the being decides on raw utility exactly as before (shadow).
 
+When an **exploration policy** is injected (card v4) and `decide` is given a
+per-object curiosity signal, the being is also pulled toward what it cannot yet
+predict: the `ExplorationPolicyService` yields a score adjustment per (action,
+object) — a curiosity bonus toward novel/uncertain objects — added to each *safe*
+candidate. With `curiosity_weight` zero (the default) the adjustment is zero and
+the being decides on pure utility exactly as before.
+
 Safety is not something this service weighs; it *obeys* it. It asks the injected
 SafetyService about each candidate and drops any that is blocked before ranking,
-so neither a high utility nor a confident learned prediction can bypass a
-guardrail (BRIEF §12: "learned predictions never bypass safety") — the prediction
-only ever reshuffles the *safe* candidates. When a would-be top choice was
-blocked, the chosen action says so in its reason. All the numbers live in
-`config/*.yaml`; this service holds none.
+so neither a high utility, a confident learned prediction, nor a curiosity bonus
+can bypass a guardrail (BRIEF §12: "learned predictions never bypass safety") —
+prediction and exploration only ever reshuffle the *safe* candidates. When a
+would-be top choice was blocked, the chosen action says so in its reason. All the
+numbers live in `config/*.yaml`; this service holds none.
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ from app.domain.decision import Decision
 from app.ml.encode_features import Example
 from app.policies import ActionPolicy, OutcomeEffectPolicy
 from app.ports.predictor import PredictorPort
+from app.services.exploration_policy_service import ExplorationPolicyService
 from app.services.safety_service import SafetyService
 
 
@@ -51,6 +59,7 @@ class DecisionService:
         *,
         predictor: Optional[PredictorPort] = None,
         outcome_effects: Optional[OutcomeEffectPolicy] = None,
+        exploration: Optional[ExplorationPolicyService] = None,
     ):
         # Preserve authored order so ties break deterministically by config order.
         self._actions = dict(actions)
@@ -59,6 +68,9 @@ class DecisionService:
         # Active prediction (card v3): both are present together or neither is.
         self._predictor = predictor
         self._outcome_effects = outcome_effects or OutcomeEffectPolicy()
+        # Exploration (card v4): the curiosity bonus is applied only when a policy
+        # is present AND `decide` is given a curiosity signal; otherwise inert.
+        self._exploration = exploration
 
     def decide(
         self,
@@ -67,6 +79,7 @@ class DecisionService:
         emotion: str,
         perceived: Sequence[Mapping],
         on_cooldown: Set[str],
+        curiosity: Optional[Mapping[str, float]] = None,
     ) -> Optional[Decision]:
         selectable: list = []
         blocked_top: Optional[_Candidate] = None
@@ -87,9 +100,11 @@ class DecisionService:
                     continue
                 if name in on_cooldown:
                     continue
-                # Prediction is active only for the SAFE candidates — it can never
-                # rescue a blocked one, so a learned score cannot bypass safety.
+                # Prediction and exploration touch only the SAFE candidates — both
+                # apply after the block check, so neither a learned cost nor a
+                # curiosity bonus can rescue a blocked action past the safety floor.
                 score -= self._anticipated_cost(policy, properties)
+                score += self._exploration_bonus(name, object_id, curiosity)
                 selectable.append(_Candidate(score, self._order[name], object_id, name, policy.reason))
 
         if not selectable:
@@ -119,3 +134,15 @@ class DecisionService:
         )
         probabilities = self._predictor.predict_outcomes(example)
         return self._outcome_effects.anticipated_cost(probabilities)
+
+    def _exploration_bonus(
+        self, action: str, object_id: str, curiosity: Optional[Mapping[str, float]]
+    ) -> float:
+        """The curiosity bonus for taking `action` on `object_id` — 0.0 when
+        exploration is off or no curiosity signal was supplied. The anticipated-
+        discomfort push stays 0 in the decision path for now; belief-anticipated
+        discomfort is a follow-up that will feed it (the v3 predictor already
+        penalizes anticipated harm here)."""
+        if self._exploration is None or curiosity is None:
+            return 0.0
+        return self._exploration.adjustment(action=action, curiosity=curiosity.get(object_id, 0.0))

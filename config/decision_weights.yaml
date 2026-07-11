@@ -1,0 +1,54 @@
+# How CURIOSITY and SURPRISE steer the being's exploration (card v4; ADR 0020,
+# extending the decision/utility + safety seam of ADR 0009).
+#
+# The being preferentially explores what it cannot yet predict. Curiosity toward
+# an object rises with how NOVEL and UNCERTAIN it is and how recently it SURPRISED
+# the being, and falls with how FAMILIAR it has become. That signal then nudges
+# the decision's action scoring — but only WITHIN the safety floor: the bonus is
+# applied to the SAFE candidates alone, so no curiosity can buy an action past a
+# safety rule (BRIEF §12).
+#
+# This is the single tuning surface for temperament — how curious, how novelty-
+# seeking the being is. Retuning it is a change HERE, never in Python.
+
+curiosity:
+  # curiosity(object) = novelty*novelty + uncertainty*uncertainty
+  #                   + recent_surprise*recent_surprise - familiarity*familiarity
+  # novelty     : share of the object's properties never before encountered
+  # uncertainty : among met properties, how far from mastered they are
+  # recent_surprise : the decayed trace of how wrong the being lately was about it
+  # familiarity : how well the object is understood (pulls curiosity back down)
+  novelty: 1.0
+  uncertainty: 0.6
+  recent_surprise: 1.0
+  familiarity: 0.8
+  # How fast acting on an object with a property makes that property familiar:
+  #   familiarity_next = familiarity + familiarity_rate * (1 - familiarity)
+  # Higher = the being habituates to a kind of object faster.
+  familiarity_rate: 0.3
+
+surprise:
+  # A recorded surprise fades each tick: recent = surprise * decay**ticks_elapsed.
+  # 1.0 never forgets a shock; 0.0 forgets it instantly.
+  decay: 0.7
+
+exploration:
+  # The curiosity bonus added to a SAFE action's score:
+  #   action_weight(action) * curiosity_weight * curiosity(object)
+  # curiosity_weight 0 -> a purely utility-driven being (the pre-v4 baseline).
+  curiosity_weight: 0.5
+  # The anticipated-discomfort penalty scale (an action the being expects to hurt
+  # is pushed down). Reserved for belief-anticipated discomfort; the active-
+  # prediction path (ADR 0015) already penalizes anticipated harm in the decision.
+  discomfort_weight: 1.0
+  # How strongly each action chases novelty. Epistemic, low-risk actions (observe,
+  # approach) chase it most; contact actions less, so curiosity draws the being to
+  # LOOK before it reaches out. An action not listed uses default_action_weight.
+  action_weights:
+    observe: 1.0
+    approach: 0.8
+    push: 0.5
+    touch: 0.2
+    grab: 0.2
+    withdraw: 0.0
+  default_action_weight: 0.0

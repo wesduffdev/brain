@@ -33,15 +33,18 @@ from app.ports.repositories import (
 from app.repositories import InMemoryPredictionRecordRepository
 from app.services.belief_service import BeliefService
 from app.services.concept_service import ConceptService
+from app.services.curiosity_service import CuriosityService
 from app.services.decision_service import DecisionService
 from app.services.emotion_service import EmotionService
 from app.services.environment_service import EnvironmentService
+from app.services.exploration_policy_service import ExplorationPolicyService
 from app.services.memory_service import MemoryService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
 from app.services.prediction_service import PredictionService
 from app.services.safety_service import SafetyService
 from app.services.similarity_service import SimilarityService
+from app.services.surprise_service import SurpriseService
 from app.services.tick_service import TickService
 
 
@@ -124,6 +127,20 @@ class Simulation:
 
         self._actions = config.action_policies()
         safety = SafetyService(config.safety_rules())
+        # Exploration (card v4): curiosity toward what the being cannot yet predict
+        # (novelty + uncertainty + recent surprise − familiarity) and the recorded
+        # surprise it decays. Always present — curiosity/surprise are exposed every
+        # tick — but the decision only shifts when the config gives a non-zero
+        # exploration weight (the default is a purely utility-driven being).
+        self._exploration = ExplorationPolicyService(
+            config.exploration_policy(),
+            CuriosityService(config.curiosity_weights()),
+            SurpriseService(config.surprise_policy()),
+        )
+        # Per-object curiosity / recent surprise for the render frame, refreshed
+        # each tick from the being's perception.
+        self._curiosity_view: Dict[str, float] = {}
+        self._surprise_view: Dict[str, float] = {}
         # Per-action timing gate: the tick an action may next be taken.
         self._cooldown_until: Dict[str, int] = {}
         self._events: List[InteractionEvent] = []
@@ -152,9 +169,10 @@ class Simulation:
                 safety,
                 predictor=ensemble,
                 outcome_effects=config.outcome_effects(),
+                exploration=self._exploration,
             )
         else:
-            self._decision = DecisionService(self._actions, safety)
+            self._decision = DecisionService(self._actions, safety, exploration=self._exploration)
             if predictor is not None:
                 self._prediction_repo = prediction_repository or InMemoryPredictionRecordRepository()
                 self._prediction = PredictionService(
@@ -194,11 +212,18 @@ class Simulation:
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 
+        # Curiosity toward each perceived object (from prior ticks' familiarity and
+        # recent surprise) steers the decision toward what the being cannot yet
+        # predict; it is also exposed on the render frame.
+        self._curiosity_view = self._exploration.curiosity_map(perceived=perceived, tick=tick)
+        self._surprise_view = self._exploration.surprise_map(perceived=perceived, tick=tick)
+
         decision = self._decision.decide(
             needs=self.being.needs,
             emotion=emotion_before,
             perceived=perceived,
             on_cooldown=on_cooldown,
+            curiosity=self._curiosity_view,
         )
         if decision is None:
             self._current_action = None
@@ -291,6 +316,19 @@ class Simulation:
             tick + policy.duration_ticks + policy.cooldown_ticks
         )
         self._current_action = decision.as_current_action()
+
+        # Learn from the interaction: how surprising its outcome was (expected vs.
+        # observed) and that the acted-on object's properties are now more familiar
+        # — so next tick's curiosity reflects what the being just experienced. Then
+        # refresh the recent-surprise view so the render frame shows this tick's.
+        self._exploration.observe_interaction(
+            object_id=decision.target_id,
+            tick=tick,
+            expected=event.expected_outcome,
+            observed=event.observed_outcome,
+            perceived_properties=perceived_props,
+        )
+        self._surprise_view = self._exploration.surprise_map(perceived=perceived, tick=tick)
 
     def _record(self, event: InteractionEvent, true_props, policy) -> None:
         """Persist the event through its port (when one is injected) and derive a
@@ -390,9 +428,14 @@ class Simulation:
         The `perceived` block is the being's view of the world, produced by the
         PerceptionService — never the true world state (ADR 0002). When the being
         took an action this tick, `currentAction` carries it ({type, targetId,
-        reason}); it is absent at birth and on any idle tick."""
+        reason}); it is absent at birth and on any idle tick. `curiosity` and
+        `surprise` carry, per perceived object, how strongly the being wants to
+        explore it and how recently it surprised the being (card v4) — empty until
+        the first tick and on a tick with nothing to perceive."""
         snapshot = self.being.snapshot(self._clock.current_tick)
         snapshot["perceived"] = self._perception.perceive(self._room)
+        snapshot["curiosity"] = dict(self._curiosity_view)
+        snapshot["surprise"] = dict(self._surprise_view)
         if self._current_action is not None:
             snapshot["currentAction"] = dict(self._current_action)
         return snapshot

@@ -334,6 +334,99 @@ class ConceptLearningPolicy:
 
 
 @dataclass(frozen=True)
+class CuriosityWeights:
+    """How the being's CURIOSITY toward a perceived object is composed from four
+    cognitive signals (card v4). The being is drawn to what it cannot yet predict:
+
+        curiosity = novelty*novelty_weight
+                  + uncertainty*uncertainty_weight
+                  + recent_surprise*surprise_weight
+                  - familiarity*familiarity_weight
+
+    - `novelty` is the share of the object's perceived properties the being has
+      never encountered (a wholly-new thing is maximally novel);
+    - `uncertainty` is how unsure the being is about the properties it HAS met
+      (met-but-not-mastered — high while a concept is still forming);
+    - `recent_surprise` is the decayed trace of how wrong the being recently was
+      about this object (from the SurprisePolicy);
+    - `familiarity` is how well the being understands the object; it pulls
+      curiosity back DOWN, so a mastered object stops drawing attention.
+
+    Familiarity itself rises as the being acts on an object: `familiarity_rate`
+    is how far each interaction moves a property's familiarity toward full mastery
+    (`familiarity_next = familiarity + familiarity_rate*(1 - familiarity)`), the
+    same saturating curve concept confidence uses. Every weight lives in
+    `config/decision_weights.yaml`, so retuning how curious / novelty-seeking the
+    being is is a config change, never a code one.
+    """
+
+    novelty: float = 1.0
+    uncertainty: float = 1.0
+    recent_surprise: float = 1.0
+    familiarity: float = 1.0
+    familiarity_rate: float = 0.3
+
+    def combine(
+        self, *, novelty: float, uncertainty: float, recent_surprise: float, familiarity: float
+    ) -> float:
+        """The composed curiosity for the four measured signals."""
+        return (
+            self.novelty * float(novelty)
+            + self.uncertainty * float(uncertainty)
+            + self.recent_surprise * float(recent_surprise)
+            - self.familiarity * float(familiarity)
+        )
+
+    def reinforce(self, current: float) -> float:
+        """A property's familiarity after one more interaction with it — nudged a
+        `familiarity_rate` fraction of the way toward full mastery (1.0)."""
+        return float(current) + self.familiarity_rate * (1.0 - float(current))
+
+
+@dataclass(frozen=True)
+class SurprisePolicy:
+    """How a fresh SURPRISE fades over time (card v4). `decay` in ``[0, 1]`` is the
+    per-tick retention of a recorded surprise: ``recent = surprise * decay**elapsed``
+    — 1.0 never forgets, 0.0 forgets instantly. Lives in the `surprise:` block of
+    `config/decision_weights.yaml`, so retuning how long a shock lingers is a config
+    change.
+    """
+
+    decay: float = 0.7
+
+
+@dataclass(frozen=True)
+class ExplorationPolicy:
+    """How the exploration drive adjusts an action's decision score (card v4). The
+    adjustment for taking `action` on an object is
+
+        action_weight(action) * curiosity_weight * curiosity
+            - discomfort_weight * anticipated_discomfort
+
+    so the being is pulled toward exploring novel/uncertain objects and pushed off
+    actions it anticipates will hurt. `action_weights` says how strongly each
+    action chases novelty — epistemic, low-risk actions (observe, approach) chase
+    it most, contact actions less; an action absent from the table uses
+    `default_action_weight`. With `curiosity_weight == 0` the adjustment is zero
+    for every action: a purely utility-driven being, byte-identical to the pre-v4
+    baseline. All the numbers live in `config/decision_weights.yaml`.
+
+    This shapes only the ranking of the *safe* candidates; it is applied after the
+    safety floor has dropped any blocked action, so a curiosity bonus can never buy
+    an action past a safety rule (BRIEF §12).
+    """
+
+    curiosity_weight: float = 0.0
+    discomfort_weight: float = 1.0
+    action_weights: Mapping[str, float] = field(default_factory=dict)
+    default_action_weight: float = 0.0
+
+    def action_weight(self, action: str) -> float:
+        """How strongly `action` chases novelty; the table default when unlisted."""
+        return float(self.action_weights.get(action, self.default_action_weight))
+
+
+@dataclass(frozen=True)
 class RenderHintsPolicy:
     """Resolved presentation hints for the render frame (ADR 0004): the neutral
     `intensity` to report until the emotion model carries one, the fallback

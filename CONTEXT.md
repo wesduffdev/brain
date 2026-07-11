@@ -303,7 +303,9 @@ _Avoid_: rule, category, class, prototype.
 **Belief**:
 A concept applied to one perceived object — an expected outcome of an action on
 it, at the supporting concept's confidence; lets a never-seen object be
-anticipated.
+anticipated. A belief now also *feeds the decision*: it raises an action's
+anticipated-discomfort cost (never bypassing the safety floor), not only sitting
+stored.
 _Avoid_: prediction, guess, opinion.
 
 **Concept confidence**:
@@ -373,6 +375,17 @@ How much a predicted set of outcomes is expected to erode the being's needs,
 subtracted from an action's utility when active prediction is on, so the being
 avoids harm it foresees rather than only harm it has already suffered.
 _Avoid_: risk score, penalty, expected loss.
+
+**One-shot aversion**:
+A single high-salience aversive interaction lifting a concept's confidence toward
+certainty in one evidence (trauma-like), versus the slow curve of low-salience
+repetition.
+_Avoid_: instant learning, trauma flag.
+
+**Anticipated discomfort**:
+The being's expected aversive cost of an action, derived from a belief (or the
+predictor), that lowers the action's decision score without a hard block.
+_Avoid_: fear penalty, predicted pain.
 
 **Curiosity**:
 The being's config-weighted drive to explore an object it cannot yet predict —

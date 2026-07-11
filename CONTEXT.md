@@ -64,8 +64,9 @@ _Avoid_: move, behaviour, command, activity.
 **Decision**:
 The being's choice of a single action toward a single object this tick, made by
 utility scoring over its needs, emotion, and what it perceives — carrying the
-action, its target, the felt emotion, and a stated reason. A safety rule can
-forbid a candidate, and no score ever overrides it.
+action, its target, the felt emotion, and a stated reason. When active prediction is on, the score also reflects the
+anticipated cost of the action's predicted outcomes. A safety rule can forbid a
+candidate, and no score — utility or predicted — ever overrides it.
 _Avoid_: plan, policy, choice engine, AI move.
 
 **Invariant floor**:
@@ -222,6 +223,31 @@ Running the outcome predictor alongside the being's rule layer so its prediction
 are recorded and compared, but do **not** control what the being does. The model
 observes; it never drives.
 _Avoid_: dry run, test mode, passive mode.
+
+**Active prediction**:
+Running the outcome predictor so its blended prediction *shapes* the being's
+decision — penalizing actions it predicts will erode the being's needs — the
+opposite of shadow mode. Off by default; a config flip turns it on, and the
+safety floor still gates every choice.
+_Avoid_: live mode, prediction-driven, model control.
+
+**Blended prediction**:
+One outcome probability per label formed by weighting the neural predictor and
+the rule-based predictor together (an ensemble); the weights, and whether the
+neural arm is enabled, are config.
+_Avoid_: combined model, average, hybrid score.
+
+**Rule-based predictor**:
+The being's own action rules exposed as a predictor — the always-available
+baseline the neural model blends with, and the safe fallback used when the
+neural arm is disabled or errors.
+_Avoid_: heuristic, fallback model, dummy predictor.
+
+**Anticipated cost**:
+How much a predicted set of outcomes is expected to erode the being's needs,
+subtracted from an action's utility when active prediction is on, so the being
+avoids harm it foresees rather than only harm it has already suffered.
+_Avoid_: risk score, penalty, expected loss.
 
 ## Not in the language
 

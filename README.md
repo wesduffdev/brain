@@ -13,41 +13,87 @@ today.
 
 ## What exists today
 
-A being whose **needs drift over ticks (config-driven)** and whose **dominant
-emotion is derived from those needs**; it **perceives the objects in its room**
-(each with a confidence); and it is exposed over an **authenticated HTTP +
-WebSocket API** (always-on JWT), runnable as a **Docker Compose stack** (engine +
-postgres). A first **outcome-predictor** model can be **trained on a synthetic
-seed set** (`ml-trainer` sidecar / `make train`) into `models/outcome_predictor.pt`.
-No database code, actions, renderer, or shadow-mode inference yet — those are
-later slices.
+The **v0 Minimal Learning Loop is complete** (`V0-1…V0-11` + `V0-SEC`) and the
+being has grown well past it. Today it:
+
+- **Lives a psychological loop.** Needs **drift over ticks** (config-driven), one
+  dominant **emotion is derived** from them, it **perceives nearby objects** each
+  with a confidence, and **environmental conditions** (dark / loud / cold) push
+  contextual needs so fear can fire. It **decides one action** by utility, and an
+  absolute **invariant floor** gates every choice — blocking only
+  simulation-breaking actions while letting **recoverable harm** (touching
+  something hot) land felt consequences it learns from.
+- **Learns and remembers.** Every interaction becomes a persisted **memory**;
+  **retrieval** recalls the relevant ones before it decides; it forms **object
+  concepts and beliefs** that feed the decision as anticipated discomfort;
+  **curiosity / surprise** drive exploration; slow **trait drift** (caution /
+  curiosity) settles a temperament; a walkable **concept graph** links what it
+  knows; and **one-shot aversive learning** lets a single bad moment stick. A
+  PyTorch **outcome predictor** trains from interactions (or a synthetic seed
+  set via the `ml-trainer` sidecar) and runs in **shadow mode**, with a config
+  flip to **active blended prediction** that shapes the decision (safety still
+  gates).
+- **Runs on an event backbone with an instinct layer.** Domain events travel over
+  an **EventBus** (in-memory by default, **Kafka** at runtime), with a
+  **transactional outbox** that projects into an idempotent **event log**. A
+  fast, pre-conceptual **instinct** neural layer reads sensory/kinematic stimuli
+  (approach, **sound-spike**, **touch / contact**) into protective **reactions**
+  that bias the displayed emotion and can **safely interrupt** an action (never
+  bypassing the floor); an **adaptive temperament** habituates to harmless
+  startles and sensitizes after harm.
+- **Is exposed, persisted, and rendered.** An **authenticated HTTP + WebSocket
+  API** (always-on JWT) serves state and render frames to a **PixiJS renderer**;
+  persistence is **Postgres** behind a repository port with **unit-of-work**
+  commits; the whole thing runs as a **Docker Compose** stack (engine + postgres
+  + kafka + renderer + ml-trainer).
+- **Has a language faculty — on top of the sim, never driving it.** It gives a
+  first-person **self-report** (`POST /ask`) grounded only in its own memories,
+  answers **subject queries** ("what do you know about hot things?") from its
+  learned concepts, and phrases both through a **config-selected narrator**
+  (deterministic template by default; Claude or a local model optional; always
+  falling back to the template). A **voicebox** speaks its report (`/speak`) and
+  reads a document aloud (`/read`). It keeps a **growing, persistent knowledge
+  store** of everything it has read, gives **grounded, cited answers** about it
+  (`/ask/reading`), holds **multi-turn conversations** (`/chat`), and takes
+  documents in as **reading-as-perception** — forming real memories and concepts
+  through the same validated door a lived interaction uses (language never writes
+  state).
+
+**Built but host-gated (not "running here").** The being's **own LLM** — LoRA
+**fine-tune**, **Ollama serving**, and sleep-triggered **consolidation** — is
+implemented behind the language-model port, but it runs **host-native on a Mac
+(MLX + Ollama)** because the GPU is not exposed inside the container. Those GPU
+paths are **gated off in CI and skip cleanly** there; the offline seams
+(deterministic-template narrator, hashing embedder, retrieval/QA against a
+fake/deterministic model) run anywhere. See
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) for exactly what runs where.
+
+The full **as-built map is the Architecture diagram below**; the ordered,
+status-bearing plan is the **Roadmap**; the decisions behind each seam are the
+[ADRs](docs/adr/) (0001–0041). Domain terms are defined in
+[`CONTEXT.md`](CONTEXT.md). Where things live:
 
 ```
-config/
-  tick_rates.yaml         # need drift + bands (the time-tuning surface)
-  emotions.yaml           # how needs derive one dominant emotion (fear included)
-  rooms.yaml              # the room and the objects it contains
-  object_properties.yaml  # object property/affordance vocabulary + objects
-  outcome_labels.yaml     # outcome-predictor vocab: labels + context + training
-engine/
-  app/
-    config_service.py     # YAML/dict -> typed policies (the only config-aware code)
-    simulation.py         # the public interface: tick(), state()
-    main.py               # FastAPI: GET /state + WebSocket /ws tick stream
-    domain/               # BeingState, Room, ObjectEntity, emotion vocabulary
-    services/             # Tick, Need, Emotion, Perception services
-    ml/                   # outcome predictor: encode_features, model, trainer
-    ports/                # ClockPort (injectable time)
-    demo.py               # run it and watch the being drift
-  tests/                  # behavior-driven tests
-  requirements-train.txt  # training-only deps (torch/numpy), kept off the lean image
-docker-compose.yml        # engine + postgres + ml-trainer (profile: training)
-engine/Dockerfile
-docs/
-  BRIEF.md                # full target architecture
-  design_boundary.md      # the adults-only / abstract-harm boundary
-  v0_execution_plan.md    # how v0 is delivered (waves, orchestration, tickets)
-  adr/                    # architecture decision records
+config/                     # ALL tuning (config-only retuning): needs & bands,
+                            #   emotions, environment, actions, decision weights,
+                            #   safety rules, events, instinct, motion, traits,
+                            #   learning rates, milestones, language, voice,
+                            #   render hints, and scenarios/
+engine/app/
+  simulation.py             # the public interface: tick(), state(), read(), + queries
+  config_service.py         # YAML -> typed policies (the only config-aware code)
+  bootstrap.py              # wires the being from config + ports
+  main.py                   # FastAPI: /state /ws /command /ask /ask/reading /chat /speak /read
+  domain/                   # BeingState, Room, objects, concepts, events, reactions
+  services/                 # the cognition / instinct / learning / language services
+  ml/                       # outcome + instinct predictors (encode, model, trainer)
+  language/                 # narration, reading, voice built on the language ports
+  ports/                    # the seams: clock, repositories, event bus, predictor, LM, voice
+  adapters/                 # concrete port impls (Kafka, Claude, local model, espeak, ...)
+  db/ · repositories.py · outbox_relay.py   # Postgres persistence + outbox relay
+engine/tests/               # behavior-driven tests (lean suite; postgres/kafka/torch gated)
+docs/                       # BRIEF, RUNBOOK, SELF_NARRATION, READING_VOICEBOX, adr/
+docker-compose.yml          # engine + postgres + kafka + renderer + ml-trainer
 ```
 
 ## Architecture
@@ -277,6 +323,8 @@ flowchart TB
 ```
 
 ## Run it
+
+**Run & verify.** The full install / verify / train guide — host tooling, Postgres, Kafka, the outcome predictor, and the host-native reading faculty, with a table of what runs where — is [`docs/RUNBOOK.md`](docs/RUNBOOK.md). The essentials:
 
 ```bash
 make setup          # create engine/.venv and install deps (once)

@@ -30,6 +30,7 @@ from app.policies import (
     InstinctRuntimePolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
+    NarrationPhrasing,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
@@ -39,6 +40,7 @@ from app.policies import (
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
+    SelfReportPolicy,
     SurprisePolicy,
     TraitDriftPolicy,
     TraitPolicy,
@@ -73,6 +75,7 @@ class ConfigService:
         "instinct",
         "events",
         "motion",
+        "language",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -127,6 +130,7 @@ class ConfigService:
         instinct: Optional[Mapping] = None,
         events: Optional[Mapping] = None,
         motion: Optional[Mapping] = None,
+        language: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -148,6 +152,7 @@ class ConfigService:
             instinct=instinct,
             events=events,
             motion=motion,
+            language=language,
         )
 
     @classmethod
@@ -178,6 +183,7 @@ class ConfigService:
             "instinct": "instinct.yaml",
             "events": "events.yaml",
             "motion": "motion.yaml",
+            "language": "language.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -666,6 +672,44 @@ class ConfigService:
             decision_gain=float(spec.get("decision_gain", 0.0)),
             min=float(spec.get("min", 0.0)),
             max=float(spec.get("max", 1.0)),
+        )
+
+    # --- language: the self-report / narration surface (S1, ADR 0032) -----
+
+    def self_report_policy(self) -> SelfReportPolicy:
+        """How the being reports its own experience (S1, ADR 0032), from the
+        `narrator:`/`report:` blocks of `config/language.yaml`: which voice backs
+        the shared `LanguageModelPort` (deterministic template narrator vs a real
+        model), how many recent memories a report covers, and the salience at or
+        above which a memory's felt affect is emphasized. Absent config yields the
+        safe defaults, so retuning what the being says is a config change only."""
+        narrator = self._language.get("narrator", {}) or {}
+        report = self._language.get("report", {}) or {}
+        return SelfReportPolicy(
+            narrator_kind=str(narrator.get("kind", "deterministic")),
+            recent_count=int(report.get("recent_count", 5)),
+            salience_emphasis_threshold=float(report.get("salience_emphasis_threshold", 1.0)),
+        )
+
+    def narration_phrasing(self) -> NarrationPhrasing:
+        """The narrator's word choices (S1, ADR 0032), from the `phrasing:` block
+        of `config/language.yaml`: the past-tense verb for each action, the clause
+        for each observed outcome, and the feeling word for each derived emotion.
+        Vocabulary lives here, never in the narrator; an unmapped token falls back
+        to itself, so the being still speaks (grounded) before a word is authored.
+        Retuning its voice is a config change only."""
+        phrasing = self._language.get("phrasing", {}) or {}
+
+        def _table(key: str):
+            return {
+                str(token): str(word)
+                for token, word in (phrasing.get(key, {}) or {}).items()
+            }
+
+        return NarrationPhrasing(
+            action_past=_table("action_past"),
+            outcome_clause=_table("outcome_clause"),
+            feeling=_table("feeling"),
         )
 
     # --- render / commands ------------------------------------------------

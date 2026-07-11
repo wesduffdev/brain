@@ -111,7 +111,15 @@ flowchart TB
         Traits["TraitService: caution / curiosity tendencies"]
     end
 
-    Lang["Language layer: interpret + narrate (non-authoritative)"]
+    %% ---- Language / self-report surface (non-authoritative, read-only) ----
+    subgraph language["Language layer (non-authoritative, read-only)"]
+        Self["SelfReportService: grounded self-report from memory"]
+        Narr["MemorySummaryService / NarrationService"]
+        LMPort["LanguageModelPort seam"]
+        Templ["TemplateLanguageModel: deterministic narrator (offline)"]
+        Claude["ClaudeLanguageModel: fluent narrator (S2, env-gated)"]
+        LCmd["LanguageCommandService: interpret NL into a validated action"]
+    end
 
     PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct tables")]
 
@@ -171,8 +179,15 @@ flowchart TB
     Mem --> PG
 
     %% ---- Language + client ----
-    Emo --> Lang
-    Mem --> Lang
+    Mem -.->|memory snapshots| Self
+    Emo -.->|state snapshot| Self
+    Self --> Narr
+    Narr --> LMPort
+    LMPort --> Templ
+    LMPort -.-> Claude
+    LCmd --> LMPort
+    API -->|"/ask"| Self
+    Self -->|self-report| API
     Emo --> API
     Dec --> API
     React --> API

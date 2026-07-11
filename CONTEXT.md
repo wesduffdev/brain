@@ -452,6 +452,61 @@ A scenario run judged pass/fail against its metric floor + expected milestone
 stages; passes on learning, FAILS when it is absent.
 _Avoid_: unit test, assertion.
 
+**Domain event**:
+A versioned fact something in the being's world produced, published on a named
+topic for other services to react to — carrying its identity, type, version,
+timestamps, the being it concerns, a correlation/causation trace, and a payload.
+Distinct from an interaction event (the persisted learning record) and from a
+tick (a unit of simulated time, not a message).
+_Avoid_: message, signal, tick, notification, interaction event (that is the learning record).
+
+**Event bus**:
+The seam domain events travel through — a publisher puts an event on a topic and
+every consumer subscribed to that topic receives it — behind a port so the
+being's code never binds to the broker. Broker-free in-memory by default; Kafka
+at runtime.
+_Avoid_: broker, queue, Kafka (that is one runtime impl), message bus, pub/sub system.
+
+**Topic**:
+The named channel a domain event is published on and consumers subscribe to
+(`being.perception.events`, `being.instinct.predictions`), always under the
+`being.*` namespace. Groups related event types; it is the routing key, not the
+event's type.
+_Avoid_: channel, queue, stream, subject, event type (that is the specific fact).
+
+**Correlation id / Causation id**:
+The two ids that trace an event chain. The correlation id is shared by every
+event in one causal chain (a root event correlates to itself); the causation id
+names the single event that directly caused this one (a root event has none).
+Together they reconstruct `A -> B -> C`.
+_Avoid_: trace id (only correlation), parent id, request id, chain id.
+
+**Scheduled event**:
+A change caused only by time passing, emitted on a fixed cadence (e.g. a
+need-drift tick) rather than by every service polling the clock. Distinct from a
+tick (time itself) and from a domain event triggered by something happening.
+_Avoid_: timer, cron, tick (that is time passing, not the emitted event).
+
+**Keep-loop (real-time work)**:
+Tick-driven work whose correctness *is* the clock (time advance, action
+cooldown/timing) — it stays a local loop rather than becoming an event, emitting
+only summarized events downstream.
+_Avoid_: game loop, polling, busy-wait.
+
+**Instinct**:
+The being's fast, pre-conceptual protective layer between perception and
+decision — a learned reaction predicted from short-window sensory/kinematic
+features, before any deliberation. It biases emotion and proposes interruption
+but never selects an action and never bypasses the safety floor.
+_Avoid_: reflex-as-emotion, mood, feeling, gut, decision (that is the chosen action).
+
+**Reaction**:
+The discrete instinctive response the instinct model outputs — one of `flinch`,
+`freeze`, `orient`, `withdraw`, `ignore`, carried with a `reaction_intensity` in
+[0,1]. A proposed fast response to a stimulus, distinct from an action (a
+deliberated behavior the decision layer chooses).
+_Avoid_: action, behavior, move, response-as-action, animation (the render hint is downstream).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

@@ -867,6 +867,18 @@ from a being's memory (a lived interaction) and from a reading chunk (a passage 
 read document).
 _Avoid_: message (bare), exchange, round, utterance, memory, chunk.
 
+**Consolidation**:
+The being's "learn it for good" step, run on its 'sleep' cycle: it fine-tunes its own
+model over question/answer pairs synthesized FROM its accumulated knowledge store, so
+recurring read facts are baked into the model's WEIGHTS and later recalled WITHOUT
+retrieval — not held only in the retrieval store. Falling asleep (the sleep need
+crossing a threshold) TRIGGERS it asynchronously and out-of-band; it never blocks the
+tick and never drives the being — it writes a re-fine-tuned model, nothing more. The
+training pairs are synthesized at build/host time (by Claude); the being's runtime
+answers stay its own local model. Distinct from immediate learning through the growing
+knowledge store (usable at once, no retrain) and from a lived interaction's memory.
+_Avoid_: retrain, memory consolidation (the being's episodic memory), sleep (the need), reindex, cache warming, batch job.
+
 **Fine-tune**:
 To adapt the being's OWN open base model to what it has read by training a small
 LoRA adapter on the ingested text — host-native on the Mac's GPU. The trained

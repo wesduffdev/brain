@@ -1422,3 +1422,44 @@ class ReadingPerceptionPolicy:
             counts[word] += 1
         ranked = sorted(counts, key=lambda word: (-counts[word], first_index[word]))
         return tuple(ranked[: self.max_tokens])
+
+
+@dataclass(frozen=True)
+class ConsolidationPolicy:
+    """How the being CONSOLIDATES what it has read into its own weights on its
+    'sleep' cycle (reading R5, ADR 0041), from the `consolidation:` block of
+    ``config/language.yaml``.
+
+    Consolidation is the being's "learn it for good" step: on the sleep cycle it
+    LoRA-fine-tunes over Q/A pairs synthesized FROM its accumulated knowledge store,
+    so recurring facts are baked into the model itself (recalled WITHOUT retrieval),
+    not only held in the retrieval store. This policy governs when it fires and how
+    its training set is built:
+
+    - `enabled` gates the whole thing. The default is OFF, so the shipped tick is
+      byte-identical — turning consolidation on is a config change only.
+    - `sleep_threshold` is the `sleep` need level (>=) that marks the sleep cycle;
+      the trigger fires on the RISING EDGE across it (the being just fell asleep). It
+      defaults to 80, the same level that reads as the `sleepy` emotion.
+    - `pair_count` caps how many consolidation pairs are synthesized per pass (the
+      strongest / first accumulated chunks).
+    - `synthesis_prompt` (`{passage}` slot) is what the build-time model is asked to
+      turn each knowledge chunk into a Q/A pair with; `pair_template`
+      (`{passage}`/`{completion}` slots) shapes the model's completion into the
+      training line. Runtime inference stays local — the synthesis model (Claude) is
+      a BUILD/HOST-time data step, never the being's runtime voice.
+    - `source` is the dataset label the consolidation training set carries.
+
+    Absent config yields these safe, disabled defaults, so retuning consolidation —
+    and turning it on — is a config change only, never a code one."""
+
+    enabled: bool = False
+    sleep_threshold: int = 80
+    pair_count: int = 32
+    synthesis_prompt: str = (
+        "From the following passage the being has read, write ONE factual question "
+        "and its answer, as 'Q: <question>\nA: <answer>'. Answer only from the passage.\n\n"
+        "Passage:\n{passage}"
+    )
+    pair_template: str = "{completion}"
+    source: str = "consolidation"

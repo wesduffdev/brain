@@ -110,6 +110,7 @@ class Simulation:
         event_publisher: Optional[EventPublisher] = None,
         event_consumer: Optional[EventConsumer] = None,
         instinct_predictor: Optional[InstinctPredictorPort] = None,
+        consolidation=None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
         # these ports as it happens, and a training example is derived per event.
@@ -162,6 +163,15 @@ class Simulation:
         # steers (pre-v6 baseline). Trait drift and the memory bias both stay within
         # the safety floor — they only ever reshape the safe candidates.
         self._traits = TraitService(config.trait_policy())
+        # Knowledge consolidation on 'sleep' (reading R5, ADR 0041): when a
+        # consolidation scheduler is injected, a RISING-EDGE crossing of the being's
+        # `sleep` need (its existing sleep cycle, config/tick_rates.yaml) ENQUEUES an
+        # async host-native LoRA pass over Claude-synthesized pairs from the knowledge
+        # store -- never blocking the tick (the executor runs it out-of-band). Absent a
+        # scheduler (the default) OR with consolidation disabled in config, the tick is
+        # byte-identical; the faculty stays strictly on top (it writes an artifact, it
+        # never drives the sim -- ADR 0022).
+        self._consolidation = consolidation
         # Cognitive seam (card v2): when a concept port is injected, every
         # interaction forms/strengthens CONCEPT SCHEMAS keyed on the object's
         # PERCEIVED properties, the being forms BELIEFS about the object from those
@@ -428,9 +438,18 @@ class Simulation:
         # tick as the one in effect for this tick; a tick with no new reaction
         # clears it (fade).
         self._reactions.begin_tick(tick)
+        sleep_before = self.being.needs.get("sleep", 0)
         self.being.needs = self._needs.apply(self.being.needs, tick)
         self.being.needs = self._environment.apply(self.being.needs, self._room, tick)
         self.being.emotion = self._emotion.derive(self.being.needs)
+        # Reading R5 (ADR 0041): the being falling asleep TRIGGERS an async knowledge
+        # consolidation -- enqueued and returned at once, so this tick never blocks.
+        # A no-op when no scheduler is wired or consolidation is disabled.
+        if self._consolidation is not None:
+            self._consolidation.maybe_consolidate(
+                sleep_before=sleep_before,
+                sleep_after=self.being.needs.get("sleep", 0),
+            )
         pain_before = self.being.needs.get("pain", 0)
         self._act(tick)
         # INS-TEMPERAMENT (ADR 0031): fold this tick's harm cue into the being's

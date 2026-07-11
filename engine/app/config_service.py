@@ -15,6 +15,7 @@ from app.domain.object_entity import ObjectEntity
 from app.domain.room import Room
 from app.policies import (
     ActionPolicy,
+    BeliefDecisionPolicy,
     CommandSpec,
     ConceptLearningPolicy,
     CuriosityWeights,
@@ -464,6 +465,19 @@ class ConfigService:
         return ConceptLearningPolicy(
             seed_confidence=float(learning.get("seed_confidence", 0.3)),
             reinforce_rate=float(learning.get("reinforce_rate", 0.2)),
+            intensity_gain=float(learning.get("intensity_gain", 0.0)),
+        )
+
+    def belief_decision_policy(self) -> BeliefDecisionPolicy:
+        """How strongly the being's concept-derived BELIEFS steer its decision (card
+        AVERSIVE-LEARN), from the `belief.decision` block of `learning_rates.yaml`.
+        `discomfort_weight` defaults to ``0.0`` — so with no config the being forms
+        beliefs but decides on utility exactly as before; only an opt-in weight turns
+        the cognitive avoidance of anticipated harm on. Retuning it is a config
+        change only."""
+        decision = (self._learning_rates.get("belief", {}) or {}).get("decision", {}) or {}
+        return BeliefDecisionPolicy(
+            discomfort_weight=float(decision.get("discomfort_weight", 0.0)),
         )
 
     def graph_edge_policy(self) -> GraphEdgePolicy:

@@ -19,6 +19,7 @@ from app.policies import (
     BeliefDecisionPolicy,
     CommandSpec,
     ConceptLearningPolicy,
+    ConversationPolicy,
     CuriosityWeights,
     EmotionRule,
     EnvironmentPolicy,
@@ -794,6 +795,28 @@ class ConfigService:
             topic_markers=tuple(
                 str(m).lower()
                 for m in (block.get("topic_markers", list(defaults.topic_markers)) or [])
+            ),
+        )
+
+    def conversation_policy(self) -> ConversationPolicy:
+        """How the being holds a MULTI-TURN conversation about what it has READ
+        (reading R6, extends ADR 0039), from the `conversation:` block of
+        ``config/language.yaml``: `history_window` (how many recent turns fold into a
+        follow-up's retrieval query) and `followup_cues` (the referential words that
+        mark a follow-up — "that"/"more"/"else"/… — vs a message that names its own
+        subject). Absent config yields the safe defaults, so retuning how far back the
+        being looks and what counts as a follow-up is a config change only. Built on
+        `reading_qa_policy` (the single-turn answer); this tunes only the multi-turn
+        history layer."""
+        block = self._language.get("conversation", {}) or {}
+        defaults = ConversationPolicy()
+        cues = block.get("followup_cues")
+        return ConversationPolicy(
+            history_window=int(block.get("history_window", defaults.history_window)),
+            followup_cues=(
+                tuple(str(c).lower() for c in cues)
+                if cues is not None
+                else defaults.followup_cues
             ),
         )
 

@@ -805,7 +805,7 @@ passages, grounding its answer in them, and citing the source — and declining
 honestly when it has read nothing relevant, optionally adding a clearly-labelled
 base-knowledge answer. Distinct from a subject query (what it KNOWS/FEELS about a
 perceived property, from learned concepts) and from self-report (what it has DONE).
-_Avoid_: chat, conversation (multi-turn is later), search, retrieval (the store step), Q&A bot.
+_Avoid_: search, retrieval (the store step), Q&A bot; it is a SINGLE-turn reading answer — the multi-turn back-and-forth is a Conversation.
 
 **Grounded answer**:
 An answer built ONLY from the passages the being actually retrieved from what it
@@ -821,6 +821,25 @@ document you have given it to read. A reading answer keeps base knowledge separa
 from — and labelled distinctly from — what the being READ, so the two are never
 conflated (the learn-and-grow stance: transparent, not blinded).
 _Avoid_: general knowledge (bare), prior, training data, world knowledge, the base model (the artifact).
+
+**Conversation**:
+A multi-turn back-and-forth about what the being has READ. Each turn is answered by
+reading QA — grounded in the retrieved passages, citing the source — and the turns
+are KEPT so a later turn can resolve a reference to an earlier one ("tell me more
+about that") and stay grounded. A follow-up that names no subject of its own leans
+on the conversation's history to reach the earlier subject; a message that names a
+NEW topic — even one the being has not read about — is judged on its own words and
+declined honestly, never dragged onto the prior topic. Held per conversation id, it
+sits on top of the simulation and drives nothing.
+_Avoid_: chat session, thread, dialogue (bare), context window, memory (the being's lived interactions).
+
+**Conversation turn**:
+One exchange of a conversation — the user's message and the being's grounded answer —
+kept, in order, so later turns can build on it. Turns accumulate per conversation and
+are never edited; they are the durable record a follow-up resolves against. Distinct
+from a being's memory (a lived interaction) and from a reading chunk (a passage of a
+read document).
+_Avoid_: message (bare), exchange, round, utterance, memory, chunk.
 
 **Fine-tune**:
 To adapt the being's OWN open base model to what it has read by training a small

@@ -212,3 +212,20 @@ reading_qa:
   read_label: "From what I read"          # prefixes a grounded, cited answer
   base_label: "From what I already knew"  # prefixes the blended base-knowledge answer
   cite_template: "(source: {sources})"    # how the source document(s) are cited
+
+# How the being holds a MULTI-TURN conversation about what it has READ (reading R6,
+# extends ADR 0039). A conversation is built ON single-turn reading QA (the
+# `reading_qa:` block): every turn is grounded + cited exactly as one question is.
+# This block tunes only what R6 adds on top -- HISTORY-AWARE grounding. Only
+# ConfigService reads this; retuning how the being converses is a change HERE, never
+# in Python.
+conversation:
+  # How many recent turns fold into a FOLLOW-UP's retrieval query, so an old,
+  # unrelated exchange never bleeds into a fresh one.
+  history_window: 6
+  # The referential words that mark a FOLLOW-UP -- a message that refers back ("tell
+  # me more about THAT", "what ELSE?") but names no subject of its own. Such a message
+  # has the recent turns folded in so it resolves to the subject established earlier;
+  # a message with NONE of these stands alone, so a new topic -- even one the being
+  # has not read about -- is judged on its own words and declined honestly.
+  followup_cues: [that, it, this, they, them, those, these, more, else, again, another]

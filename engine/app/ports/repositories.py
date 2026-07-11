@@ -32,6 +32,7 @@ from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
 from app.domain.event_log import EventLogEntry
 from app.domain.knowledge import KnowledgeChunk
+from app.domain.conversation import ConversationTurn
 from app.domain.instinct import (
     InstinctPrediction,
     InstinctReaction,
@@ -322,4 +323,24 @@ class KnowledgeChunkRepository(Protocol):
 
     def all(self) -> List[KnowledgeChunk]:
         """Every stored passage, oldest first."""
+        ...
+
+
+class ConversationTurnRepository(Protocol):
+    """Stores the turns of the being's MULTI-TURN conversations about what it has READ
+    (reading R6, extends ADR 0039). Append-only and CUMULATIVE, like the other
+    learned-fact ports: each turn (`add`) is one exchange kept so later turns can
+    resolve references to earlier ones, staged in one unit of work (ADR 0017), and
+    never replaces what came before. `history` reads back ONE conversation's turns,
+    oldest-first, so the conversation is durable across turns and beings can hold
+    several at once. The in-memory fake (`app.repositories`) is the seam the behavior
+    suite drives; a Postgres-backed adapter onto the `conversation_turns` table serves
+    the runtime."""
+
+    def add(self, turn: ConversationTurn) -> None:
+        """Append one conversation turn to the store."""
+        ...
+
+    def history(self, conversation_id: str) -> List[ConversationTurn]:
+        """Every stored turn of ``conversation_id``, oldest first."""
         ...

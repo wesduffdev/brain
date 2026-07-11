@@ -1,0 +1,34 @@
+# Scenario: Rolling Object Intro (card V10a) — a repeatable "watch it learn".
+#
+# This file is a HARNESS input for the ScenarioRunner, NOT a ConfigService
+# section: the runner parses it directly (PyYAML). It seeds the room with one
+# round object, lets the being explore for `ticks`, and checks that a LEARNING
+# METRIC rose — the confidence of the concept "a round thing, pushed, rolls"
+# (card v2). See docs/BRIEF.md §16 (Testing Strategy) and §18 (v10 scenario
+# system). Retuning the run — object, length, or success bar — is a change here.
+
+name: rolling_object_intro
+description: >
+  The being wakes alone with a round object. Repeated pushes teach it that round
+  things roll; the round->push->rolls concept's confidence climbs from nothing.
+
+# The room's contents for this run: human-typed selectors resolved to catalogued
+# object ids by ConfigService.resolve_object (so `ball` -> obj_red_ball).
+room:
+  objects:
+    - ball
+
+# How many ticks the being lives before the metric is read.
+ticks: 120
+
+# The LEARNING METRIC: the concept whose confidence is tracked before vs after.
+# Keyed on a PERCEIVED property + action + observed outcome (never a label).
+learning_target:
+  feature: round
+  action: push
+  outcome: rolls
+
+# The run PASSES when the metric's rise (after - before) meets this floor. A run
+# with no learning (e.g. zero interactions) cannot clear it — that is the point.
+success_condition:
+  min_confidence_delta: 0.5

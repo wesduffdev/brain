@@ -1,0 +1,92 @@
+# The self-report / narration language layer (S1, ADR 0032; extends ADR 0022).
+#
+# The being reports its own experience in plain first-person language, grounded
+# ONLY in its logged memories. This file tunes that voice — which narrator backs
+# the shared LanguageModelPort, how far back a report looks, and the WORD CHOICES
+# it renders with. Retuning the voice is a change HERE, never in Python (the
+# config-driven-tuning rule). Only ConfigService reads this file.
+
+# Which PROVIDER sits behind the one LanguageModelPort seam (S2). The same
+# grounded self-report can be phrased by any of these — they only change where the
+# words come from, never what the being is allowed to say (it only ever sees the
+# structured experience, so it cannot invent).
+#   deterministic -> the offline template narrator (fully offline, no key); default
+#   fake          -> the in-memory test model (suite only)
+#   claude        -> the Claude adapter, env-gated on ANTHROPIC_API_KEY ("model" is
+#                    the S1 back-compat alias)
+#   local         -> a locally-served, Ollama-style model (activates once reading
+#                    R1/R2 serve one on the endpoint below)
+narrator:
+  kind: deterministic
+  # Fallback-safe (mirrors the predictor ensemble's rule fallback): when a selected
+  # model raises or is unavailable, degrade to the deterministic template — which
+  # sees the SAME prompt, so the report stays grounded. Turn off to let a model
+  # error surface instead.
+  fallback_to_template: true
+  # The `local` provider's endpoint. base_url + model are authored here; the base
+  # URL is overridden at deploy time by the env var named in base_url_env (a deploy
+  # detail, like DATABASE_URL). Inert until `kind: local` and R1/R2 serve a model.
+  local:
+    base_url: http://localhost:11434
+    model: qwen2.5:3b-instruct
+    base_url_env: OLLAMA_BASE_URL
+    timeout_seconds: 30.0
+
+# How the being answers a SUBJECT query — "what do you know / how do you feel
+# about X?" (S3). It is answered ONLY from what the being has LEARNED (its
+# concepts / beliefs / graph explanations and the emotions its memories recorded),
+# keyed on the PERCEIVED property a subject term resolves to ("hot things" -> hot,
+# never a developer label). A subject it has no learned concept for is answered
+# honestly, never invented.
+subject:
+  # The connective(s) that INTRODUCE a subject in a question — the word after which
+  # the subject term begins. A question with none of these is not a subject query
+  # and stays on the recent-experience path ("what have you done recently?").
+  query_markers: [about]
+  # How many learned facts an answer cites (the strongest concepts first).
+  max_facts: 6
+  # What the being says about a subject it has NEVER learned about — an honest
+  # no-knowledge line, not an invention. `{subject}` is filled with the term asked.
+  unknown_response: "I don't know anything about {subject} yet — I haven't encountered anything like that."
+
+report:
+  # How many of the most-recent memories a "what have you done recently?" report
+  # covers, in the order they were lived.
+  recent_count: 5
+  # A memory at or above this salience (priority) has its felt affect emphasized
+  # ("afterwards I felt VERY scared") — surprise/emotion make a moment stand out.
+  salience_emphasis_threshold: 1.0
+
+# How a structured memory/state fact is rendered into prose. The vocabulary lives
+# here, not in the narrator; an unmapped token falls back to itself, so the being
+# still speaks (grounded, if terse) before a word is authored.
+phrasing:
+  # action -> its past-tense verb
+  action_past:
+    observe: looked at
+    approach: moved toward
+    withdraw: backed away from
+    touch: touched
+    push: pushed
+    grab: grabbed
+    drop: dropped
+  # observed outcome label -> a plain first-person clause
+  outcome_clause:
+    rolls: it rolled
+    bounces: it bounced
+    falls: it fell
+    causes_pain: it hurt me
+    makes_noise: it made a noise
+    pleasant: it felt nice
+    scary: it frightened me
+  # derived emotion -> the feeling word the being names
+  feeling:
+    calm: calm
+    scared: scared
+    curious: curious
+    hungry: hungry
+    sleepy: sleepy
+    frustrated: frustrated
+    happy: happy
+    excited: excited
+    comforted: comforted

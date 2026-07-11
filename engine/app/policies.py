@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Dict, Mapping, Optional, Tuple
 
 from app.domain.motion import Motion
+from app.ports.voice import VoiceParams
 
 # Valid values for NeedTickPolicy.direction.
 INCREASE = "increase"
@@ -1039,3 +1040,136 @@ class ReactionResponsePolicy:
     def is_interruptible(self, action: str) -> bool:
         """Whether `action` is one the being may break off on a strong reaction."""
         return action in self.interruptible_actions
+
+
+@dataclass(frozen=True)
+class NarrationPhrasing:
+    """How the deterministic narrator turns a structured memory/state fact into
+    prose (S1, ADR 0032) — the WORD CHOICES only, held as config vocabulary
+    (`config/language.yaml`), never in service code (the config-driven-tuning
+    rule). Three lookup tables map the being's internal vocabulary to plain
+    English: an action to its past-tense verb (`push -> pushed`), an outcome
+    label to a clause (`causes_pain -> it hurt me`), and a derived emotion to a
+    feeling word (`scared -> scared`). Each lookup falls back to the raw token,
+    so an unmapped label still renders (grounded, if terse) rather than dropping
+    — and retuning the being's voice is a YAML change, never a code one.
+    """
+
+    action_past: Mapping[str, str] = field(default_factory=dict)
+    outcome_clause: Mapping[str, str] = field(default_factory=dict)
+    feeling: Mapping[str, str] = field(default_factory=dict)
+
+    def action(self, name: str) -> str:
+        """The past-tense verb for an action; the raw name when unmapped."""
+        return self.action_past.get(name, name)
+
+    def outcome(self, label: str) -> str:
+        """The plain clause for an observed outcome; the raw label when unmapped."""
+        return self.outcome_clause.get(label, label)
+
+    def feel(self, emotion: str) -> str:
+        """The feeling word for a derived emotion; the raw emotion when unmapped."""
+        return self.feeling.get(emotion, emotion)
+
+
+@dataclass(frozen=True)
+class SelfReportPolicy:
+    """How the being reports its own experience (S1, ADR 0032), from the
+    `narrator:`/`report:` blocks of `config/language.yaml`. `narrator_kind`
+    selects the PROVIDER behind the shared `LanguageModelPort` — ``"deterministic"``
+    (the offline template narrator, the default), ``"fake"`` (the in-memory test
+    model), ``"claude"`` (the env-gated Claude adapter; ``"model"`` is a back-compat
+    alias), or ``"local"`` (an Ollama-style local endpoint, S2). `recent_count` is
+    how many of the most-recent memories a "what have you done recently?" report
+    covers; `salience_emphasis_threshold` is the priority at or above which a
+    memory's felt affect is emphasized. `fallback_to_template` (default ``True``)
+    is the fallback-safe rule (mirroring `PredictionBlendPolicy`'s
+    `fallback_to_rules_on_error`): when a selected model raises or is unavailable,
+    the narrator degrades to the deterministic template — which sees the SAME
+    structured-experience prompt, so the report stays grounded. Absent config
+    yields the safe defaults (deterministic, 5, 1.0, fallback on), so retuning what
+    the being says — and how it fails safe — is a config change only.
+    """
+
+    narrator_kind: str = "deterministic"
+    recent_count: int = 5
+    salience_emphasis_threshold: float = 1.0
+    fallback_to_template: bool = True
+
+
+@dataclass(frozen=True)
+class LocalModelPolicy:
+    """How the being's `local` narrator provider reaches a LOCALLY-served language
+    model (S2, extends ADR 0022/0032) — the CLIENT config for an Ollama-style HTTP
+    endpoint, from the `narrator.local:` block of `config/language.yaml`. `base_url`
+    is the endpoint the client POSTs to (`{base_url}/api/generate`) and `model` the
+    served model name; `base_url_env` names the environment variable that OVERRIDES
+    `base_url` at deploy time (like `DATABASE_URL` — a deploy detail, not authored
+    config), and `timeout_seconds` bounds the request. The model is not served here
+    (that is reading R1/R2); this policy only wires the client, so with no endpoint
+    the adapter refuses rather than blind-calls. Retuning where the being's local
+    voice lives is a config/env change only.
+    """
+
+    base_url: str = ""
+    model: str = ""
+    base_url_env: str = "OLLAMA_BASE_URL"
+    timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
+class SubjectQueryPolicy:
+    """How the being answers a SUBJECT query — "what do you know / how do you feel
+    about X?" (S3, ADR 0034), from the `subject:` block of `config/language.yaml`.
+    `query_markers` are the connectives that INTRODUCE a subject in a question (the
+    word after which the subject term begins — e.g. ``about`` in "what do you know
+    *about* hot things"); a question with none is not a subject query and stays on
+    the S1 recent-experience path. `max_facts` bounds how many learned facts an
+    answer cites (the strongest concepts first). `unknown_response` is what the
+    being says about a subject it has NO learned concept for — an honest
+    no-knowledge line, never an invented one; ``{subject}`` is filled with the term.
+    Absent config yields the safe defaults, so retuning how the being fields a
+    subject — and how honestly it declines an unknown one — is a config change only.
+    """
+
+    query_markers: Tuple[str, ...] = ("about",)
+    max_facts: int = 6
+    unknown_response: str = (
+        "I don't know anything about {subject} — I haven't encountered anything like that."
+    )
+
+
+@dataclass(frozen=True)
+class VoicePolicy:
+    """How the being SPEAKS its self-report aloud (S4, ADR 0035), from
+    ``config/voice.yaml``. `engine` selects the `VoicePort` engine (the open-source
+    ``espeak-ng`` by default; ``fake`` for a demo/test); `voice`/`rate`/`pitch` are
+    the neutral voice the being speaks with, and `emotion_params` is the optional
+    per-emotion override (a scared voice faster and higher, a sleepy one slower and
+    lower) — so what the being SOUNDS like tracks how it FEELS. `params_for(emotion)`
+    resolves the two into a `VoiceParams`, falling back to the neutral voice for an
+    unmapped emotion. Every value lives in config, so retuning the being's voice — or
+    switching engines — is a config change, never a code one (the config-driven-tuning
+    rule); an absent file yields the safe espeak-ng defaults.
+    """
+
+    engine: str = "espeak-ng"
+    voice: str = "en"
+    rate: int = 175
+    pitch: int = 50
+    emotion_params: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+
+    def default_params(self) -> VoiceParams:
+        """The neutral voice, before any emotion override."""
+        return VoiceParams(voice=self.voice, rate=self.rate, pitch=self.pitch)
+
+    def params_for(self, emotion: str) -> VoiceParams:
+        """The voice for a being feeling `emotion` — the neutral voice with the
+        emotion's authored `rate`/`pitch` override applied; the neutral voice for
+        an emotion with no mapping."""
+        override = self.emotion_params.get(str(emotion), {}) or {}
+        return VoiceParams(
+            voice=self.voice,
+            rate=int(override.get("rate", self.rate)),
+            pitch=int(override.get("pitch", self.pitch)),
+        )

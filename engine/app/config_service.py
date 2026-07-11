@@ -28,8 +28,10 @@ from app.policies import (
     InstinctModelPolicy,
     InstinctConsumePolicy,
     InstinctRuntimePolicy,
+    LocalModelPolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
+    NarrationPhrasing,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
@@ -39,9 +41,12 @@ from app.policies import (
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
+    SelfReportPolicy,
+    SubjectQueryPolicy,
     SurprisePolicy,
     TraitDriftPolicy,
     TraitPolicy,
+    VoicePolicy,
 )
 
 # Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
@@ -73,6 +78,8 @@ class ConfigService:
         "instinct",
         "events",
         "motion",
+        "language",
+        "voice",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -127,6 +134,8 @@ class ConfigService:
         instinct: Optional[Mapping] = None,
         events: Optional[Mapping] = None,
         motion: Optional[Mapping] = None,
+        language: Optional[Mapping] = None,
+        voice: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -148,6 +157,8 @@ class ConfigService:
             instinct=instinct,
             events=events,
             motion=motion,
+            language=language,
+            voice=voice,
         )
 
     @classmethod
@@ -178,6 +189,8 @@ class ConfigService:
             "instinct": "instinct.yaml",
             "events": "events.yaml",
             "motion": "motion.yaml",
+            "language": "language.yaml",
+            "voice": "voice.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -666,6 +679,105 @@ class ConfigService:
             decision_gain=float(spec.get("decision_gain", 0.0)),
             min=float(spec.get("min", 0.0)),
             max=float(spec.get("max", 1.0)),
+        )
+
+    # --- language: the self-report / narration surface (S1, ADR 0032) -----
+
+    def self_report_policy(self) -> SelfReportPolicy:
+        """How the being reports its own experience (S1, ADR 0032), from the
+        `narrator:`/`report:` blocks of `config/language.yaml`: which voice backs
+        the shared `LanguageModelPort` (deterministic template narrator vs a real
+        model), how many recent memories a report covers, and the salience at or
+        above which a memory's felt affect is emphasized. Absent config yields the
+        safe defaults, so retuning what the being says is a config change only."""
+        narrator = self._language.get("narrator", {}) or {}
+        report = self._language.get("report", {}) or {}
+        return SelfReportPolicy(
+            narrator_kind=str(narrator.get("kind", "deterministic")),
+            recent_count=int(report.get("recent_count", 5)),
+            salience_emphasis_threshold=float(report.get("salience_emphasis_threshold", 1.0)),
+            fallback_to_template=bool(narrator.get("fallback_to_template", True)),
+        )
+
+    def narration_phrasing(self) -> NarrationPhrasing:
+        """The narrator's word choices (S1, ADR 0032), from the `phrasing:` block
+        of `config/language.yaml`: the past-tense verb for each action, the clause
+        for each observed outcome, and the feeling word for each derived emotion.
+        Vocabulary lives here, never in the narrator; an unmapped token falls back
+        to itself, so the being still speaks (grounded) before a word is authored.
+        Retuning its voice is a config change only."""
+        phrasing = self._language.get("phrasing", {}) or {}
+
+        def _table(key: str):
+            return {
+                str(token): str(word)
+                for token, word in (phrasing.get(key, {}) or {}).items()
+            }
+
+        return NarrationPhrasing(
+            action_past=_table("action_past"),
+            outcome_clause=_table("outcome_clause"),
+            feeling=_table("feeling"),
+        )
+
+    def subject_query_policy(self) -> SubjectQueryPolicy:
+        """How the being fields a SUBJECT query (S3, ADR 0034), from the `subject:`
+        block of `config/language.yaml`: the connective(s) that introduce a subject
+        in a question (`query_markers`), how many learned facts an answer cites
+        (`max_facts`), and the honest line it gives for a subject it has never
+        learned about (`unknown_response`, with a `{subject}` slot). Absent config
+        yields the safe defaults, so retuning how the being answers about a subject
+        — and how it declines an unknown one — is a config change only."""
+        subject = self._language.get("subject", {}) or {}
+        return SubjectQueryPolicy(
+            query_markers=tuple(
+                str(marker).lower()
+                for marker in (subject.get("query_markers", ["about"]) or [])
+            ),
+            max_facts=int(subject.get("max_facts", 6)),
+            unknown_response=str(
+                subject.get(
+                    "unknown_response",
+                    "I don't know anything about {subject} — I haven't "
+                    "encountered anything like that.",
+                )
+            ),
+        )
+
+    def local_model_policy(self) -> LocalModelPolicy:
+        """How the `local` narrator provider reaches a locally-served model (S2,
+        extends ADR 0022/0032), from the `narrator.local:` block of
+        `config/language.yaml`: the Ollama-style endpoint `base_url` + served
+        `model`, the env var that overrides the base URL at deploy time
+        (`base_url_env`), and the request `timeout_seconds`. Absent config yields an
+        empty endpoint, so the adapter refuses to call out (never a blind network
+        hit) until reading R1/R2 serve a model. Retuning where the local voice lives
+        is a config/env change only."""
+        local = (self._language.get("narrator", {}) or {}).get("local", {}) or {}
+        return LocalModelPolicy(
+            base_url=str(local.get("base_url", "")),
+            model=str(local.get("model", "")),
+            base_url_env=str(local.get("base_url_env", "OLLAMA_BASE_URL")),
+            timeout_seconds=float(local.get("timeout_seconds", 30.0)),
+        )
+
+    def voice_policy(self) -> VoicePolicy:
+        """How the being SPEAKS its self-report aloud (S4, ADR 0035), from
+        ``config/voice.yaml``: which `engine` backs the `VoicePort`, the neutral
+        `voice`/`rate`/`pitch`, and the optional per-emotion `rate`/`pitch` overrides
+        so the being's voice tracks how it feels. Absent config yields the safe
+        espeak-ng defaults, so retuning the voice is a config change only."""
+        voice = self._voice or {}
+        emotion_params = {
+            str(name): {str(k): int(v) for k, v in (spec or {}).items()}
+            for name, spec in (voice.get("emotion", {}) or {}).items()
+        }
+        return VoicePolicy(
+            engine=str(voice.get("engine", "espeak-ng")),
+            voice=str(voice.get("voice", "en")),
+            rate=int(voice.get("rate", 175)),
+            pitch=int(voice.get("pitch", 50)),
+            emotion_params=emotion_params,
         )
 
     # --- render / commands ------------------------------------------------

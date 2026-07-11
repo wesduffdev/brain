@@ -111,7 +111,24 @@ flowchart TB
         Traits["TraitService: caution / curiosity tendencies"]
     end
 
-    Lang["Language layer: interpret + narrate (non-authoritative)"]
+    %% ---- Language / self-report surface (non-authoritative, read-only) ----
+    subgraph language["Language layer (non-authoritative, read-only)"]
+        Self["SelfReportService: grounded self-report from memory + subject routing"]
+        Subj["SubjectReportService: what it knows/feels about X (from learning)"]
+        Res["SubjectResolver: subject term -> perceived-property tokens"]
+        Narr["MemorySummaryService / NarrationService"]
+        LMPort["LanguageModelPort seam"]
+        Sel["build_narrator: config provider selection + fallback-safe"]
+        Templ["TemplateLanguageModel: deterministic narrator (offline; default + fallback)"]
+        Fake["FakeLanguageModel: in-memory (tests)"]
+        Claude["ClaudeLanguageModel: fluent narrator (env-gated)"]
+        Local["LocalLanguageModel: local model (S2 = reading R2; Ollama, client-only)"]
+        LCmd["LanguageCommandService: interpret NL into a validated action"]
+        VBuild["build_voice: config engine selection (S4 = reading R8)"]
+        VPort["VoicePort seam: synthesize self-report → speech"]
+        Espeak["EspeakVoice: espeak-ng TTS (host-gated; no-op if binary absent)"]
+        FakeV["FakeVoice: in-memory (tests)"]
+    end
 
     PG[("Postgres: repositories + unit-of-work + outbox + event_log + instinct tables")]
 
@@ -171,8 +188,31 @@ flowchart TB
     Mem --> PG
 
     %% ---- Language + client ----
-    Emo --> Lang
-    Mem --> Lang
+    Mem -.->|memory snapshots| Self
+    Emo -.->|state snapshot| Self
+    Self -->|subject query| Subj
+    Subj --> Res
+    Concepts -.->|learned concepts / beliefs| Subj
+    KGraph -.->|explanation paths| Subj
+    Subj --> LMPort
+    Self --> Narr
+    Narr --> LMPort
+    LMPort --> Sel
+    Sel --> Templ
+    Sel -.-> Fake
+    Sel -.-> Claude
+    Sel -.-> Local
+    Claude -.->|on error| Templ
+    Local -.->|on error / unavailable| Templ
+    LCmd --> LMPort
+    API -->|"/ask"| Self
+    Self -->|self-report| API
+    API -->|"/speak"| Self
+    Self -->|self-report text| VPort
+    VPort --> VBuild
+    VBuild --> Espeak
+    VBuild -.-> FakeV
+    VPort -->|audio| API
     Emo --> API
     Dec --> API
     React --> API

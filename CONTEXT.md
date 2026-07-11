@@ -670,6 +670,86 @@ reaction thresholds grown from a life of startles (habituation) and harms
 in-process.
 _Avoid_: mood, personality stat, the caution trait.
 
+**Self-report**:
+The being's first-person account of its own experience, produced on request
+(`/ask`) and grounded ONLY in its logged memories — it can say what it has lived,
+never what it has not. It names objects by their perceived properties ("the round
+red thing"), never a developer label, and it describes; it never acts.
+_Avoid_: introspection, confession, status, log dump, self-awareness.
+
+**Narration**:
+Turning the being's state or memories into readable text laid ON TOP of the
+simulation — non-authoritative and read-only. Narration reflects the being; it
+never controls it, feeds back into a decision, or mutates state.
+_Avoid_: narrative, story, commentary, voice-over, dialogue.
+
+**Narrator provider**:
+Which voice phrases the being's self-report behind the one language-model seam,
+chosen by config: the offline deterministic template (default), the in-memory
+fake (tests), Claude (env-gated), or a locally-served model. A provider only
+changes where the words come from — it is always handed the same structured
+experience, so it can never change what the being is allowed to say.
+_Avoid_: LLM-as-brain, backend, engine, model (bare).
+
+**Narrator fallback**:
+The fallback-safe rule that a self-report always lands, grounded: when the
+selected narrator provider errors or is unavailable, the being degrades to the
+deterministic template over the same experience — fluency lost, grounding kept.
+The fluent voice is an upgrade, never a dependency (the sibling of the predictor
+ensemble's rule fallback).
+_Avoid_: retry, failover (as infra), silent error, default model.
+
+**Subject query**:
+A question that asks the being what it KNOWS or how it FEELS *about* something —
+"what do you know about hot things?", "how do you feel about round things?" —
+answered from what it has LEARNED (its concepts, beliefs, graph explanations, and
+the emotions its memories recorded), keyed on the PERCEIVED property the subject
+resolves to. A subject it has never encountered is declined honestly, never
+invented. Distinct from a self-report of what it has DONE (the recent-experience
+question).
+_Avoid_: topic, search query, question intent, knowledge lookup, FAQ.
+
+**Subject resolver**:
+The step that turns a subject term into the being's PERCEIVED-property tokens
+("hot things" -> `hot`; "the round red thing" -> `round`, `red`), drawn from the
+perceived-property vocabulary — never a developer label or object id (the being
+has no name for a thing, only how it perceives it). A term with no perceptual
+handle ("dragons") resolves to nothing and is answered as unknown; resolving to a
+real property is not the same as having learned about it.
+_Avoid_: parser, intent classifier, entity linker, name lookup, keyword match.
+
+**Salience**:
+How strongly a memory stands out — its priority, raised by surprise (prediction
+error) and emotional intensity, so the moments the being was most wrong or most
+affected are held hardest. In a self-report, higher salience emphasizes the felt
+affect ("afterwards I felt VERY scared").
+_Avoid_: priority-as-queue-order, importance, weight, relevance (the recall
+signal).
+
+**Voicebox**:
+The faculty that turns the being's self-report into audible SPEECH — a voice port
+behind which an open-source TTS engine (espeak-ng) renders the report text to
+audio, exposed at `/speak`. Like narration it sits ON TOP of the simulation: it
+gives the words sound, never new words, and controls nothing. Voice is an upgrade,
+not a dependency — a host with no engine degrades to a clear no-op and the being
+still answers in text.
+_Avoid_: voice assistant, speech agent, TTS-as-feature, speaker, mouth.
+
+**Utterance**:
+One thing the being is asked to speak — the self-report text handed to the
+voicebox, together with the voice parameters (rate, pitch, voice) it is spoken
+with. The being can only utter what it can report, so an utterance is as grounded
+as the self-report behind it.
+_Avoid_: message, phrase, line, dialogue, sound clip.
+
+**Synthesize**:
+To render an utterance into audio through the voice port — deterministic given the
+text and parameters, producing WAV bytes, or nothing when no engine is available on
+the host. Synthesis adds sound to words the being already produced; it never
+produces the words.
+_Avoid_: speak (the act itself), generate, narrate/render (the narrator's words),
+TTS (as a verb).
+
 ## Not in the language
 
 - **Caregiver** — there is no caregiver; the being acts on its own state and the

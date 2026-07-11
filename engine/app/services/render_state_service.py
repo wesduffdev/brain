@@ -2,10 +2,11 @@
 `being_state_update` frame (ADR 0004).
 
 It is the one place that turns what the being *is* into what the renderer draws:
-it copies the domain snapshot through unchanged (so a `perceived` block, and any
-field a later slice adds to `state()`, flow onto the wire without a change here),
-stamps the frame `type`, looks up the emotion's `visual` draw hints from config,
-and reports a neutral `intensity` until the emotion model carries one (~V0-4).
+it copies the domain snapshot through unchanged (so a `perceived` block, the
+`curiosity`/`surprise` maps card v4 adds to `state()`, and any field a later slice
+adds, flow onto the wire without a change here), stamps the frame `type`, looks up
+the emotion's `visual` draw hints from config, and reports a neutral `intensity`
+until the emotion model carries one (~V0-4).
 
 It makes NO psychology decision — the emotion is already derived upstream; the
 visual is a pure config lookup keyed by that emotion, and `pose`/`action` are

@@ -17,14 +17,17 @@ from app.policies import (
     ActionPolicy,
     CommandSpec,
     ConceptLearningPolicy,
+    CuriosityWeights,
     EmotionRule,
     EnvironmentPolicy,
+    ExplorationPolicy,
     MemoryPriorityPolicy,
     NeedTickPolicy,
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
     RenderHintsPolicy,
     SafetyRule,
+    SurprisePolicy,
 )
 
 # Trainer tuning defaults, used when outcome_labels.yaml omits a `training` key
@@ -51,6 +54,7 @@ class ConfigService:
         "safety",
         "outcome_effects",
         "learning_rates",
+        "decision_weights",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -100,6 +104,7 @@ class ConfigService:
         safety: Optional[Mapping] = None,
         outcome_effects: Optional[Mapping] = None,
         learning_rates: Optional[Mapping] = None,
+        decision_weights: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -116,6 +121,7 @@ class ConfigService:
             safety=safety,
             outcome_effects=outcome_effects,
             learning_rates=learning_rates,
+            decision_weights=decision_weights,
         )
 
     @classmethod
@@ -141,6 +147,7 @@ class ConfigService:
             "safety": "safety_rules.yaml",
             "outcome_effects": "outcome_effects.yaml",
             "learning_rates": "learning_rates.yaml",
+            "decision_weights": "decision_weights.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -448,6 +455,46 @@ class ConfigService:
         return ConceptLearningPolicy(
             seed_confidence=float(learning.get("seed_confidence", 0.3)),
             reinforce_rate=float(learning.get("reinforce_rate", 0.2)),
+        )
+
+    # --- decision weights: curiosity / surprise / exploration (card v4) ---
+
+    def curiosity_weights(self) -> CuriosityWeights:
+        """How the being's CURIOSITY is composed from novelty, uncertainty, recent
+        surprise, and familiarity (card v4), from the `curiosity:` block of
+        `decision_weights.yaml`. Absent config yields neutral defaults, so a sim
+        with no decision-weights file still feels curiosity. Retuning how curious /
+        novelty-seeking the being is is a config change only."""
+        curiosity = self._decision_weights.get("curiosity", {}) or {}
+        return CuriosityWeights(
+            novelty=float(curiosity.get("novelty", 1.0)),
+            uncertainty=float(curiosity.get("uncertainty", 1.0)),
+            recent_surprise=float(curiosity.get("recent_surprise", 1.0)),
+            familiarity=float(curiosity.get("familiarity", 1.0)),
+            familiarity_rate=float(curiosity.get("familiarity_rate", 0.3)),
+        )
+
+    def surprise_policy(self) -> SurprisePolicy:
+        """How fast a recorded SURPRISE fades each tick (card v4), from the
+        `surprise:` block. Absent config keeps the neutral default decay."""
+        surprise = self._decision_weights.get("surprise", {}) or {}
+        return SurprisePolicy(decay=float(surprise.get("decay", 0.7)))
+
+    def exploration_policy(self) -> ExplorationPolicy:
+        """How the exploration drive adjusts action scores (card v4), from the
+        `exploration:` block. `curiosity_weight` defaults to ``0.0`` — so with no
+        decision-weights file the adjustment is zero for every action and the being
+        decides on pure utility exactly as before (the pre-v4 baseline). Retuning
+        how strongly curiosity steers the being is a config change only."""
+        exploration = self._decision_weights.get("exploration", {}) or {}
+        return ExplorationPolicy(
+            curiosity_weight=float(exploration.get("curiosity_weight", 0.0)),
+            discomfort_weight=float(exploration.get("discomfort_weight", 1.0)),
+            action_weights={
+                str(action): float(weight)
+                for action, weight in (exploration.get("action_weights", {}) or {}).items()
+            },
+            default_action_weight=float(exploration.get("default_action_weight", 0.0)),
         )
 
     # --- render / commands ------------------------------------------------

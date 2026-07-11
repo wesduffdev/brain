@@ -64,3 +64,6 @@ def test_with_room_contents_preserves_every_config_section():
     assert focused.action_policies() == config.action_policies()
     assert focused.safety_rules() == config.safety_rules()
     assert focused.outcome_effects() == config.outcome_effects()
+    assert focused.curiosity_weights() == config.curiosity_weights()
+    assert focused.surprise_policy() == config.surprise_policy()
+    assert focused.exploration_policy() == config.exploration_policy()

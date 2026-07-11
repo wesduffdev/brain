@@ -28,6 +28,7 @@ from app.policies import (
     InstinctModelPolicy,
     InstinctConsumePolicy,
     InstinctRuntimePolicy,
+    LocalModelPolicy,
     MemoryPriorityPolicy,
     MotionPolicy,
     NarrationPhrasing,
@@ -689,6 +690,7 @@ class ConfigService:
             narrator_kind=str(narrator.get("kind", "deterministic")),
             recent_count=int(report.get("recent_count", 5)),
             salience_emphasis_threshold=float(report.get("salience_emphasis_threshold", 1.0)),
+            fallback_to_template=bool(narrator.get("fallback_to_template", True)),
         )
 
     def narration_phrasing(self) -> NarrationPhrasing:
@@ -710,6 +712,23 @@ class ConfigService:
             action_past=_table("action_past"),
             outcome_clause=_table("outcome_clause"),
             feeling=_table("feeling"),
+        )
+
+    def local_model_policy(self) -> LocalModelPolicy:
+        """How the `local` narrator provider reaches a locally-served model (S2,
+        extends ADR 0022/0032), from the `narrator.local:` block of
+        `config/language.yaml`: the Ollama-style endpoint `base_url` + served
+        `model`, the env var that overrides the base URL at deploy time
+        (`base_url_env`), and the request `timeout_seconds`. Absent config yields an
+        empty endpoint, so the adapter refuses to call out (never a blind network
+        hit) until reading R1/R2 serve a model. Retuning where the local voice lives
+        is a config/env change only."""
+        local = (self._language.get("narrator", {}) or {}).get("local", {}) or {}
+        return LocalModelPolicy(
+            base_url=str(local.get("base_url", "")),
+            model=str(local.get("model", "")),
+            base_url_env=str(local.get("base_url_env", "OLLAMA_BASE_URL")),
+            timeout_seconds=float(local.get("timeout_seconds", 30.0)),
         )
 
     # --- render / commands ------------------------------------------------

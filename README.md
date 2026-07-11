@@ -116,8 +116,11 @@ flowchart TB
         Self["SelfReportService: grounded self-report from memory"]
         Narr["MemorySummaryService / NarrationService"]
         LMPort["LanguageModelPort seam"]
-        Templ["TemplateLanguageModel: deterministic narrator (offline)"]
-        Claude["ClaudeLanguageModel: fluent narrator (S2, env-gated)"]
+        Sel["build_narrator: config provider selection + fallback-safe"]
+        Templ["TemplateLanguageModel: deterministic narrator (offline; default + fallback)"]
+        Fake["FakeLanguageModel: in-memory (tests)"]
+        Claude["ClaudeLanguageModel: fluent narrator (env-gated)"]
+        Local["LocalLanguageModel: local model (S2 = reading R2; Ollama, client-only)"]
         LCmd["LanguageCommandService: interpret NL into a validated action"]
     end
 
@@ -183,8 +186,13 @@ flowchart TB
     Emo -.->|state snapshot| Self
     Self --> Narr
     Narr --> LMPort
-    LMPort --> Templ
-    LMPort -.-> Claude
+    LMPort --> Sel
+    Sel --> Templ
+    Sel -.-> Fake
+    Sel -.-> Claude
+    Sel -.-> Local
+    Claude -.->|on error| Templ
+    Local -.->|on error / unavailable| Templ
     LCmd --> LMPort
     API -->|"/ask"| Self
     Self -->|self-report| API

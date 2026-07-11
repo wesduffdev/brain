@@ -683,6 +683,22 @@ simulation — non-authoritative and read-only. Narration reflects the being; it
 never controls it, feeds back into a decision, or mutates state.
 _Avoid_: narrative, story, commentary, voice-over, dialogue.
 
+**Narrator provider**:
+Which voice phrases the being's self-report behind the one language-model seam,
+chosen by config: the offline deterministic template (default), the in-memory
+fake (tests), Claude (env-gated), or a locally-served model. A provider only
+changes where the words come from — it is always handed the same structured
+experience, so it can never change what the being is allowed to say.
+_Avoid_: LLM-as-brain, backend, engine, model (bare).
+
+**Narrator fallback**:
+The fallback-safe rule that a self-report always lands, grounded: when the
+selected narrator provider errors or is unavailable, the being degrades to the
+deterministic template over the same experience — fluency lost, grounding kept.
+The fluent voice is an upgrade, never a dependency (the sibling of the predictor
+ensemble's rule fallback).
+_Avoid_: retry, failover (as infra), silent error, default model.
+
 **Salience**:
 How strongly a memory stands out — its priority, raised by surprise (prediction
 error) and emotional intensity, so the moments the being was most wrong or most

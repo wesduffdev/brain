@@ -25,6 +25,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketD
 
 from app import auth
 from app.auth import AuthConfig, require_auth
+from app.adapters.narrator import build_narrator
 from app.bootstrap import BuiltSimulation, build_simulation
 from app.config_service import ConfigService
 from app.ports.clock import ClockPort, WallClock
@@ -173,24 +174,15 @@ def create_app(
 
 
 def _build_self_report(config: ConfigService) -> SelfReportService:
-    """Wire the self-report surface from config (S1, ADR 0032). The narrator that
-    backs the shared `LanguageModelPort` is chosen by `narrator.kind`: the offline
-    deterministic template narrator by default, or the Claude adapter when the
-    config opts into a real model (S2, env-gated on ANTHROPIC_API_KEY, never
-    reached by the deterministic path or the test suite)."""
+    """Wire the self-report surface from config (S1/S2, ADR 0032). The narrator that
+    backs the shared `LanguageModelPort` is provider-selected by `narrator.kind`
+    (deterministic template by default; fake / claude / local otherwise) and, for a
+    real model, made FALLBACK-SAFE — a model that errors or is unavailable degrades
+    to the grounded deterministic template. `build_narrator` owns that selection +
+    fallback; the deterministic default path is byte-identical to S1 and the suite
+    never reaches a real provider (env-gated, ADR 0022)."""
     policy = config.self_report_policy()
-    if policy.narrator_kind == "model":
-        from app.adapters.claude_language_model import ClaudeLanguageModel
-
-        narrator = ClaudeLanguageModel()
-    else:
-        from app.adapters.template_language_model import TemplateLanguageModel
-
-        narrator = TemplateLanguageModel(
-            phrasing=config.narration_phrasing(),
-            salience_emphasis_threshold=policy.salience_emphasis_threshold,
-            neutral_emotion=config.default_emotion(),
-        )
+    narrator = build_narrator(config)
     return SelfReportService(
         MemorySummaryService(narrator),
         NarrationService(narrator),

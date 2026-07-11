@@ -104,3 +104,21 @@ def test_the_demo_defaults_to_the_hot_lamp_and_the_being_can_be_hurt_by_it(capsy
     assert "Hot Lamp" in out
     assert "harmful contact" in out
     assert "causes_pain" in out
+
+
+# --- the VISUAL-ON reaction demonstration (`demo react`) ----------------------
+
+def test_the_react_demo_runs_both_the_interrupt_and_suppression_scenarios(capsys):
+    # `demo react` runs the wired being beside a no-instinct baseline in TWO scenarios:
+    # [1] the shipped (empty) floor, where a strong flinch may cancel a safe action, and
+    # [2] a floor forbidding the protective `withdraw`, where the interruption is
+    # SUPPRESSED. Structural output holds whether or not a trained artifact is present
+    # (artifact-free here -> the chain is inert and the run says so); the behaviour
+    # itself is pinned by the reaction/wiring tests.
+    demo.main(["react", "5"])
+
+    out = capsys.readouterr().out
+    assert "Red Ball" in out
+    assert "allow_interrupt is ON" in out          # INTERRUPT-ON is active in the shipped config
+    assert "SUPPRESSION" in out                     # the floor-suppression scenario ran
+    assert "shipped floor" in out                   # the interruption scenario ran

@@ -391,6 +391,14 @@ class ConfigService:
         # through unchanged, so none can be silently dropped here.
         return self._with(rooms=rooms)
 
+    def with_safety_rules(self, rules: List[Mapping]) -> "ConfigService":
+        """Return a copy of this config whose invariant-floor rules are exactly
+        `rules` (each `{action, blocked_property, reason}`), every other section
+        carried through unchanged — the demo seam for showing the floor SUPPRESS a
+        would-be action interruption. Mirrors `with_room_contents`; the floor stays
+        the sole arbiter (ADR 0009/0014), so this only tightens what is forbidden."""
+        return self._with(safety={"rules": list(rules)})
+
     # --- actions / safety (the decision + guardrail seam, ADR 0009) -------
 
     def action_policies(self) -> Dict[str, ActionPolicy]:
@@ -746,6 +754,20 @@ class ConfigService:
             seed=int(training.get("seed", 0)),
             intensity_loss=str(training.get("intensity_loss", "bce")),
         )
+
+    def instinct_runtime_enabled(self) -> bool:
+        """Whether the DEPLOYED runtime (bootstrap/main) WIRES and drives the
+        instinct chain live (RUNTIME-WIRE), from the `runtime.enabled` flag of
+        `config/instinct.yaml`. Defaults to ``True``: the chain runs in SHADOW
+        (still governed by the `reaction.shadow` / `visual_only` / `allow_interrupt`
+        gates of `instinct_runtime_policy` / `reaction_response_policy`), and it is
+        None-safe -- absent torch or a trained artifact the instinct predictor loads
+        as ``None`` and the chain stays inert, so a lean runtime is byte-identical.
+        Set it ``false`` to keep the chain out of the runtime entirely. This gates
+        only the runtime's AUTO-wiring; an explicitly injected predictor/bus always
+        wins (the bootstrap's injection contract). Retuning is a config change only."""
+        runtime = self._instinct.get("runtime", {}) or {}
+        return bool(runtime.get("enabled", True))
 
     def instinct_runtime_policy(self) -> InstinctRuntimePolicy:
         """The instinct CONSUMER's reaction-selection tuning (INS-RT, extends ADR

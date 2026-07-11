@@ -53,6 +53,19 @@ training:
   seed: 0
   intensity_loss: bce
 
+# RUNTIME wiring (RUNTIME-WIRE): whether the DEPLOYED engine (main.py / bootstrap)
+# constructs a shared EventBus and drives the perception -> instinct -> reaction
+# chain LIVE each tick. Default ON: the chain runs in SHADOW (the `reaction.shadow`
+# / `visual_only` / `allow_interrupt` gates below still govern behavior, all set to
+# the byte-identical prior default), and it is None-safe -- with no torch or no
+# trained `models/instinct.pt` the predictor is None and the chain stays inert, so
+# a lean runtime is byte-identical. The broker is chosen by the environment
+# (InMemoryEventBus by default; KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set,
+# ADR 0024) -- never authored here. Set `enabled: false` to keep instinct out of
+# the runtime entirely. Retuning is a config change only.
+runtime:
+  enabled: true
+
 # Reaction SELECTION — the instinct CONSUMER's concern (INS-RT, extends ADR 0011),
 # read into a typed InstinctRuntimePolicy. The model only predicts; it never
 # selects an action and never bypasses the safety floor. Selection turns a
@@ -90,8 +103,10 @@ reaction:
   #   allow_interrupt : step 2 — a reaction at/above `interrupt.intensity_threshold`
   #                     may CANCEL an interruptible current action, but only when the
   #                     floor permits the protective response; otherwise SUPPRESSED.
-  visual_only: false
-  allow_interrupt: false
+  visual_only: true       # VISUAL-ON: surface + bias emotion (active)
+  allow_interrupt: true   # INTERRUPT-ON: a strong reaction may CANCEL a safe,
+                          # interruptible action (the first behaviour change);
+                          # the SafetyService floor still disposes, never bypassed.
   # The TRANSIENT affect a triggered reaction feeds into emotion derivation, per
   # label (`need: delta`). A flinch drops the felt safety used for derivation below
   # the `scared` threshold, so the being reads as afraid — the stored needs are left

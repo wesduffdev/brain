@@ -33,6 +33,7 @@ from app.policies import (
     OutcomeEffectPolicy,
     PredictionBlendPolicy,
     PreferencePolicy,
+    ReactionResponsePolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -764,6 +765,34 @@ class ConfigService:
             thresholds=thresholds,
             cooldowns=cooldowns,
             shadow=bool(reaction.get("shadow", True)),
+        )
+
+    def reaction_response_policy(self) -> ReactionResponsePolicy:
+        """The ACTIVE-instinct integration tuning (INS-ACT, ADR 0029) from the
+        `reaction:` block of `config/instinct.yaml`: the `visual_only` /
+        `allow_interrupt` activation flags (both default OFF => byte-identical), the
+        per-label `emotion_bias` affect signal fed into emotion derivation, and the
+        interrupt gating (`intensity_threshold`, `interruptible_actions`,
+        `protective_action`). Absent config yields both flags off and no bias, so a
+        triggered reaction changes no behavior until a config flip — the active
+        counterpart to `instinct_runtime_policy`'s shadow selection."""
+        reaction = self._instinct.get("reaction", {}) or {}
+        interrupt = reaction.get("interrupt", {}) or {}
+        emotion_bias = {
+            str(label): {
+                str(need): int(delta) for need, delta in (deltas or {}).items()
+            }
+            for label, deltas in (reaction.get("emotion_bias", {}) or {}).items()
+        }
+        return ReactionResponsePolicy(
+            visual_only=bool(reaction.get("visual_only", False)),
+            allow_interrupt=bool(reaction.get("allow_interrupt", False)),
+            emotion_bias=emotion_bias,
+            intensity_threshold=float(interrupt.get("intensity_threshold", 1.0)),
+            interruptible_actions=tuple(
+                str(a) for a in (interrupt.get("interruptible_actions", []) or [])
+            ),
+            protective_action=str(interrupt.get("protective_action", "withdraw")),
         )
 
     def outcome_training_params(self) -> Dict[str, float]:

@@ -79,3 +79,29 @@ reaction:
     freeze: 5
     orient: 3
     withdraw: 8
+  # ACTIVE-instinct integration (INS-ACT, ADR 0029), staged behind two flags that
+  # BOTH default to the prior (byte-identical) behavior — activation is a config
+  # flip, never code. A triggered reaction proposes; the SafetyService floor always
+  # disposes (never bypassed).
+  #   visual_only     : step 1 — SURFACE the reaction in the being's state (the
+  #                     render `reaction` field) and BIAS the being's DERIVED
+  #                     emotion (via `emotion_bias`, fed into needs->emotion
+  #                     derivation — never assigned). No action interruption.
+  #   allow_interrupt : step 2 — a reaction at/above `interrupt.intensity_threshold`
+  #                     may CANCEL an interruptible current action, but only when the
+  #                     floor permits the protective response; otherwise SUPPRESSED.
+  visual_only: false
+  allow_interrupt: false
+  # The TRANSIENT affect a triggered reaction feeds into emotion derivation, per
+  # label (`need: delta`). A flinch drops the felt safety used for derivation below
+  # the `scared` threshold, so the being reads as afraid — the stored needs are left
+  # untouched. Retuning how a reaction colours emotion is a change here only.
+  emotion_bias:
+    flinch:   { safety: -60 }
+    freeze:   { safety: -40 }
+    withdraw: { safety: -50 }
+    orient:   { safety: -20 }
+  interrupt:
+    intensity_threshold: 0.7          # a reaction must be this intense to interrupt
+    interruptible_actions: [observe, approach, touch, grab, push]
+    protective_action: withdraw       # the response the floor is asked to permit

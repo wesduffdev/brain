@@ -855,3 +855,50 @@ class InstinctRuntimePolicy:
     def cooldown(self, label: str) -> int:
         """How many ticks must elapse between firings of `label` (0 = no cooldown)."""
         return int(self.cooldowns.get(label, 0))
+
+
+@dataclass(frozen=True)
+class ReactionResponsePolicy:
+    """How the being ACTS on a triggered instinct reaction (INS-ACT, ADR 0029) —
+    the active counterpart to `InstinctRuntimePolicy`'s shadow selection. Staged
+    behind two flags that BOTH default to the prior (byte-identical) behavior, so
+    activation is a config change, never code:
+
+    - `visual_only` (step 1): a triggered reaction is SURFACED in the being's state
+      (the render `reaction` field) and BIASES the being's DERIVED emotion — a
+      TRANSIENT affect signal fed into the same needs->emotion derivation (never an
+      assignment), keyed per reaction label by `emotion_bias` (`label -> {need:
+      delta}`). The stored needs are untouched; only the derivation input is nudged.
+    - `allow_interrupt` (step 2): a reaction at or above `intensity_threshold` may
+      CANCEL the current action when that action is in `interruptible_actions` AND
+      the SafetyService permits the `protective_action` on the target. The invariant
+      floor is never bypassed — an interruption the floor forbids is SUPPRESSED, not
+      forced.
+
+    Every value lives in the `reaction:` block of `config/instinct.yaml`; an empty
+    policy (no config) leaves both steps off, so a reaction changes no behavior —
+    the safe default.
+    """
+
+    visual_only: bool = False
+    allow_interrupt: bool = False
+    emotion_bias: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    intensity_threshold: float = 1.0
+    interruptible_actions: Tuple[str, ...] = ()
+    protective_action: str = "withdraw"
+
+    @property
+    def surfaces_reaction(self) -> bool:
+        """Whether an active reaction is exposed at all — true once either step is
+        on, so the `reaction` field never appears while both flags are off (the
+        byte-identical default)."""
+        return self.visual_only or self.allow_interrupt
+
+    def bias_for(self, label: str) -> Mapping[str, int]:
+        """The transient per-need affect signal a `label` reaction feeds into the
+        emotion derivation; empty (no nudge) for a label with no configured bias."""
+        return self.emotion_bias.get(label, {})
+
+    def is_interruptible(self, action: str) -> bool:
+        """Whether `action` is one the being may break off on a strong reaction."""
+        return action in self.interruptible_actions

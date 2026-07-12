@@ -543,6 +543,14 @@ frozen ordered 14-scalar feature vector (the instinct analogue of the outcome
 FeatureEncoder); config order is the contract.
 _Avoid_: feature builder.
 
+**Instinct training example**:
+One learnable row pairing the fast-sensory stimulus features the instinct model
+saw with the reaction labels the being actually reacted with; what the instinct
+model learns from (the instinct analogue of a training example). Real ones are
+derived from lived perception events; until those are recorded, the synthetic
+seed set stands in.
+_Avoid_: instinct sample, reaction record, stimulus row.
+
 **Reaction intensity**:
 A scalar in [0,1] for how strongly a stimulus provokes a protective reaction — a
 separate regression head of the instinct model, distinct from a label

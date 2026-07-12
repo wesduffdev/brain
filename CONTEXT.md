@@ -370,6 +370,26 @@ baseline the neural model blends with, and the safe fallback used when the
 neural arm is disabled or errors.
 _Avoid_: heuristic, fallback model, dummy predictor.
 
+**Prediction client**:
+WHERE a learned model's inference runs, chosen behind the model ports without
+touching any caller: in-process (torch or rules inside the engine), over HTTP to
+the model service, or a fallback-safe wrapper that degrades to the rule/safe
+baseline when the service is unavailable. One object covers both model ports
+(outcome and instinct). It only decides where prediction happens — it never
+predicts differently, and never chooses an action.
+_Avoid_: the model, the predictor (what predicts, not where it runs), inference
+engine, model client (the Ollama language adapter).
+
+**Model service**:
+The out-of-process sidecar that serves the being's two learned models (outcome +
+instinct) over HTTP — an availability boundary, not a new brain. The engine
+reaches it through the prediction client and degrades to the rule/safe baseline
+when it is unavailable, so a model outage never stalls the sim; a local container
+and a prod GPU host are the SAME service behind an endpoint swap. It serves
+scores; it never decides anything.
+_Avoid_: model server (the Ollama LLM host — a different thing), the model,
+backend, inference API, sidecar (the deployment shape, not the thing).
+
 **Anticipated cost**:
 How much a predicted set of outcomes is expected to erode the being's needs,
 subtracted from an action's utility when active prediction is on, so the being

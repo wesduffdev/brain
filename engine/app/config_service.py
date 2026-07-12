@@ -34,6 +34,8 @@ from app.policies import (
     LocalModelPolicy,
     LoRAFinetunePolicy,
     MemoryPriorityPolicy,
+    ModelsPolicy,
+    ModelRoutePolicy,
     MotionPolicy,
     NarrationPhrasing,
     NeedTickPolicy,
@@ -88,6 +90,7 @@ class ConfigService:
         "motion",
         "language",
         "voice",
+        "models",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -144,6 +147,7 @@ class ConfigService:
         motion: Optional[Mapping] = None,
         language: Optional[Mapping] = None,
         voice: Optional[Mapping] = None,
+        models: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -167,6 +171,7 @@ class ConfigService:
             motion=motion,
             language=language,
             voice=voice,
+            models=models,
         )
 
     @classmethod
@@ -199,6 +204,7 @@ class ConfigService:
             "motion": "motion.yaml",
             "language": "language.yaml",
             "voice": "voice.yaml",
+            "models": "models.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -1058,6 +1064,34 @@ class ConfigService:
             neural_weight=float(prediction.get("neural_weight", 0.5)),
             rule_weight=float(prediction.get("rule_weight", 0.5)),
             fallback_to_rules_on_error=bool(prediction.get("fallback_to_rules_on_error", True)),
+        )
+
+    def models_policy(self) -> ModelsPolicy:
+        """Where each learned model's inference RUNS (v8, ADR 0043), from
+        `config/models.yaml`: a per-model `routing:` entry (`mode`
+        inprocess/http, `active_version`, `fallback`) plus the shared sidecar
+        `endpoint:` defaults. Absent config yields all-``inprocess`` routing with
+        fallback on, so the being is byte-identical to before v8. The sidecar base
+        URL is env-overridable (`MODEL_SERVICE_URL`) — deploy config, never authored
+        YAML — so the same routing points at a local container or a prod GPU host by
+        an endpoint swap. Retuning where a model runs is a config/env change only."""
+        endpoint = self._models.get("endpoint", {}) or {}
+        routing = self._models.get("routing", {}) or {}
+
+        def _route(name: str) -> ModelRoutePolicy:
+            entry = routing.get(name, {}) or {}
+            return ModelRoutePolicy(
+                mode=str(entry.get("mode", "inprocess")),
+                active_version=str(entry.get("active_version", "")),
+                fallback=bool(entry.get("fallback", True)),
+            )
+
+        return ModelsPolicy(
+            outcome=_route("outcome"),
+            instinct=_route("instinct"),
+            base_url=str(endpoint.get("base_url", "")),
+            base_url_env=str(endpoint.get("base_url_env", "MODEL_SERVICE_URL")),
+            timeout_seconds=float(endpoint.get("timeout_seconds", 5.0)),
         )
 
 

@@ -1,0 +1,31 @@
+# Where each learned model's INFERENCE runs (v8, ADR 0043).
+#
+# Two learned models sit behind stable ports — the outcome predictor (ADR
+# 0011/0015) and the instinct model (ADR 0026). This file selects, PER MODEL,
+# whether inference runs in-process (torch/rules inside the engine) or
+# out-of-process behind the `model-service` sidecar over HTTP. Default is
+# `inprocess` for both, so the shipped being is byte-identical to before v8.
+#
+# The sidecar ENDPOINT is deploy config, NOT authored here: the base URL is read
+# from the MODEL_SERVICE_URL environment variable (like DATABASE_URL), so the same
+# routing points at a local container in dev or a GPU host in prod by an endpoint
+# swap. Only routing and flags live in this file — a retune is a config change.
+
+endpoint:
+  # Default base URL for the model-service; OVERRIDDEN by the env var below at
+  # deploy time. Empty by default: with http mode selected and no endpoint set,
+  # the fallback-safe client degrades to the rule/safe baseline (never a blind
+  # call), so the sim keeps running.
+  base_url: ""
+  base_url_env: MODEL_SERVICE_URL
+  timeout_seconds: 5.0
+
+routing:
+  outcome:
+    mode: inprocess        # inprocess | http
+    active_version: v1
+    fallback: on           # degrade to the rule baseline on a service outage
+  instinct:
+    mode: inprocess        # inprocess | http
+    active_version: v1
+    fallback: on           # degrade to the safe no-reaction baseline on an outage

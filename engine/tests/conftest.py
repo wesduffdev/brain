@@ -27,6 +27,39 @@ TEST_ISSUER = "jarvis"
 TEST_AUDIENCE = "jarvis-engine"
 
 
+def pytest_configure(config):
+    """BUG #81: app.main builds the app at import (create_app connects to the DB),
+    so the autouse _hermetic_database_url fixture (test-setup) is too late to stop an
+    import-time connect. Before collection, if DATABASE_URL points at an UNREACHABLE
+    server, strip it (+ MODEL_SERVICE_URL) so import takes the in-memory path and
+    @integration tests skip-as-unreachable. Reachable/unset -> unchanged."""
+    import os
+    import socket
+    import warnings
+
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        return
+    try:
+        from sqlalchemy.engine import make_url
+
+        u = make_url(url)
+        host, port = (u.host or "localhost"), (u.port or 5432)
+    except Exception:
+        host, port = "localhost", 5432
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            return  # reachable -> keep DATABASE_URL (integration tests run)
+    except OSError:
+        pass
+    os.environ.pop("DATABASE_URL", None)
+    os.environ.pop("MODEL_SERVICE_URL", None)
+    warnings.warn(
+        f"DATABASE_URL points at unreachable {host}:{port}; stripped for this "
+        f"session so non-integration tests stay in-memory (BUG #81)."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _auth_env(monkeypatch):
     """Pin always-on auth with a known secret for every test. The app reads

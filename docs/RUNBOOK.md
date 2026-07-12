@@ -74,6 +74,23 @@ make setup     # creates engine/.venv, installs engine/requirements.txt,
                # and installs the git guardrail hooks (no commits on main)
 ```
 
+**First-run prerequisites.**
+
+1. **Virtualenv.** `make setup` creates `engine/.venv` seeded with `pip` and
+   installs `engine/requirements.txt`. If you manage venvs with `uv`, create it
+   seeded instead: `uv venv engine/.venv --seed`.
+2. **Secrets file.** `cp .env.example .env`, then set a strong `JWT_SECRET`
+   (`openssl rand -hex 32`). `.env` is **gitignored — never commit it**; only
+   `.env.example` (placeholders) is tracked.
+3. **`.env` auto-load (host targets).** The runtime targets — `token`, `migrate`,
+   `run`, `up`, `db-up`, `kafka-up`, `kafka-init`, `serve-language`, `consolidate`
+   — now auto-load `.env`, so you no longer prefix `JWT_SECRET=…` by hand. The
+   lean targets `make test` and `make demo` stay zero-dependency and are
+   deliberately **not** given `DATABASE_URL` (a leaked `DATABASE_URL` would force
+   the lean suite onto Postgres). A compose target such as `make db-up` still
+   needs `JWT_SECRET` set — Compose validates the whole file (see §3.4) — which
+   `.env` now satisfies.
+
 ### 3.2 Run the lean behavior suite
 
 ```bash

@@ -5,6 +5,28 @@
 # Everything runs against a local virtualenv at engine/.venv (gitignored), so
 # `make test` behaves the same for everyone and in CI later. No global installs.
 
+# Load .env (gitignored) if present so RUNTIME host targets see JWT_SECRET/DATABASE_URL
+# etc. without a manual `export`. SCOPED on purpose: the secrets are exported only to
+# the targets below, NOT to `test`/`demo`/`train`, which must stay zero-dependency
+# (in-memory/sqlite) — a blanket export would force the lean suite onto Postgres.
+# docker compose reads .env on its own; when .env is absent make still runs and
+# compose's required-var guard still fires.
+ifneq (,$(wildcard .env))
+include .env
+endif
+# Scope the export to the runtime targets only. GNU Make 3.81 (the macOS default)
+# does NOT support a bare `target: export VAR` list, so use the portable
+# target-specific `export VAR := $(VAR)` form — one per secret — over the target list.
+RUNTIME_TARGETS := token migrate run up down db-up kafka-up kafka-init serve-language consolidate
+$(RUNTIME_TARGETS): export JWT_SECRET := $(JWT_SECRET)
+$(RUNTIME_TARGETS): export DATABASE_URL := $(DATABASE_URL)
+$(RUNTIME_TARGETS): export RENDERER_TOKEN := $(RENDERER_TOKEN)
+$(RUNTIME_TARGETS): export JWT_ISSUER := $(JWT_ISSUER)
+$(RUNTIME_TARGETS): export JWT_AUDIENCE := $(JWT_AUDIENCE)
+$(RUNTIME_TARGETS): export JWT_TTL_SECONDS := $(JWT_TTL_SECONDS)
+$(RUNTIME_TARGETS): export KAFKA_BOOTSTRAP_SERVERS := $(KAFKA_BOOTSTRAP_SERVERS)
+$(RUNTIME_TARGETS): export OLLAMA_BASE_URL := $(OLLAMA_BASE_URL)
+
 ENGINE := engine
 VENV   := $(ENGINE)/.venv
 PY     := $(VENV)/bin/python
@@ -32,7 +54,7 @@ run: ## serve the engine API on http://localhost:8000 (GET /state, WS /ws)
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/uvicorn app.main:app --reload --port 8000
 
 token: ## mint a service JWT for the API (needs JWT_SECRET set; see .env.example)
-	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.auth_token
+	@cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.auth_token
 
 db-up: ## start Postgres alone and wait until it is accepting connections
 	docker compose up -d --wait postgres

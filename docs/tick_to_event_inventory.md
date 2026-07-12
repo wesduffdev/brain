@@ -58,7 +58,7 @@ service copies rather than mutates and has no external side effect.
 
 | # | Responsibility | Owner module / function | Reads | Writes | Cadence | Side effects | Classification |
 |---|---|---|---|---|---|---|---|
-| 5 | Perceive the room | `PerceptionService.perceive` (`services/perception_service.py:28`), called at `simulation.py:295` | `Room.contains`, object catalog (true defs) | — (returns perceived view) | **every tick** | none | **Event-driven — MIGRATE FIRST.** Becomes `being.perception.events` (`ObjectApproached` / motion frames) once `WORLD-MOTION` adds kinematics |
+| 5 | Perceive the room | `PerceptionService.perceive`, feeds `StimulusService` in `_act` (`services/stimulus_service.py`) | `Room.contains`, object catalog (true defs) | — (returns perceived view) | **every tick** | none | **Event-driven — MIGRATING (shadow/parallel, TICK-EVENT-MIGRATE).** The perceived-frame → sensory-stimulus seam is now config-routable onto the backbone: `route_via_events` on publishes `being.perception.taken`, which `StimulusService` consumes (proven byte-identical to the direct call). Default off; full cutover (remove the direct call) is the follow-up |
 | 6 | Curiosity / surprise derivation + render view | `ExplorationPolicyService.curiosity_map` / `surprise_map` (`simulation.py:302-303`, refreshed at `:446`) wrapping `CuriosityService` + `SurpriseService` | `perceived`, `tick`, internal familiarity/recorded-surprise state, curiosity weights + surprise policy (config) | `_curiosity_view`, `_surprise_view` (transient view dicts) | **every tick** (surprise decays as a function of `tick`, computed on read) | transient in-memory views | **Renderer-only** (also the decision's curiosity input) — migrates alongside the perception→instinct→render path |
 | 7 | Choose one action | `DecisionService.decide` (`services/decision_service.py:75`, +`SafetyService`, optional ensemble predictor, exploration, `score_bias`), called at `simulation.py:305` | `needs`, `emotion`, `perceived`, `on_cooldown`, `curiosity`, `score_bias` (memory + belief biases), action/safety policies, predictor | — (returns `Decision` or `None`) | **every tick** | none (pure decision; safety gates) | **Event-driven** — reaction to a perception (instinct will sit *before* it). Full integration is later (`INS-ACT`, wave E4), through the existing safety/decision seam — **not** wave 1 |
 | 8 | Apply the action's felt consequence to needs | `NeedService.apply_outcomes` (`services/need_service.py:55`), called at `simulation.py:331` | `being.needs`, `observed_outcome`, `OutcomeEffectPolicy` (config) | `being.needs` (pain spike, safety/comfort drop) | **each acting tick — NOT tick-gated** ("lands the moment the action does", per docstring) | none (pure) | **Event-driven** — already an event-shaped consequence of the action |
@@ -106,6 +106,16 @@ order below matches the wave plan (`event_instinct_execution_plan.md` §1.2 #3 a
      `WORLD-MOTION` adds object kinematics and an approach stimulus
      (`ObjectApproached`). This is the pull-through that gives the instinct model
      real features.
+     - **Status (TICK-EVENT-MIGRATE, shadow/parallel).** `WORLD-MOTION` landed the
+       `ObjectApproached` producer; this slice migrated the *input* seam — the
+       perceived-frame hand-off into the sensory-stimulus subsystem — onto the bus,
+       config-gated by `motion.perception.route_via_events` (default off). On, `_act`
+       publishes a `being.perception.taken` event and `StimulusService` consumes it
+       instead of the direct `observe(...)` call; a two-being equivalence test proves
+       the routes are byte-identical `state()`-for-`state()` across many ticks, and
+       delivery stays synchronous on the tick thread (single-writer). Not yet cut over:
+       the direct call remains the default path and the Kafka pull path for this frame
+       is deferred to the cutover follow-up.
    - **Instinct** is a *new* consumer between perception and decision (`INS-RT`,
      shadow mode) — it does not exist on the tick today, so nothing is "migrated,"
      it is added downstream of the perception event; it records and persists,

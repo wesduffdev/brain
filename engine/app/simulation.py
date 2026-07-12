@@ -249,7 +249,11 @@ class Simulation:
         # EventPublisher (ADR 0024). Absent a publisher, motion still advances and
         # the stimulus is still exposed on `state()`; a static world raises none.
         self._stimulus = StimulusService(
-            config.motion_policy(), being_id=being_id, publisher=event_publisher
+            config.motion_policy(),
+            being_id=being_id,
+            publisher=event_publisher,
+            consumer=event_consumer,
+            route_via_events=config.perception_routing_policy().route_via_events,
         )
 
         self._actions = config.action_policies()
@@ -573,8 +577,11 @@ class Simulation:
         perceived = self._perception.perceive(self._room)["objects"]
         # Advance object motion one tick and raise an approach stimulus for any
         # object now closing on the body — a world/perception side effect that
-        # never bends the decision below.
-        self._stimulus.observe(perceived=perceived, tick=tick, sound=self._room.sound)
+        # never bends the decision below. `ingest` runs the step directly, or — when
+        # perception routing is on and a bus is wired — publishes the perceived frame
+        # as a `being.perception.taken` event the StimulusService consumes; the two are
+        # byte-identical (TICK-EVENT-MIGRATE, ADR 0024/0025).
+        self._stimulus.ingest(perceived=perceived, tick=tick, sound=self._room.sound)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 

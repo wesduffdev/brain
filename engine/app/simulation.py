@@ -10,10 +10,13 @@ interface.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import Dict, List, Optional
 
 from app.config_service import ConfigService
+from app.language.ingest import ingest_text
+from app.policies import ActionPolicy
 from app.domain.being_state import BeingState
 from app.domain.interaction_event import InteractionEvent
 from app.domain.training_example import TrainingExample
@@ -60,6 +63,8 @@ from app.services.memory_retrieval_service import MemoryRetrievalService
 from app.services.memory_service import MemoryService
 from app.services.need_service import NeedService
 from app.services.perception_service import PerceptionService
+from app.services.action_validation_service import ActionValidationService
+from app.services.reading_perception_service import ReadingPerceptionService
 from app.services.prediction_service import PredictionService
 from app.services.preference_service import PreferenceService
 from app.services.safety_service import SafetyService
@@ -106,6 +111,7 @@ class Simulation:
         event_publisher: Optional[EventPublisher] = None,
         event_consumer: Optional[EventConsumer] = None,
         instinct_predictor: Optional[InstinctPredictorPort] = None,
+        consolidation=None,
     ):
         # Persistence seam (ADR 0007/0012): each interaction is written through
         # these ports as it happens, and a training example is derived per event.
@@ -158,6 +164,15 @@ class Simulation:
         # steers (pre-v6 baseline). Trait drift and the memory bias both stay within
         # the safety floor — they only ever reshape the safe candidates.
         self._traits = TraitService(config.trait_policy())
+        # Knowledge consolidation on 'sleep' (reading R5, ADR 0041): when a
+        # consolidation scheduler is injected, a RISING-EDGE crossing of the being's
+        # `sleep` need (its existing sleep cycle, config/tick_rates.yaml) ENQUEUES an
+        # async host-native LoRA pass over Claude-synthesized pairs from the knowledge
+        # store -- never blocking the tick (the executor runs it out-of-band). Absent a
+        # scheduler (the default) OR with consolidation disabled in config, the tick is
+        # byte-identical; the faculty stays strictly on top (it writes an artifact, it
+        # never drives the sim -- ADR 0022).
+        self._consolidation = consolidation
         # Cognitive seam (card v2): when a concept port is injected, every
         # interaction forms/strengthens CONCEPT SCHEMAS keyed on the object's
         # PERCEIVED properties, the being forms BELIEFS about the object from those
@@ -234,12 +249,30 @@ class Simulation:
         # EventPublisher (ADR 0024). Absent a publisher, motion still advances and
         # the stimulus is still exposed on `state()`; a static world raises none.
         self._stimulus = StimulusService(
-            config.motion_policy(), being_id=being_id, publisher=event_publisher
+            config.motion_policy(),
+            being_id=being_id,
+            publisher=event_publisher,
+            consumer=event_consumer,
+            route_via_events=config.perception_routing_policy().route_via_events,
         )
 
         self._actions = config.action_policies()
         safety = SafetyService(config.safety_rules())
         self._safety = safety
+        # REACTION-EVENTS-PERSIST (ADR 0042): the being's active-reaction events
+        # (EmotionBiasApplied / ActionInterrupted) are DURABLE -- no longer published
+        # straight to the bus. The ReactionResponseService STAGES each into this
+        # transactional outbox in the tick's unit of work (ADR 0017/0028), and
+        # `_drain_reactions` later relays them onto the bus AND projects them into the
+        # idempotent event log. Wired only when a publisher (a bus to relay onto) is
+        # present; absent one the being stages nothing and is byte-identical.
+        self._event_publisher = event_publisher
+        self._reaction_outbox = (
+            InMemoryOutboxRepository() if event_publisher is not None else None
+        )
+        self._reaction_event_log = (
+            InMemoryEventLogRepository() if event_publisher is not None else None
+        )
         # Active-instinct integration (INS-ACT, ADR 0029): a triggered reaction on
         # `being.instinct.reactions` may bias the being's DERIVED emotion and, at a
         # higher rollout step, interrupt an interruptible action — always through
@@ -251,7 +284,7 @@ class Simulation:
             safety,
             being_id,
             consumer=event_consumer,
-            publisher=event_publisher,
+            outbox=self._reaction_outbox,
         )
         # Event-instinct chain wiring (EVT-VALID): with an instinct predictor
         # AND a shared event bus (publisher + consumer), the being's fast
@@ -325,6 +358,42 @@ class Simulation:
             CuriosityService(config.curiosity_weights()),
             SurpriseService(config.surprise_policy()),
         )
+        # Reading-as-perception (reading R7, ADR 0040): a document CHANGES the being
+        # only through the validated perception/cognition door -- each read section
+        # becomes a perceptual observation routed through PerceptionService ->
+        # ActionValidationService -> the SAME MemoryService/ConceptService a lived
+        # interaction uses, never by letting the language model write state
+        # (language-on-top, ADR 0022). Wired only when a memory store is present (the
+        # cognition `read()` folds into); concepts are folded in when a concept store
+        # is too. The reading action has its OWN one-word vocabulary validated through
+        # the same ActionValidationService the language layer uses -- so reading is a
+        # validated learning event without joining the being's physical action loop.
+        self._reading_policy = config.reading_perception_policy()
+        self._reading = (
+            ReadingPerceptionService(
+                memory=self._memory,
+                concepts=self._concepts,
+                exploration=self._exploration,
+                validation=ActionValidationService(
+                    {
+                        self._reading_policy.action: ActionPolicy(
+                            name=self._reading_policy.action,
+                            affordance=self._reading_policy.action,
+                            base=0.0,
+                            need_weights={},
+                            emotion_bonuses={},
+                            expected_outcomes=(),
+                            property_outcomes={},
+                            reason="reading a section",
+                        )
+                    }
+                ),
+                policy=self._reading_policy,
+                unit_of_work=self._uow,
+            )
+            if self._memory is not None
+            else None
+        )
         # Per-object curiosity / recent surprise for the render frame, refreshed
         # each tick from the being's perception.
         self._curiosity_view: Dict[str, float] = {}
@@ -386,11 +455,22 @@ class Simulation:
         tick = self._clock.advance()
         # INS-ACT: latch the instinct reaction (if any) received since the last
         # tick as the one in effect for this tick; a tick with no new reaction
-        # clears it (fade).
-        self._reactions.begin_tick(tick)
+        # clears it (fade). Any EmotionBiasApplied it stages rides the tick's unit of
+        # work (REACTION-EVENTS-PERSIST, ADR 0042).
+        with self._reaction_uow():
+            self._reactions.begin_tick(tick)
+        sleep_before = self.being.needs.get("sleep", 0)
         self.being.needs = self._needs.apply(self.being.needs, tick)
         self.being.needs = self._environment.apply(self.being.needs, self._room, tick)
         self.being.emotion = self._emotion.derive(self.being.needs)
+        # Reading R5 (ADR 0041): the being falling asleep TRIGGERS an async knowledge
+        # consolidation -- enqueued and returned at once, so this tick never blocks.
+        # A no-op when no scheduler is wired or consolidation is disabled.
+        if self._consolidation is not None:
+            self._consolidation.maybe_consolidate(
+                sleep_before=sleep_before,
+                sleep_after=self.being.needs.get("sleep", 0),
+            )
         pain_before = self.being.needs.get("pain", 0)
         self._act(tick)
         # INS-TEMPERAMENT (ADR 0031): fold this tick's harm cue into the being's
@@ -404,6 +484,10 @@ class Simulation:
         # (the in-process outbox relay, ADR 0028), so a reaction produced this
         # tick reaches the ReactionResponseService at the next begin_tick.
         self._drain_instinct()
+        # REACTION-EVENTS-PERSIST (ADR 0042): publish this tick's staged reaction
+        # events (EmotionBiasApplied / ActionInterrupted) and project them into the
+        # idempotent event log -- the ADR 0028 relay applied to reaction events.
+        self._drain_reactions()
         # INS-ACT (visual_only): re-derive the being's DISPLAYED emotion from a
         # TRANSIENT reaction-affect overlay (never assigned) — a flinch reads as
         # `scared` without touching the stored needs or the decision above. A
@@ -436,6 +520,29 @@ class Simulation:
             publisher=self._instinct_publisher,
         )
         self._pump_consumer()
+
+    def _drain_reactions(self) -> None:
+        """Publish this tick's staged reaction events and project them into the
+        idempotent event log -- the ADR 0028 relay applied to the being's
+        active-reaction events (EmotionBiasApplied / ActionInterrupted, ADR 0042).
+        Publication happens OUTSIDE any DB transaction; a replayed entry is neither
+        re-published nor re-logged (the event log is the delivery ledger), so the
+        append-only outbox may be re-drained every tick. A no-op when no event bus is
+        wired, so the outbox-less being is byte-identical."""
+        if self._reaction_outbox is None or self._event_publisher is None:
+            return
+        drain_outbox(
+            outbox=self._reaction_outbox,
+            event_log=self._reaction_event_log,
+            publisher=self._event_publisher,
+        )
+
+    def _reaction_uow(self):
+        """The unit of work a reaction event stages in (ADR 0017/0042): the tick's
+        uow when a reaction outbox is wired -- so a staged EmotionBiasApplied /
+        ActionInterrupted commits transactionally with the tick's writes -- else a
+        no-op context, since there is nothing to stage (the byte-identical default)."""
+        return self._uow.begin() if self._reaction_outbox is not None else nullcontext()
 
     def _pump_consumer(self) -> None:
         """PULL a bounded batch of pending events off a broker-backed consumer and
@@ -470,8 +577,11 @@ class Simulation:
         perceived = self._perception.perceive(self._room)["objects"]
         # Advance object motion one tick and raise an approach stimulus for any
         # object now closing on the body — a world/perception side effect that
-        # never bends the decision below.
-        self._stimulus.observe(perceived=perceived, tick=tick, sound=self._room.sound)
+        # never bends the decision below. `ingest` runs the step directly, or — when
+        # perception routing is on and a bus is wired — publishes the perceived frame
+        # as a `being.perception.taken` event the StimulusService consumes; the two are
+        # byte-identical (TICK-EVENT-MIGRATE, ADR 0024/0025).
+        self._stimulus.ingest(perceived=perceived, tick=tick, sound=self._room.sound)
         on_cooldown = {name for name, until in self._cooldown_until.items() if tick <= until}
         emotion_before = self.being.emotion
 
@@ -503,12 +613,14 @@ class Simulation:
         # proposes, the invariant floor disposes. An interruption the floor
         # forbids is SUPPRESSED (the action completes below); a no-op when
         # allow_interrupt is off, so the default is byte-identical.
-        if self._reactions.interrupt(
-            action=decision.action,
-            target_id=decision.target_id,
-            target_properties=perceived_props,
-            tick=tick,
-        ):
+        with self._reaction_uow():
+            interrupted = self._reactions.interrupt(
+                action=decision.action,
+                target_id=decision.target_id,
+                target_properties=perceived_props,
+                tick=tick,
+            )
+        if interrupted:
             self._current_action = None
             return
         true_props = self._catalog[decision.target_id].properties
@@ -757,6 +869,48 @@ class Simulation:
         if self._prediction_repo is None:
             return []
         return [record.snapshot() for record in self._prediction_repo.all()]
+
+    def event_log(self) -> List[Dict]:
+        """The durable projection of the being's active-reaction events -- each
+        `EmotionBiasApplied` / `ActionInterrupted` staged in the tick's unit of work
+        and relayed through the transactional outbox into the idempotent event log
+        (REACTION-EVENTS-PERSIST, ADR 0028/0042), oldest first, as plain envelope
+        snapshots (the stable camelCase wire form). Empty when no event bus is wired,
+        so the being stages no reaction events."""
+        if self._reaction_event_log is None:
+            return []
+        return [entry.event.snapshot() for entry in self._reaction_event_log.all()]
+
+    def read(self, text: str, *, source: str) -> List[Dict]:
+        """Read `text` (a document you hand the being) as a VALIDATED learning event:
+        each section becomes a perceptual observation routed through the SAME
+        perception/cognition door a lived interaction uses (PerceptionService ->
+        ActionValidationService -> MemoryService/ConceptService), so `memories()` and
+        `concepts()` come to reflect the reading and curiosity updates from the new
+        material -- never by letting the language model write state (language-on-top,
+        ADR 0040). The being's clock advances one step per section (reading takes
+        time), so each memory keeps a distinct identity. Requires a memory store
+        (inject a `memory_repository`); returns one observation snapshot per section
+        read (its perceived tokens, the reading action, and the curiosity it felt)."""
+        if self._reading is None:
+            raise RuntimeError(
+                "reading requires a memory store; construct the Simulation with a "
+                "memory_repository"
+            )
+        document = ingest_text(
+            text,
+            source=source,
+            max_chars=self._reading_policy.section_max_chars,
+            overlap=self._reading_policy.section_overlap,
+            min_chunk_chars=self._reading_policy.min_section_chars,
+        )
+        observations = self._reading.read(
+            document,
+            being_id=self.being.being_id,
+            emotion=self.being.emotion,
+            tick_source=self._clock.advance,
+        )
+        return [observation.snapshot() for observation in observations]
 
     def memories(self) -> List[Dict]:
         """The durable memories the being has formed, oldest first, as plain

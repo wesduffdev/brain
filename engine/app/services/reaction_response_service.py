@@ -25,22 +25,26 @@ flags default OFF, in which case the service is inert — no bias, no interrupti
 no `reaction` field — so behavior is byte-identical to the pre-INS-ACT being and
 activation is purely a config flip.
 
-The published `EmotionBiasApplied` (state topic) and `ActionInterrupted` (action
-topic) events are transient runtime signals for observers/the renderer — like the
-`ObjectApproached` the StimulusService emits, they are published straight through
-the injected publisher, not staged in a persistence unit of work.
+The `EmotionBiasApplied` (state topic) and `ActionInterrupted` (action topic)
+events are DURABLE: rather than publishing them straight to the bus, a triggered
+reaction STAGES each into the transactional outbox (ADR 0028) inside the tick's
+unit of work (ADR 0017); the relay publishes it and projects it into the idempotent
+event log — atomic with the tick's writes, no dual-write (REACTION-EVENTS-PERSIST,
+ADR 0042, superseding ADR 0029's transient decision).
 """
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Sequence
 
 from app.domain.event import DomainEvent
+from app.domain.outbox import OutboxEntry
 from app.policies import ReactionResponsePolicy
-from app.ports.events import EventConsumer, EventPublisher
+from app.ports.events import EventConsumer
+from app.ports.repositories import OutboxRepository
 from app.services.instinct_service import INSTINCT_REACTIONS_TOPIC, REACTION_TRIGGERED
 from app.services.safety_service import SafetyService
 
-# The being.* topics this service publishes onto (EVT-KAFKA catalogue, ADR 0024:
+# The being.* topics this service stages events onto (EVT-KAFKA catalogue, ADR 0024:
 # `action` carries ActionStarted/ActionInterrupted, `state` carries the durable
 # brain-state changes NeedChanged/EmotionBiasApplied) and the event types it emits.
 STATE_EVENTS_TOPIC = "being.state.events"
@@ -72,12 +76,12 @@ class ReactionResponseService:
         being_id: str,
         *,
         consumer: Optional[EventConsumer] = None,
-        publisher: Optional[EventPublisher] = None,
+        outbox: Optional[OutboxRepository] = None,
     ) -> None:
         self._policy = policy
         self._safety = safety
         self._being_id = being_id
-        self._publisher = publisher
+        self._outbox = outbox
         # Reactions arrive between ticks; `_incoming` is the latest not-yet-latched
         # one, `_active` the one in effect for the tick currently being processed.
         self._incoming: Optional[_ActiveReaction] = None
@@ -107,12 +111,12 @@ class ReactionResponseService:
     def begin_tick(self, tick: int) -> None:
         """Latch the reaction received since the last tick as the one in effect for
         THIS tick; a tick with no new reaction clears it (fade). When `visual_only`
-        is on and a reaction is active, announce the bias as an `EmotionBiasApplied`
-        state event."""
+        is on and a reaction is active, stage the bias as an `EmotionBiasApplied`
+        state event (durable via the outbox, ADR 0042)."""
         self._active = self._incoming
         self._incoming = None
         if self._active is not None and self._policy.visual_only:
-            self._publish(
+            self._stage(
                 STATE_EVENTS_TOPIC,
                 EMOTION_BIAS_APPLIED,
                 {"reaction": self._active.label, "intensity": self._active.intensity, "tick": tick},
@@ -158,11 +162,12 @@ class ReactionResponseService:
         the action is interruptible, AND the SafetyService permits the protective
         response on the target: the invariant floor is never bypassed, so a
         floor-forbidden break-off is SUPPRESSED (returns False), not forced. On a
-        genuine interruption it emits an `ActionInterrupted` action event and returns
-        True; otherwise it returns False and stays silent."""
+        genuine interruption it stages an `ActionInterrupted` action event (durable
+        via the outbox, ADR 0042) and returns True; otherwise returns False and stays
+        silent."""
         if not self._should_interrupt(action=action, target_properties=target_properties):
             return False
-        self._publish(
+        self._stage(
             ACTION_EVENTS_TOPIC,
             ACTION_INTERRUPTED,
             {
@@ -185,10 +190,15 @@ class ReactionResponseService:
         blocked = self._safety.block_reason(self._policy.protective_action, target_properties)
         return blocked is None
 
-    # --- publishing -------------------------------------------------------
+    # --- staging (transactional outbox, ADR 0028/0042) --------------------
 
-    def _publish(self, topic: str, event_type: str, payload: Mapping[str, Any]) -> None:
-        if self._publisher is None:
+    def _stage(self, topic: str, event_type: str, payload: Mapping[str, Any]) -> None:
+        """Stage a reaction event into the transactional outbox rather than
+        publishing it directly (ADR 0028/0042): it commits with the tick's unit of
+        work, and the relay publishes + projects it into the idempotent event log. A
+        caused event keeps the reaction's correlation chain. A no-op when no outbox is
+        wired — the byte-identical default, exactly as with no publisher before."""
+        if self._outbox is None:
             return
         source = self._active.event if self._active is not None else None
         if source is not None:
@@ -203,4 +213,4 @@ class ReactionResponseService:
                 being_id=self._being_id,
                 payload=payload,
             )
-        self._publisher.publish(topic, event)
+        self._outbox.add(OutboxEntry(topic=topic, event=event))

@@ -9,7 +9,7 @@ ENGINE := engine
 VENV   := $(ENGINE)/.venv
 PY     := $(VENV)/bin/python
 
-.PHONY: help setup test demo run token db-up migrate train up down clean kafka-up kafka-init
+.PHONY: help setup test demo run token db-up migrate train train-language serve-language consolidate up down clean kafka-up kafka-init
 
 help: ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -43,6 +43,18 @@ migrate: ## create the v0 database schema (needs DATABASE_URL set; see .env.exam
 train: ## train the outcome predictor -> models/outcome_predictor.pt (installs torch on first run; minutes)
 	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-train.txt
 	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.ml.train_outcome_model
+
+train-language: ## fine-tune our own language model on a document (host-native MLX-LM LoRA; Mac + mlx_lm) — make train-language DOC=path/to/doc.txt
+	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-finetune.txt
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.language.finetune "$(DOC)"
+
+serve-language: ## serve our fine-tuned model via Ollama: fuse R1's LoRA -> GGUF -> `ollama create` on :11434 (host-native Mac + Ollama + the R1 adapter)
+	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-finetune.txt
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.language.serve
+
+consolidate: ## force a knowledge-consolidation pass now (the being's 'sleep' fine-tune): synthesize pairs from the knowledge store -> host-native MLX-LM LoRA -> re-serve (Mac + mlx_lm + Ollama; needs DATABASE_URL)
+	$(PY) -m pip install --quiet -r $(ENGINE)/requirements-finetune.txt
+	cd $(ENGINE) && PYTHONPATH=. .venv/bin/python -m app.language.consolidation
 
 kafka-up: ## start the Kafka broker (KRaft) and create the being.* topics + .dlq companions
 	docker compose --profile events up -d --wait kafka

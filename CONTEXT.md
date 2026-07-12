@@ -370,6 +370,26 @@ baseline the neural model blends with, and the safe fallback used when the
 neural arm is disabled or errors.
 _Avoid_: heuristic, fallback model, dummy predictor.
 
+**Prediction client**:
+WHERE a learned model's inference runs, chosen behind the model ports without
+touching any caller: in-process (torch or rules inside the engine), over HTTP to
+the model service, or a fallback-safe wrapper that degrades to the rule/safe
+baseline when the service is unavailable. One object covers both model ports
+(outcome and instinct). It only decides where prediction happens — it never
+predicts differently, and never chooses an action.
+_Avoid_: the model, the predictor (what predicts, not where it runs), inference
+engine, model client (the Ollama language adapter).
+
+**Model service**:
+The out-of-process sidecar that serves the being's two learned models (outcome +
+instinct) over HTTP — an availability boundary, not a new brain. The engine
+reaches it through the prediction client and degrades to the rule/safe baseline
+when it is unavailable, so a model outage never stalls the sim; a local container
+and a prod GPU host are the SAME service behind an endpoint swap. It serves
+scores; it never decides anything.
+_Avoid_: model server (the Ollama LLM host — a different thing), the model,
+backend, inference API, sidecar (the deployment shape, not the thing).
+
 **Anticipated cost**:
 How much a predicted set of outcomes is expected to erode the being's needs,
 subtracted from an action's utility when active prediction is on, so the being
@@ -542,6 +562,14 @@ The pure, torch-free, config-vocab-driven contract turning a stimulus into the
 frozen ordered 14-scalar feature vector (the instinct analogue of the outcome
 FeatureEncoder); config order is the contract.
 _Avoid_: feature builder.
+
+**Instinct training example**:
+One learnable row pairing the fast-sensory stimulus features the instinct model
+saw with the reaction labels the being actually reacted with; what the instinct
+model learns from (the instinct analogue of a training example). Real ones are
+derived from lived perception events; until those are recorded, the synthetic
+seed set stands in.
+_Avoid_: instinct sample, reaction record, stimulus row.
 
 **Reaction intensity**:
 A scalar in [0,1] for how strongly a stimulus provokes a protective reaction — a
@@ -727,19 +755,22 @@ _Avoid_: priority-as-queue-order, importance, weight, relevance (the recall
 signal).
 
 **Voicebox**:
-The faculty that turns the being's self-report into audible SPEECH — a voice port
-behind which an open-source TTS engine (espeak-ng) renders the report text to
-audio, exposed at `/speak`. Like narration it sits ON TOP of the simulation: it
-gives the words sound, never new words, and controls nothing. Voice is an upgrade,
-not a dependency — a host with no engine degrades to a clear no-op and the being
-still answers in text.
+The faculty that turns the being's words into audible SPEECH — a voice port behind
+which an open-source TTS engine (espeak-ng) renders text to audio. It voices the
+being's self-report (`/speak`), reads a document you hand it aloud (`/read`), and
+speaks a grounded reading answer on request (an opt-in `speak` on `/ask/reading`
+and `/chat`) — one voicebox, one port, reused across all three (reading R8). Like
+narration it sits ON TOP of the simulation: it gives words sound, never new words,
+and controls nothing. Voice is an upgrade, not a dependency — a host with no engine
+degrades to a clear no-op and the being still answers in text.
 _Avoid_: voice assistant, speech agent, TTS-as-feature, speaker, mouth.
 
 **Utterance**:
-One thing the being is asked to speak — the self-report text handed to the
-voicebox, together with the voice parameters (rate, pitch, voice) it is spoken
-with. The being can only utter what it can report, so an utterance is as grounded
-as the self-report behind it.
+One thing the being is asked to speak — the text handed to the voicebox (its
+self-report, a grounded reading answer, or one chunk of a document being read
+aloud), together with the voice parameters (rate, pitch, voice) it is spoken with.
+The being can only utter what it can report, read, or answer, so an utterance is as
+grounded as the text behind it.
 _Avoid_: message, phrase, line, dialogue, sound clip.
 
 **Synthesize**:
@@ -749,6 +780,162 @@ the host. Synthesis adds sound to words the being already produced; it never
 produces the words.
 _Avoid_: speak (the act itself), generate, narrate/render (the narrator's words),
 TTS (as a verb).
+
+**Read aloud**:
+To voice a whole DOCUMENT through the voicebox — the document is cleaned and chunked
+into utterances (reusing ingest, at a config-driven read-aloud size) and each is
+synthesized in turn, so a long file is spoken in sensible pieces rather than one
+enormous synthesis call (`/read`, reading R8). Distinct from reading-as-perception
+(which CHANGES the being) and Reading QA (which ANSWERS a question): reading aloud
+only speaks the document's own words and mutates nothing.
+_Avoid_: narrate, recite, playback, dictate, text-to-speech (the mechanism).
+
+**Reading**:
+The faculty by which the being takes in a document you hand it and LEARNS from
+it — growing its knowledge from what you give it. Reading sits ON TOP of the
+simulation like narration and voice: it adds to what the being knows, it does not
+drive its needs, emotion, or decisions.
+_Avoid_: parsing, loading, importing, scanning.
+
+**Reading-as-perception**:
+How reading CHANGES the being's cognition — the doctrine that a read document
+forms memories and concepts (and moves curiosity) ONLY through the same validated
+perception/cognition door a lived interaction uses, never by letting the language
+model write state. Each section of a document is perceived as its salient content
+tokens (deterministic, model-free), validated as a reading action on a perceived
+thing, and handed to the SAME memory/concept/curiosity machinery an interaction
+feeds. The tokens are what the being perceives — never the document's title or
+file name (a developer label). Distinct from Reading QA and Conversation, which
+read the knowledge store and only speak; reading-as-perception is the write path,
+and the language model is absent from it.
+_Avoid_: learning from text, the model remembering, importing knowledge, indexing
+(the knowledge store), text-to-memory.
+
+**Ingest**:
+To turn a document the being reads into training-ready text — reading it,
+cleaning it (uniform whitespace and line endings), and chunking it into ordered
+passages. Ingest is pure and deterministic: it produces the corpus a fine-tune
+learns from, and touches no model or GPU. The same document always ingests the
+same way.
+_Avoid_: parse, tokenize, preprocess, load, index (the retrieval store).
+
+**Chunk**:
+An ordered slice of a document's cleaned text — the unit reading works in. Ingest
+splits a document into chunks; each chunk is embedded and folded into the
+knowledge store as one retrievable passage, tagged with its source document.
+_Avoid_: token, segment, fragment, shard, paragraph.
+
+**Embedding**:
+A fixed-dimension vector that stands for a chunk's (or a query's) meaning, so
+similarity is a distance between vectors. The default embedder is deterministic
+and offline (a bag-of-words hash); a real semantic embedder is an optional, gated
+alternative. Distinct from the outcome/instinct models' feature vectors.
+_Avoid_: encoding, feature vector, representation, token.
+
+**Knowledge store**:
+The being's persistent, CUMULATIVE store of embedded chunks, spanning every
+document it has ever read. A newly read document ADDS to it and never replaces
+what came before, so knowledge grows over time. It is retrieved from to ground
+answers; it sits on top of the simulation and drives nothing. Distinct from the
+being's memories (its lived interactions).
+_Avoid_: memory, database, index, cache, vector DB, corpus.
+
+**Retrieval**:
+Finding the chunks in the knowledge store most relevant to a query — the top-k
+passages by embedding similarity, each carrying its source document. It is how a
+question reaches what the being has read (grounded, cited answering builds on it).
+Distinct from memory retrieval (recalling a lived interaction).
+_Avoid_: search, recall, lookup, query, ranking.
+
+**Citation**:
+The source document a retrieved passage came from, carried with it so an answer
+can say WHERE a fact was read. Every retrieved passage is attributable to the
+document that was ingested.
+_Avoid_: reference, provenance, footnote, source (bare).
+
+**Reading QA**:
+The being answering a question about what it has READ — retrieving the relevant
+passages, grounding its answer in them, and citing the source — and declining
+honestly when it has read nothing relevant, optionally adding a clearly-labelled
+base-knowledge answer. Distinct from a subject query (what it KNOWS/FEELS about a
+perceived property, from learned concepts) and from self-report (what it has DONE).
+_Avoid_: search, retrieval (the store step), Q&A bot; it is a SINGLE-turn reading answer — the multi-turn back-and-forth is a Conversation.
+
+**Grounded answer**:
+An answer built ONLY from the passages the being actually retrieved from what it
+has read, plus the question — never the model's free invention — and carrying the
+source document it drew on. When nothing read is relevant the being says so rather
+than forcing one. Distinct from a self-report, which is grounded in the being's own
+lived memories rather than read documents.
+_Avoid_: response, generation, completion, RAG answer, hallucination.
+
+**Base knowledge**:
+What the being knows from its underlying language model itself, independent of any
+document you have given it to read. A reading answer keeps base knowledge separate
+from — and labelled distinctly from — what the being READ, so the two are never
+conflated (the learn-and-grow stance: transparent, not blinded).
+_Avoid_: general knowledge (bare), prior, training data, world knowledge, the base model (the artifact).
+
+**Conversation**:
+A multi-turn back-and-forth about what the being has READ. Each turn is answered by
+reading QA — grounded in the retrieved passages, citing the source — and the turns
+are KEPT so a later turn can resolve a reference to an earlier one ("tell me more
+about that") and stay grounded. A follow-up that names no subject of its own leans
+on the conversation's history to reach the earlier subject; a message that names a
+NEW topic — even one the being has not read about — is judged on its own words and
+declined honestly, never dragged onto the prior topic. Held per conversation id, it
+sits on top of the simulation and drives nothing.
+_Avoid_: chat session, thread, dialogue (bare), context window, memory (the being's lived interactions).
+
+**Conversation turn**:
+One exchange of a conversation — the user's message and the being's grounded answer —
+kept, in order, so later turns can build on it. Turns accumulate per conversation and
+are never edited; they are the durable record a follow-up resolves against. Distinct
+from a being's memory (a lived interaction) and from a reading chunk (a passage of a
+read document).
+_Avoid_: message (bare), exchange, round, utterance, memory, chunk.
+
+**Consolidation**:
+The being's "learn it for good" step, run on its 'sleep' cycle: it fine-tunes its own
+model over question/answer pairs synthesized FROM its accumulated knowledge store, so
+recurring read facts are baked into the model's WEIGHTS and later recalled WITHOUT
+retrieval — not held only in the retrieval store. Falling asleep (the sleep need
+crossing a threshold) TRIGGERS it asynchronously and out-of-band; it never blocks the
+tick and never drives the being — it writes a re-fine-tuned model, nothing more. The
+training pairs are synthesized at build/host time (by Claude); the being's runtime
+answers stay its own local model. Distinct from immediate learning through the growing
+knowledge store (usable at once, no retrain) and from a lived interaction's memory.
+_Avoid_: retrain, memory consolidation (the being's episodic memory), sleep (the need), reindex, cache warming, batch job.
+
+**Fine-tune**:
+To adapt the being's OWN open base model to what it has read by training a small
+LoRA adapter on the ingested text — host-native on the Mac's GPU. The trained
+adapter IS "our model": the being's learned voice, saved as an artifact and later
+served behind the language-model port. Learning from a document means fine-tuning
+on it (immediately, or later during consolidation).
+_Avoid_: train-from-scratch, retrain, pretrain, tune (a config value), calibrate.
+
+**Serve (a model)**:
+To make the being's fine-tuned model answerable at runtime — fuse its LoRA adapter
+into the base, export GGUF, and register it with a local model server (Ollama) that
+answers prompts on an endpoint the language-model port reaches. Serving turns the
+trained artifact into a running voice; it produces no new knowledge, only
+availability, and drives nothing. One fuse-and-export step per fine-tune.
+_Avoid_: deploy, host (the machine), run, expose, publish.
+
+**GGUF**:
+The single-file model format the fused model is exported to so a local model server
+(Ollama) can load and run it. It is the being's fine-tuned weights packaged to
+serve — the base with the LoRA adapter baked in — not a new model.
+_Avoid_: checkpoint, safetensors, the adapter (what is fused in), quantization.
+
+**Model server**:
+The host-native process (Ollama, on :11434) that loads the GGUF model and answers
+prompts over an HTTP endpoint, reached by the local language-model adapter. On the
+Mac it runs host-native because the Metal GPU is not passed into the container; in
+production it becomes a GPU container behind the SAME port — local→prod is an
+endpoint swap. The server serves words; it never decides anything.
+_Avoid_: sidecar (the deployment shape), backend, LLM, the adapter, endpoint (the URL).
 
 ## Not in the language
 

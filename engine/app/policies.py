@@ -6,6 +6,7 @@ one without any risk of mutating shared config.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import ClassVar, Dict, Mapping, Optional, Tuple
 
@@ -276,6 +277,40 @@ class PredictionBlendPolicy:
     neural_weight: float = 0.5
     rule_weight: float = 0.5
     fallback_to_rules_on_error: bool = True
+
+
+@dataclass(frozen=True)
+class ModelRoutePolicy:
+    """Where ONE learned model's inference runs (v8, ADR 0043), from a `routing:`
+    entry of `config/models.yaml`. `mode` is ``inprocess`` (the default — torch or
+    rules in the engine process, byte-identical to before v8) or ``http`` (the
+    out-of-process `model-service` sidecar). `active_version` is the served model
+    version the sidecar is asked for (advisory; the sidecar owns what it loads).
+    `fallback` wraps the HTTP client in a fallback-safe client so a service outage
+    degrades to the rule/safe baseline rather than stalling the sim. Retuning where
+    a model runs — or turning the sidecar on — is a config change only; the sidecar
+    ENDPOINT is deploy config (env), never authored here."""
+
+    mode: str = "inprocess"
+    active_version: str = ""
+    fallback: bool = True
+
+
+@dataclass(frozen=True)
+class ModelsPolicy:
+    """Per-model inference ROUTING for both learned models plus the shared sidecar
+    endpoint defaults (v8, ADR 0043), from `config/models.yaml`. `outcome` and
+    `instinct` each carry a `ModelRoutePolicy`; `base_url`/`base_url_env`/
+    `timeout_seconds` are the `model-service` endpoint defaults, with the base URL
+    OVERRIDABLE by an environment variable at deploy time (`MODEL_SERVICE_URL` by
+    default) — a deploy detail like `DATABASE_URL`, so only the default lives in
+    YAML. Both models default to ``inprocess``, so the shipped being is unchanged."""
+
+    outcome: ModelRoutePolicy = field(default_factory=ModelRoutePolicy)
+    instinct: ModelRoutePolicy = field(default_factory=ModelRoutePolicy)
+    base_url: str = ""
+    base_url_env: str = "MODEL_SERVICE_URL"
+    timeout_seconds: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -947,6 +982,21 @@ class InstinctConsumePolicy:
 
 
 @dataclass(frozen=True)
+class PerceptionRoutingPolicy:
+    """How the perceived-room frame reaches the sensory-stimulus subsystem
+    (TICK-EVENT-MIGRATE, ADR 0024/0025). Off (the default), `Simulation` hand-feeds
+    the frame straight into `StimulusService.observe(...)` — the pre-migration inline
+    call (TICK-INV #5). On, and only when an event bus is wired, the frame is PUBLISHED
+    as a `being.perception.taken` domain event at that seam and the StimulusService
+    CONSUMES it — the same responsibility, routed onto the backbone. The two routes are
+    proven byte-identical; the toggle governs which one drives, so migration is a config
+    flip and the default keeps the current behavior. Lives in the `perception:` block of
+    `config/motion.yaml` (the sensory-stimulus config); retuning it is a config change only."""
+
+    route_via_events: bool = False
+
+
+@dataclass(frozen=True)
 class ReactionTemperamentPolicy:
     """How the being's EFFECTIVE instinct thresholds DRIFT with experience — the slow
     PERSONALIZATION of the reaction GATING owned by `InstinctRuntimePolicy` (adaptive
@@ -1158,6 +1208,9 @@ class VoicePolicy:
     rate: int = 175
     pitch: int = 50
     emotion_params: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    # Reading a whole DOCUMENT aloud (reading R8): the largest utterance the being
+    # voices in one go — a long file is chunked to this before synthesis.
+    read_aloud_max_chars: int = 2000
 
     def default_params(self) -> VoiceParams:
         """The neutral voice, before any emotion override."""
@@ -1173,3 +1226,289 @@ class VoicePolicy:
             rate=int(override.get("rate", self.rate)),
             pitch=int(override.get("pitch", self.pitch)),
         )
+
+
+@dataclass(frozen=True)
+class LoRAFinetunePolicy:
+    """How the being LEARNS from a document it reads — the config for a host-native
+    MLX-LM LoRA fine-tune of OUR OWN open-source base model (reading R1, ADR 0036),
+    from the `finetune:` block of ``config/language.yaml``. It bundles three groups,
+    all config-driven so retuning training never touches Python:
+
+    - the MODEL: `base_model` (the open base to fine-tune, Qwen2.5-3B-Instruct by
+      default) and `adapter_path` (where the trained LoRA adapter — "our model" — is
+      saved);
+    - INGEST: `max_chars` / `overlap` / `min_chunk_chars` shape the document into
+      training-ready chunks, and `valid_fraction` is the held-out validation share;
+    - LoRA TRAINING: `iters`, `batch_size`, `learning_rate`, `num_layers`, `rank`,
+      `scale`, `dropout`, `max_seq_length`, `seed` — the MLX-LM LoRA hyperparameters.
+
+    Plus SAMPLING: `sample_prompt` / `sample_max_tokens` drive the post-train
+    generation so you can watch the model write in the corpus's style. The defaults
+    match READING_VOICEBOX §6's test-scale choice, so the policy is usable even
+    before the config file carries a `finetune` block.
+    """
+
+    base_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    adapter_path: str = "models/language/adapter"
+    # ingest
+    max_chars: int = 1000
+    overlap: int = 100
+    min_chunk_chars: int = 1
+    valid_fraction: float = 0.1
+    # LoRA training
+    iters: int = 200
+    batch_size: int = 4
+    learning_rate: float = 1e-5
+    num_layers: int = 8
+    rank: int = 8
+    scale: float = 20.0
+    dropout: float = 0.0
+    max_seq_length: int = 512
+    seed: int = 0
+    # sampling
+    sample_prompt: str = "Tell me, in your own words, what you just read about:"
+    sample_max_tokens: int = 200
+
+
+@dataclass(frozen=True)
+class OllamaServePolicy:
+    """How OUR fine-tuned model is SERVED locally and reached behind the
+    `LanguageModelPort` (reading R2, ADR 0037), from the `serve:` block of
+    ``config/language.yaml`` — the host-native Mac pipeline that fuses R1's LoRA
+    into the base, exports GGUF, and `ollama create`s a named model Ollama serves
+    on :11434. `base_model` and `adapter_path` are REUSED from the `finetune:`
+    block (one source of truth — R1's artifacts, never re-declared); this policy
+    adds only the serving surface: `model_name` (the Ollama model created — it MUST
+    equal `narrator.local.model`, so the `local` narrator calls our model),
+    `fused_path` / `gguf_file` (the fuse + GGUF artifact locations, `gguf_path`
+    joining them for the Modelfile `FROM`), `port` (Ollama's serve port, for the
+    informative message), and the config-driven Ollama Modelfile knobs `params`
+    (baked-in generation PARAMETERs) and `system` (an optional SYSTEM preamble) — so
+    no generation value is hard-coded. The model is served only on a Mac with MLX +
+    Ollama (the runner refuses loudly off-host); the defaults match
+    READING_VOICEBOX §6, so the policy is usable before the config carries a
+    `serve` block. Retuning what/how the being's voice is served is a config change
+    only.
+    """
+
+    model_name: str = "jarvis-reader"
+    base_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    adapter_path: str = "models/language/adapter"
+    fused_path: str = "models/language/fused"
+    gguf_file: str = "jarvis-reader-f16.gguf"
+    port: int = 11434
+    params: Mapping[str, object] = field(default_factory=dict)
+    system: str = ""
+
+    @property
+    def gguf_path(self) -> str:
+        """The full path to the exported GGUF (the Modelfile `FROM`): the GGUF file
+        inside the fused-model directory."""
+        return f"{self.fused_path.rstrip('/')}/{self.gguf_file}"
+
+
+@dataclass(frozen=True)
+class KnowledgeRetrievalPolicy:
+    """How the being retrieves from its GROWING KNOWLEDGE STORE (reading R3, ADR
+    0038), from the `retrieval:` block of ``config/language.yaml``. `embedder`
+    selects how a passage becomes a vector -- ``"hashing"`` (the deterministic,
+    OFFLINE bag-of-words embedder, the default) or ``"sentence-transformers"`` (the
+    real semantic embedder, gated on the optional library). `dim` is the hashing
+    embedder's vector dimension; `k` is how many passages a query retrieves by
+    default; `model` is the sentence-transformers model to load (only when that
+    embedder is selected). Distinct from the memory-recall `RetrievalPolicy` (card
+    v6): this is the reading faculty's DOCUMENT store, not memory recall. The
+    defaults are fully offline, so a config with no `retrieval:` block still
+    retrieves; retuning what/how the being retrieves is a config change only --
+    never a code one.
+    """
+
+    embedder: str = "hashing"
+    dim: int = 256
+    k: int = 4
+    model: str = "BAAI/bge-small-en-v1.5"
+
+
+@dataclass(frozen=True)
+class ReadingQAPolicy:
+    """How the being answers a question about what it has READ (reading R4, ADR
+    0039), from the `reading_qa:` block of ``config/language.yaml``. Retrieval
+    finds the top-`k` passages; a passage scoring below `min_relevance` is treated
+    as not relevant, so a query that matches nothing the being has read yields the
+    honest unread answer rather than a forced, ungrounded one. The rest are the
+    VOCABULARY the answer is composed from (config-driven, never hard-coded):
+
+    - `read_label` prefixes a grounded answer, and the retrieved passages' source
+      document(s) are appended via `cite_template` (`{sources}` slot) -- so a
+      grounded answer always says WHERE it read the fact.
+    - `unread_response` (`{topic}` slot) is the honest line for a topic the being
+      has not read about; `topic_markers` are the connective(s) after which the
+      asked-about topic begins ("about" in "what do you know *about* dinosaurs").
+    - `blend_base_knowledge` toggles whether an unread answer ALSO offers a
+      base-knowledge answer (from the model, WITHOUT any retrieved context, so it
+      can carry no citation), labelled with `base_label` so what the being READ is
+      always distinguished from what it already KNEW.
+
+    Absent config yields safe defaults, so retuning how the being answers -- and how
+    honestly it declines the unread -- is a config change only. Distinct from
+    `KnowledgeRetrievalPolicy` (that tunes the STORE; this tunes the ANSWER)."""
+
+    k: int = 4
+    min_relevance: float = 0.05
+    unread_response: str = "I haven't read anything about {topic} yet."
+    blend_base_knowledge: bool = True
+    read_label: str = "From what I read"
+    base_label: str = "From what I already knew"
+    cite_template: str = "(source: {sources})"
+    topic_markers: Tuple[str, ...] = ("about",)
+
+
+@dataclass(frozen=True)
+class ConversationPolicy:
+    """How the being holds a MULTI-TURN conversation about what it has READ (reading
+    R6, extends ADR 0039), from the `conversation:` block of ``config/language.yaml``.
+    A conversation is built on single-turn reading QA; this policy tunes only what R6
+    adds on top — HISTORY-AWARE grounding:
+
+    - `followup_cues` are the referential words that mark a FOLLOW-UP — a message that
+      refers back ("tell me more about *that*", "what *else*?") but names no subject of
+      its own. Such a message has the recent turns' questions folded into its retrieval
+      query, so it resolves to the subject established earlier and stays grounded +
+      cited. A message with NONE of these cues stands alone, so a NEW topic — even one
+      the being has not read about — is judged on its own words and declined honestly,
+      never dragged onto a prior topic.
+    - `history_window` bounds how many recent turns fold into a follow-up, so an old,
+      unrelated exchange never bleeds into a fresh one.
+
+    Absent config yields safe defaults, so retuning how far back the being looks and
+    what counts as a follow-up is a config change only — never a code one."""
+
+    history_window: int = 6
+    followup_cues: Tuple[str, ...] = (
+        "that", "it", "this", "they", "them", "those", "these",
+        "more", "else", "again", "another",
+    )
+
+    def is_followup(self, message: str) -> bool:
+        """Whether `message` refers BACK to the conversation rather than naming its
+        own subject — true when it contains any referential `followup_cues` word."""
+        tokens = set(re.findall(r"[a-z']+", str(message).lower()))
+        return bool(tokens & {cue.lower() for cue in self.followup_cues})
+
+    def recent(self, history: "Sequence") -> list:
+        """The most recent turns to fold into a follow-up's query — the last
+        `history_window` of them (all of them when the window is <= 0)."""
+        turns = list(history)
+        if self.history_window <= 0:
+            return turns
+        return turns[-self.history_window:]
+
+
+@dataclass(frozen=True)
+class ReadingPerceptionPolicy:
+    """How a READ section becomes a validated perceptual OBSERVATION (reading R7,
+    ADR 0040), from the `reading_perception:` block of ``config/language.yaml``.
+
+    Reading changes the being only through the SAME perception/cognition door a
+    lived interaction goes through -- never by letting language-model output write
+    state (the language-on-top invariant, ADR 0022). This policy governs the
+    deterministic, model-free bridge from a document's text to that door:
+
+    - SECTIONING -- `section_max_chars` / `section_overlap` / `min_section_chars`
+      chunk a document into the sections the being reads one at a time (reusing the
+      R1 ingest chunker), so a long document is MANY observations, not one.
+    - PERCEPTION -- from a section's text the being perceives its salient CONTENT
+      TOKENS: lowercased word tokens at least `min_token_length` long, minus the
+      `stopwords`, the `max_tokens` most frequent (ties broken by first appearance,
+      so extraction is order-stable and deterministic). These are the perceived
+      properties the memory/concept key on; the source/developer label is never
+      among them (ADR 0002).
+    - COGNITION -- `action` is the reading action the observation is VALIDATED as
+      (through the ActionValidationService), and `outcome` is the reading outcome a
+      read section yields, so a token that recurs across sections builds a
+      (token -> outcome) concept exactly as repeated interactions strengthen one.
+
+    Absent config yields safe defaults, so retuning what the being takes from a
+    document is a config change only -- never a code one."""
+
+    action: str = "read"
+    outcome: str = "informs"
+    max_tokens: int = 6
+    min_token_length: int = 4
+    section_max_chars: int = 120
+    section_overlap: int = 0
+    min_section_chars: int = 1
+    stopwords: Tuple[str, ...] = (
+        "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "for",
+        "with", "from", "by", "as", "is", "are", "was", "were", "be", "been",
+        "being", "it", "its", "this", "that", "these", "those", "they", "them",
+        "their", "when", "then", "than", "so", "if", "we", "you", "your", "he",
+        "she", "his", "her", "do", "does", "did", "has", "have", "had", "will",
+        "would", "can", "could", "not", "no", "yes", "there", "here", "what",
+        "which", "who", "whom", "into", "over", "under", "about",
+    )
+
+    def salient_tokens(self, text: str) -> Tuple[str, ...]:
+        """The content tokens the being PERCEIVES of `text` -- a deterministic,
+        model-free reading of the section into its most-frequent meaningful words.
+
+        Lowercased word tokens shorter than `min_token_length` or in `stopwords` are
+        dropped; the rest are ranked by frequency (ties broken by first appearance),
+        and the top `max_tokens` are returned in that order. No model, no network --
+        so what the being takes from a section is fixed by the text, never invented.
+        """
+        words = re.findall(r"[a-z0-9]+", str(text).lower())
+        stops = {word.lower() for word in self.stopwords}
+        counts: Dict[str, int] = {}
+        first_index: Dict[str, int] = {}
+        for index, word in enumerate(words):
+            if len(word) < self.min_token_length or word in stops:
+                continue
+            if word not in counts:
+                counts[word] = 0
+                first_index[word] = index
+            counts[word] += 1
+        ranked = sorted(counts, key=lambda word: (-counts[word], first_index[word]))
+        return tuple(ranked[: self.max_tokens])
+
+
+@dataclass(frozen=True)
+class ConsolidationPolicy:
+    """How the being CONSOLIDATES what it has read into its own weights on its
+    'sleep' cycle (reading R5, ADR 0041), from the `consolidation:` block of
+    ``config/language.yaml``.
+
+    Consolidation is the being's "learn it for good" step: on the sleep cycle it
+    LoRA-fine-tunes over Q/A pairs synthesized FROM its accumulated knowledge store,
+    so recurring facts are baked into the model itself (recalled WITHOUT retrieval),
+    not only held in the retrieval store. This policy governs when it fires and how
+    its training set is built:
+
+    - `enabled` gates the whole thing. The default is OFF, so the shipped tick is
+      byte-identical — turning consolidation on is a config change only.
+    - `sleep_threshold` is the `sleep` need level (>=) that marks the sleep cycle;
+      the trigger fires on the RISING EDGE across it (the being just fell asleep). It
+      defaults to 80, the same level that reads as the `sleepy` emotion.
+    - `pair_count` caps how many consolidation pairs are synthesized per pass (the
+      strongest / first accumulated chunks).
+    - `synthesis_prompt` (`{passage}` slot) is what the build-time model is asked to
+      turn each knowledge chunk into a Q/A pair with; `pair_template`
+      (`{passage}`/`{completion}` slots) shapes the model's completion into the
+      training line. Runtime inference stays local — the synthesis model (Claude) is
+      a BUILD/HOST-time data step, never the being's runtime voice.
+    - `source` is the dataset label the consolidation training set carries.
+
+    Absent config yields these safe, disabled defaults, so retuning consolidation —
+    and turning it on — is a config change only, never a code one."""
+
+    enabled: bool = False
+    sleep_threshold: int = 80
+    pair_count: int = 32
+    synthesis_prompt: str = (
+        "From the following passage the being has read, write ONE factual question "
+        "and its answer, as 'Q: <question>\nA: <answer>'. Answer only from the passage.\n\n"
+        "Passage:\n{passage}"
+    )
+    pair_template: str = "{completion}"
+    source: str = "consolidation"

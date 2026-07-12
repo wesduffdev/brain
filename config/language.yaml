@@ -27,8 +27,13 @@ narrator:
   # URL is overridden at deploy time by the env var named in base_url_env (a deploy
   # detail, like DATABASE_URL). Inert until `kind: local` and R1/R2 serve a model.
   local:
+    # base_url is the authored default for a HOST-NATIVE engine (localhost); from the
+    # engine CONTAINER set OLLAMA_BASE_URL=http://host.docker.internal:11434 to reach
+    # Ollama on the Mac host (READING_VOICEBOX §5). `model` is OUR served, fine-tuned
+    # model — it MUST match serve.model_name below, so `kind: local` answers from the
+    # model reading R2 creates (not the raw base).
     base_url: http://localhost:11434
-    model: qwen2.5:3b-instruct
+    model: jarvis-reader
     base_url_env: OLLAMA_BASE_URL
     timeout_seconds: 30.0
 
@@ -90,3 +95,200 @@ phrasing:
     happy: happy
     excited: excited
     comforted: comforted
+
+# The being's OWN language model (reading R1, ADR 0036). It LEARNS from documents
+# you give it by LoRA-fine-tuning an open-source base model, host-native on the
+# Mac's Metal GPU via MLX-LM, producing a LoRA ADAPTER that IS "our model". Only
+# ConfigService reads this; retuning training is a change HERE, never in Python.
+finetune:
+  # The open base to fine-tune (Apache-2.0, test-scale per READING_VOICEBOX §6),
+  # and where the trained LoRA adapter — the being's learned voice — is saved.
+  base_model: Qwen/Qwen2.5-3B-Instruct
+  adapter_path: models/language/adapter
+  # Document ingestion: how a read document is cleaned + chunked into training
+  # text (pure/deterministic), and the held-out validation share.
+  ingest:
+    max_chars: 1000       # target size of a training chunk
+    overlap: 100          # characters shared between adjacent split chunks
+    min_chunk_chars: 1    # chunks shorter than this are dropped
+    valid_fraction: 0.1   # share of chunks held out for validation
+  # MLX-LM LoRA hyperparameters (host-native; watch the loss drop as it trains).
+  lora:
+    iters: 200            # training iterations
+    batch_size: 4
+    learning_rate: 0.00001  # 1e-5
+    num_layers: 8         # transformer layers LoRA is applied to
+    rank: 8               # LoRA rank
+    scale: 20.0           # LoRA scale (alpha/rank)
+    dropout: 0.0
+    max_seq_length: 512
+    seed: 0
+  # After training, sample a generation so you can read it in the doc's style.
+  sample:
+    prompt: "Tell me, in your own words, what you just read about:"
+    max_tokens: 200
+
+# How OUR fine-tuned model is SERVED locally and reached behind the LanguageModelPort
+# (reading R2, ADR 0037). After R1 saves the LoRA adapter, `make serve-language`
+# (host-native Mac) fuses it into the base, exports GGUF, and `ollama create`s a named
+# model that Ollama serves on :11434 — reached by the `local` narrator above (from the
+# engine container via host.docker.internal:11434). base_model + adapter_path are
+# REUSED from the finetune block above (one source of truth — R1's artifacts); this
+# block adds only the serving surface. Inert off-host (Mac + Ollama + mlx_lm required);
+# only ConfigService reads it — retuning how the being's voice is served is a change HERE.
+serve:
+  # The Ollama model this pipeline creates. MUST match narrator.local.model above, so
+  # the `local` narrator calls exactly the model we serve.
+  model_name: jarvis-reader
+  # Where the fused (base + LoRA) model and its exported GGUF land; gguf_file is the
+  # GGUF filename inside fused_path (the Modelfile FROM = fused_path/gguf_file).
+  fused_path: models/language/fused
+  gguf_file: jarvis-reader-f16.gguf
+  # Ollama's serve port (for the informative message; the engine reaches it via
+  # narrator.local.base_url / OLLAMA_BASE_URL).
+  port: 11434
+  # Generation PARAMETERs baked into the created model via the Modelfile — config-
+  # driven, so nothing about how our model generates is hard-coded in Python.
+  params:
+    temperature: 0.7
+    top_p: 0.9
+    num_ctx: 4096
+  # Optional Modelfile SYSTEM preamble baked into the served model; empty = none.
+  system: ""
+
+# The being's GROWING KNOWLEDGE STORE (reading R3, ADR 0038). Everything it reads
+# is chunked (reading R1's ingest), embedded, and folded into a PERSISTENT,
+# CUMULATIVE store it retrieves from at answer time (grounded/cited answering
+# follows in R4). Only ConfigService reads this; retuning what/how it retrieves is
+# a change HERE, never in Python.
+retrieval:
+  # Which EMBEDDER turns a passage into a vector for similarity search:
+  #   hashing               -> a deterministic, OFFLINE bag-of-words embedder (no
+  #                            model, no network, no heavy dep); the default so the
+  #                            whole faculty runs offline and reproducibly.
+  #   sentence-transformers -> the real semantic embedder (bge-small / MiniLM),
+  #                            gated on the optional `sentence-transformers` lib —
+  #                            it refuses loudly if the library is absent.
+  embedder: hashing
+  # The hashing embedder's vector dimension (bigger -> fewer token collisions).
+  dim: 256
+  # How many passages a query retrieves by default (top-k). Brute-force cosine
+  # today; pgvector-ready for an ANN index later (roadmap v11).
+  k: 4
+  # The sentence-transformers model to load — only used when embedder is
+  # `sentence-transformers`. bge-small-en-v1.5 / all-MiniLM-L6-v2 are good small
+  # local open embedders (READING_VOICEBOX §6).
+  model: BAAI/bge-small-en-v1.5
+
+# How the being ANSWERS a question about what it has READ (reading R4, ADR 0039).
+# Retrieval (the `retrieval:` block above) finds the passages; this block tunes the
+# ANSWER: it grounds the reply in the retrieved passages and CITES the source
+# document, or -- when nothing read is relevant -- declines honestly and (optionally)
+# offers a clearly-labelled base-knowledge answer. The model only ever sees the
+# retrieved passages + the question, so it cannot invent grounding, and the citation
+# is taken from the retrieval result, never the model. Only ConfigService reads this;
+# retuning how the being answers is a change HERE, never in Python.
+reading_qa:
+  # How many passages a question retrieves (top-k).
+  k: 4
+  # A retrieved passage scoring below this (cosine) is treated as NOT relevant, so a
+  # question matching nothing the being has read declines honestly instead of forcing
+  # an ungrounded answer. 0.0 would accept anything the store returns.
+  min_relevance: 0.05
+  # The honest line for a topic the being has not read about ({topic} is filled from
+  # the question). It NEVER carries a citation -- there is nothing read to cite.
+  unread_response: "I haven't read anything about {topic} yet."
+  # The connective(s) after which the asked-about topic begins ("about" in "what do
+  # you know about dinosaurs" -> "dinosaurs"); a question with none uses the whole
+  # (trimmed) question as the topic.
+  topic_markers: [about]
+  # When true, an unread answer ALSO offers a base-knowledge answer -- the model
+  # answering from its own knowledge WITHOUT any retrieved context (so it can carry no
+  # citation) -- clearly labelled so what the being READ is distinguished from what it
+  # already KNEW. Requires a generative model; with the offline template narrator there
+  # is no base knowledge to draw on, so this is simply skipped.
+  blend_base_knowledge: true
+  # The VOCABULARY an answer is composed from (config-driven, never hard-coded).
+  read_label: "From what I read"          # prefixes a grounded, cited answer
+  base_label: "From what I already knew"  # prefixes the blended base-knowledge answer
+  cite_template: "(source: {sources})"    # how the source document(s) are cited
+
+# How the being holds a MULTI-TURN conversation about what it has READ (reading R6,
+# extends ADR 0039). A conversation is built ON single-turn reading QA (the
+# `reading_qa:` block): every turn is grounded + cited exactly as one question is.
+# This block tunes only what R6 adds on top -- HISTORY-AWARE grounding. Only
+# ConfigService reads this; retuning how the being converses is a change HERE, never
+# in Python.
+conversation:
+  # How many recent turns fold into a FOLLOW-UP's retrieval query, so an old,
+  # unrelated exchange never bleeds into a fresh one.
+  history_window: 6
+  # The referential words that mark a FOLLOW-UP -- a message that refers back ("tell
+  # me more about THAT", "what ELSE?") but names no subject of its own. Such a message
+  # has the recent turns folded in so it resolves to the subject established earlier;
+  # a message with NONE of these stands alone, so a new topic -- even one the being
+  # has not read about -- is judged on its own words and declined honestly.
+  followup_cues: [that, it, this, they, them, those, these, more, else, again, another]
+
+# How a READ document CHANGES the being (reading R7, ADR 0040). Reading is a
+# validated learning event: each section becomes a perceptual OBSERVATION routed
+# through the SAME perception/cognition door a lived interaction goes through
+# (PerceptionService -> ActionValidationService -> Memory/Concept), never by
+# letting the language model write state (the language-on-top invariant, ADR 0022).
+# Only ConfigService reads this; retuning what the being takes from a document is a
+# change HERE, never in Python.
+reading_perception:
+  # The reading ACTION each section is validated as (through ActionValidationService)
+  # and the reading OUTCOME a read section yields -- so a token that recurs across
+  # sections builds a (token -> outcome) concept, exactly as repeated interactions do.
+  action: read
+  outcome: informs
+  # PERCEPTION: from a section's text the being perceives its salient CONTENT TOKENS
+  # -- the `max_tokens` most frequent word tokens at least `min_token_length` long,
+  # minus `stopwords` (deterministic, model-free). These become the perceived
+  # properties the memory/concept key on; the source/developer label is never among
+  # them (ADR 0002).
+  max_tokens: 6
+  min_token_length: 4
+  # SECTIONING: how a document is chunked into the sections read one at a time
+  # (reuses the R1 ingest chunker), so a long document is many observations, not one.
+  section_max_chars: 120
+  section_overlap: 0
+  min_section_chars: 1
+  # The words dropped before ranking a section's tokens -- function words that carry
+  # no subject. A word here can never become a perceived token.
+  stopwords: [the, a, an, and, or, but, of, to, in, on, at, for, with, from, by, as,
+              is, are, was, were, be, been, being, it, its, this, that, these, those,
+              they, them, their, when, then, than, so, if, we, you, your, he, she,
+              his, her, do, does, did, has, have, had, will, would, can, could, not,
+              no, yes, there, here, what, which, who, whom, into, over, under, about]
+
+# The being's KNOWLEDGE CONSOLIDATION on its 'sleep' cycle (reading R5, ADR 0041).
+# The growing knowledge store (retrieval:, above) makes what it reads usable
+# IMMEDIATELY; consolidation is the "learn it for good" step -- on the being's sleep
+# cycle it LoRA-fine-tunes over Q/A pairs synthesized FROM the accumulated store, so
+# recurring facts are baked into the model's WEIGHTS and later recalled WITHOUT
+# retrieval. The sim tick only TRIGGERS the pass (async, host-native, never blocks the
+# tick); `make consolidate` forces one now. The synthesis model (Claude) is a
+# BUILD/HOST-time data step only -- runtime inference stays 100% our local model.
+# Only ConfigService reads this; retuning consolidation -- and turning it on -- is a
+# change HERE, never in Python.
+consolidation:
+  # OFF by default, so the shipped tick is byte-identical: no consolidation is
+  # triggered until this is flipped on (and a scheduler is wired at the host runtime).
+  enabled: false
+  # The `sleep` need level (>=) that marks the sleep cycle; the trigger fires on the
+  # RISING EDGE across it (the being just fell asleep), so a pass runs once per sleep,
+  # not every tick while asleep. Aligned with the `sleepy` emotion threshold
+  # (config/emotions.yaml: sleep >= 80).
+  sleep_threshold: 80
+  # How many consolidation Q/A pairs to synthesize per pass (the first accumulated
+  # knowledge chunks). Keep small for a test-scale LoRA pass.
+  pair_count: 32
+  # What the BUILD-time model turns each knowledge chunk into a consolidation pair
+  # with ({passage} is filled with the chunk); and how its completion becomes the
+  # training line ({passage}/{completion} slots). Runtime never sees these.
+  synthesis_prompt: "From the following passage the being has read, write ONE factual question and its answer, as 'Q: <question>\nA: <answer>'. Answer only from the passage.\n\nPassage:\n{passage}"
+  pair_template: "{completion}"
+  # The dataset label the consolidation training set carries (its `source`).
+  source: consolidation

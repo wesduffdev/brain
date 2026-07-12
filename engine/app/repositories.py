@@ -38,6 +38,8 @@ from app.domain.similarity import ObjectSimilarityRecord
 from app.domain.training_example import TrainingExample
 from app.domain.event import DomainEvent
 from app.domain.event_log import EventLogEntry
+from app.domain.knowledge import KnowledgeChunk
+from app.domain.conversation import ConversationTurn
 from app.domain.instinct import (
     InstinctPrediction,
     InstinctReaction,
@@ -879,6 +881,116 @@ class PostgresInstinctTrainingExampleRepository:
                 event_id=row.event_id,
                 input_features=tuple(row.input_features or ()),
                 output_labels=tuple(row.output_labels or ()),
+            )
+            for row in rows
+        ]
+
+
+# --- reading: the growing knowledge store (reading R3, ADR 0038) ----------------
+
+
+class InMemoryKnowledgeChunkRepository:
+    """A growing-knowledge store held in a list — the seam the behavior suite
+    drives, no database required. Chunks are immutable value objects
+    (`KnowledgeChunk`), stored and returned directly; append-only and cumulative."""
+
+    def __init__(self) -> None:
+        self._chunks: List[KnowledgeChunk] = []
+
+    def add(self, chunk: KnowledgeChunk) -> None:
+        self._chunks.append(chunk)
+
+    def all(self) -> List[KnowledgeChunk]:
+        return list(self._chunks)
+
+
+class PostgresKnowledgeChunkRepository:
+    """A growing-knowledge store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only: each ingested document stages its chunks on the `knowledge_chunks`
+    table, and ``all`` reads them back oldest-first as immutable `KnowledgeChunk`
+    value objects. The `embedding` persists as a JSON float list — pgvector-ready
+    (roadmap v11): swapping in a native vector column + ANN index is a change here,
+    behind the unchanged port. Staged only — the caller's unit of work commits it
+    (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, chunk: KnowledgeChunk) -> None:
+        self._session.add(
+            models.KnowledgeChunk(
+                source=chunk.source,
+                text=chunk.text,
+                embedding=list(chunk.embedding),
+            )
+        )
+
+    def all(self) -> List[KnowledgeChunk]:
+        rows = (
+            self._session.query(models.KnowledgeChunk)
+            .order_by(models.KnowledgeChunk.id)
+            .all()
+        )
+        return [
+            KnowledgeChunk(
+                source=row.source,
+                text=row.text,
+                embedding=tuple(row.embedding or ()),
+            )
+            for row in rows
+        ]
+
+
+# --- reading: multi-turn conversation turns (reading R6, extends ADR 0039) ------
+
+
+class InMemoryConversationTurnRepository:
+    """A conversation-turn store held in a list — the seam the behavior suite drives,
+    no database required. Turns are immutable value objects (`ConversationTurn`),
+    stored and returned directly; append-only and cumulative. `history` filters to one
+    conversation, preserving insertion (oldest-first) order."""
+
+    def __init__(self) -> None:
+        self._turns: List[ConversationTurn] = []
+
+    def add(self, turn: ConversationTurn) -> None:
+        self._turns.append(turn)
+
+    def history(self, conversation_id: str) -> List[ConversationTurn]:
+        return [turn for turn in self._turns if turn.conversation_id == conversation_id]
+
+
+class PostgresConversationTurnRepository:
+    """A conversation-turn store backed by Postgres via a SQLAlchemy ``Session``.
+    Append-only: each turn stages one row on the `conversation_turns` table, and
+    `history` reads one conversation's turns back oldest-first (by insertion id) as
+    immutable `ConversationTurn` value objects. Staged only — the caller's unit of
+    work commits it (ADR 0017)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, turn: ConversationTurn) -> None:
+        self._session.add(
+            models.ConversationTurn(
+                conversation_id=turn.conversation_id,
+                user_message=turn.user_message,
+                answer=turn.answer,
+            )
+        )
+
+    def history(self, conversation_id: str) -> List[ConversationTurn]:
+        rows = (
+            self._session.query(models.ConversationTurn)
+            .filter(models.ConversationTurn.conversation_id == conversation_id)
+            .order_by(models.ConversationTurn.id)
+            .all()
+        )
+        return [
+            ConversationTurn(
+                conversation_id=row.conversation_id,
+                user_message=row.user_message,
+                answer=row.answer,
             )
             for row in rows
         ]

@@ -18,10 +18,14 @@ import pytest
 torch = pytest.importorskip("torch")  # noqa: F841 — training-only dep gate
 
 from app.config_service import ConfigService
+from app.domain.instinct import InstinctTrainingExample
 from app.ml import train_instinct_model as trainer
 from app.ml.instinct_encoder import InstinctFeatureEncoder, Stimulus
 from app.ml.instinct_model import load_instinct_model
-from app.repositories import InMemoryModelRunRepository
+from app.repositories import (
+    InMemoryInstinctTrainingExampleRepository,
+    InMemoryModelRunRepository,
+)
 
 import os
 
@@ -131,3 +135,57 @@ def test_run_training_runs_standalone_with_no_repositories(tmp_path):
 
     assert out.exists()
     assert metrics["source"] == "synthetic"
+
+
+# --- run_training on persisted examples (INS-RETRAIN) ------------------------
+#
+# Closing the instinct learning loop: when the `instinct_training_examples` table
+# holds rows (EVT-PERSIST), `run_training` trains on THEM through the repository
+# port instead of the synthetic seed, mirroring how the outcome trainer already
+# uses persisted `training_examples`. The torch run itself is gated with the rest
+# of this module; the pure dataset SELECTION is covered torch-free in
+# `test_train_instinct_dataset.py`.
+
+
+def test_run_training_trains_on_persisted_examples_and_records_the_run(tmp_path):
+    config = _shipped_config()
+    encoder = InstinctFeatureEncoder.from_config(config)
+    stored = InMemoryInstinctTrainingExampleRepository()
+    for i, (stim, reactions) in enumerate(
+        [
+            (Stimulus(velocity=0.9, trajectory_toward_body=0.9, time_to_contact=0.1), ("flinch",)),
+            (Stimulus(sound_spike_intensity=0.9, unexpectedness=0.8, visibility_confidence=0.2), ("freeze",)),
+            (Stimulus(), ("ignore",)),
+        ]
+    ):
+        stored.add(
+            InstinctTrainingExample(
+                event_id=f"being_001:{i}",
+                input_features=encoder.encode_features(stim),
+                output_labels=encoder.encode_labels(reactions),
+            )
+        )
+    runs = InMemoryModelRunRepository()
+    out = tmp_path / "instinct.pt"
+
+    metrics = trainer.run_training(
+        config=config,
+        output_path=str(out),
+        training_repo=stored,
+        model_run_repo=runs,
+        timestamp=_FIXED_TIME,
+        epochs=3,
+        hidden_size=8,
+    )
+
+    assert out.exists()
+    # trained on the PERSISTED examples, not the synthetic seed
+    assert metrics["source"] == "instinct_training_examples"
+    assert metrics["num_examples"] == 3
+    recorded = runs.all()
+    assert len(recorded) == 1
+    assert recorded[0].metrics["source"] == "instinct_training_examples"
+    # the artifact still carries + validates the current encoder's contract
+    _model, contract = load_instinct_model(str(out))
+    assert tuple(contract["feature_names"]) == encoder.feature_names()
+    assert tuple(contract["label_names"]) == encoder.label_names()

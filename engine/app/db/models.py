@@ -21,6 +21,8 @@ data (BRIEF §8: Postgres is for learned/dynamic data, not authored config):
 - ``instinct_predictions``       — per-stimulus instinct inferences (ADR 0026).
 - ``instinct_reactions``         — the reaction triggered/suppressed per stimulus.
 - ``instinct_training_examples`` — model-ready instinct rows for training.
+- ``knowledge_chunks``    — embedded passages of the growing knowledge store (R3).
+- ``conversation_turns``  — turns of multi-turn conversations about read docs (R6).
 
 These are the *schema*, not the interface. Callers persist and read through the
 repository port (`app.ports.repositories`); the ORM is an implementation detail
@@ -422,4 +424,55 @@ class InstinctTrainingExampleRecord(Base):
     event_id = Column(String, nullable=True, index=True)
     input_features = Column(JSON, nullable=False, default=list)
     output_labels = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- reading: the growing knowledge store (reading R3, ADR 0038) ----------------
+#
+# `source` is a plain string (the document the passage came from), not a DB
+# foreign key — a knowledge chunk is a self-contained, replayable fact about text
+# the being read, not a catalog relationship (the same FK discipline as the event
+# backbone and beliefs, ADR 0019). The `embedding` is the passage's vector, stored
+# as a JSON float list today and pgvector-ready tomorrow: moving to a native
+# `vector` column + ANN index (roadmap v11) is an adapter change on this one table,
+# not a domain change. Append-only + cumulative — reading a document adds chunks.
+
+
+class KnowledgeChunk(Base):
+    """One embedded passage of the being's growing knowledge store (reading R3, ADR
+    0038): the `source` document it came from (for citation), the chunk `text`, and
+    its `embedding` vector. Append-only: each ingested document stages its chunks in
+    one unit of work (ADR 0017) and never replaces earlier ones, so knowledge
+    accumulates across every document read."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String, nullable=False, index=True)
+    text = Column(String, nullable=False)
+    embedding = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- reading: multi-turn conversation turns (reading R6, extends ADR 0039) ------
+#
+# One row per conversational exchange — the `user_message` and the being's grounded
+# `answer` — tagged with the `conversation_id` it belongs to (a plain indexed string,
+# not a DB foreign key: a turn is a self-contained, replayable record, the same FK
+# discipline as knowledge_chunks and the event backbone). Append-only: a turn, once
+# lived, is never edited; insertion order (the autoincrement id) is the turn order.
+
+
+class ConversationTurn(Base):
+    """One turn of a multi-turn conversation about what the being has READ (reading
+    R6, extends ADR 0039): the `conversation_id` it belongs to, the `user_message`,
+    and the being's grounded `answer`. Append-only + cumulative — turns accumulate so
+    later turns can resolve references to earlier ones; ordered oldest-first by id."""
+
+    __tablename__ = "conversation_turns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String, nullable=False, index=True)
+    user_message = Column(String, nullable=False)
+    answer = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -19,6 +19,8 @@ from app.policies import (
     BeliefDecisionPolicy,
     CommandSpec,
     ConceptLearningPolicy,
+    ConsolidationPolicy,
+    ConversationPolicy,
     CuriosityWeights,
     EmotionRule,
     EnvironmentPolicy,
@@ -28,16 +30,24 @@ from app.policies import (
     InstinctModelPolicy,
     InstinctConsumePolicy,
     InstinctRuntimePolicy,
+    KnowledgeRetrievalPolicy,
     LocalModelPolicy,
+    LoRAFinetunePolicy,
     MemoryPriorityPolicy,
+    ModelsPolicy,
+    ModelRoutePolicy,
     MotionPolicy,
     NarrationPhrasing,
     NeedTickPolicy,
+    OllamaServePolicy,
     OutcomeEffectPolicy,
+    PerceptionRoutingPolicy,
     PredictionBlendPolicy,
     PreferencePolicy,
     ReactionResponsePolicy,
     ReactionTemperamentPolicy,
+    ReadingPerceptionPolicy,
+    ReadingQAPolicy,
     RenderHintsPolicy,
     RetrievalPolicy,
     SafetyRule,
@@ -80,6 +90,7 @@ class ConfigService:
         "motion",
         "language",
         "voice",
+        "models",
     )
     _SECTIONS: Tuple[str, ...] = _REQUIRED_SECTIONS + _OPTIONAL_SECTIONS
 
@@ -136,6 +147,7 @@ class ConfigService:
         motion: Optional[Mapping] = None,
         language: Optional[Mapping] = None,
         voice: Optional[Mapping] = None,
+        models: Optional[Mapping] = None,
     ) -> "ConfigService":
         """Build from already-parsed config. Used by tests so behavior is
         pinned to explicit values, not to whatever the shipped files hold."""
@@ -159,6 +171,7 @@ class ConfigService:
             motion=motion,
             language=language,
             voice=voice,
+            models=models,
         )
 
     @classmethod
@@ -191,6 +204,7 @@ class ConfigService:
             "motion": "motion.yaml",
             "language": "language.yaml",
             "voice": "voice.yaml",
+            "models": "models.yaml",
         }
         sections = {
             name: yaml.safe_load((root / filename).read_text())
@@ -360,6 +374,19 @@ class ConfigService:
             contact_distance=float(contact.get("contact_distance", 0.0)),
             contact_min_touch=float(contact.get("min_touch_intensity", 0.0)),
             contact_unexpectedness=float(contact.get("unexpectedness", 0.0)),
+        )
+
+    def perception_routing_policy(self) -> PerceptionRoutingPolicy:
+        """Whether the being routes its perceived-room frame to the sensory-stimulus
+        subsystem THROUGH the event backbone (TICK-EVENT-MIGRATE, ADR 0024/0025), from
+        the `perception:` block of `config/motion.yaml`. Off (the default) keeps the
+        pre-migration inline `StimulusService.observe(...)` call; on — and only when an
+        event bus is wired — the frame is published as a `being.perception.taken` event
+        the StimulusService consumes. Absent config yields the default (off), so every
+        pre-migration slice behaves unchanged. Flipping the route is a config change only."""
+        perception = (self._motion or {}).get("perception", {}) or {}
+        return PerceptionRoutingPolicy(
+            route_via_events=bool(perception.get("route_via_events", False))
         )
 
     def resolve_object(self, selector: str) -> str:
@@ -744,6 +771,106 @@ class ConfigService:
             ),
         )
 
+    def knowledge_retrieval_policy(self) -> KnowledgeRetrievalPolicy:
+        """How the being retrieves from its GROWING KNOWLEDGE STORE (reading R3, ADR
+        0038), from the `retrieval:` block of ``config/language.yaml``: which
+        `embedder` turns a passage into a vector (``"hashing"`` -- the deterministic
+        offline default -- or the gated ``"sentence-transformers"``), the hashing
+        embedder's `dim`, the default number of passages `k` a query retrieves, and
+        the sentence-transformers `model`. Absent config yields the safe OFFLINE
+        defaults, so retuning what/how the being retrieves is a config change only.
+        Distinct from `retrieval_policy` (card v6 memory recall) -- this is the
+        reading faculty's document store."""
+        retrieval = self._language.get("retrieval", {}) or {}
+        defaults = KnowledgeRetrievalPolicy()
+        return KnowledgeRetrievalPolicy(
+            embedder=str(retrieval.get("embedder", defaults.embedder)),
+            dim=int(retrieval.get("dim", defaults.dim)),
+            k=int(retrieval.get("k", defaults.k)),
+            model=str(retrieval.get("model", defaults.model)),
+        )
+
+    def reading_qa_policy(self) -> ReadingQAPolicy:
+        """How the being answers a question about what it has READ (reading R4, ADR
+        0039), from the `reading_qa:` block of ``config/language.yaml``: how many
+        passages a query retrieves (`k`) and the `min_relevance` below which a
+        passage is not counted (so an unmatched query declines honestly), the
+        `unread_response` line (`{topic}` slot) and its `topic_markers`, whether an
+        unread answer also blends a labelled base-knowledge answer
+        (`blend_base_knowledge`), and the `read_label` / `base_label` / `cite_template`
+        the answer is composed from. Absent config yields the safe defaults, so
+        retuning how the being answers -- and how honestly it declines the unread --
+        is a config change only. Distinct from `knowledge_retrieval_policy` (which
+        tunes the STORE; this tunes the ANSWER)."""
+        block = self._language.get("reading_qa", {}) or {}
+        defaults = ReadingQAPolicy()
+        return ReadingQAPolicy(
+            k=int(block.get("k", defaults.k)),
+            min_relevance=float(block.get("min_relevance", defaults.min_relevance)),
+            unread_response=str(block.get("unread_response", defaults.unread_response)),
+            blend_base_knowledge=bool(
+                block.get("blend_base_knowledge", defaults.blend_base_knowledge)
+            ),
+            read_label=str(block.get("read_label", defaults.read_label)),
+            base_label=str(block.get("base_label", defaults.base_label)),
+            cite_template=str(block.get("cite_template", defaults.cite_template)),
+            topic_markers=tuple(
+                str(m).lower()
+                for m in (block.get("topic_markers", list(defaults.topic_markers)) or [])
+            ),
+        )
+
+    def reading_perception_policy(self) -> ReadingPerceptionPolicy:
+        """How a READ section becomes a validated perceptual OBSERVATION (reading R7,
+        ADR 0040), from the `reading_perception:` block of ``config/language.yaml``:
+        the reading `action` a section is validated as and the `outcome` it yields,
+        how a section is chunked (`section_max_chars` / `section_overlap` /
+        `min_section_chars`), and how its salient CONTENT TOKENS are perceived
+        (`max_tokens` / `min_token_length` / `stopwords`). Absent config yields the
+        safe defaults, so retuning what the being takes from a document is a config
+        change only. This is the reading faculty's cognition bridge -- distinct from
+        `reading_qa_policy` (how it ANSWERS) and `knowledge_retrieval_policy` (its
+        document STORE); reading here changes the being, never the language model."""
+        block = self._language.get("reading_perception", {}) or {}
+        defaults = ReadingPerceptionPolicy()
+        stopwords = block.get("stopwords")
+        return ReadingPerceptionPolicy(
+            action=str(block.get("action", defaults.action)),
+            outcome=str(block.get("outcome", defaults.outcome)),
+            max_tokens=int(block.get("max_tokens", defaults.max_tokens)),
+            min_token_length=int(block.get("min_token_length", defaults.min_token_length)),
+            section_max_chars=int(block.get("section_max_chars", defaults.section_max_chars)),
+            section_overlap=int(block.get("section_overlap", defaults.section_overlap)),
+            min_section_chars=int(block.get("min_section_chars", defaults.min_section_chars)),
+            stopwords=(
+                tuple(str(word).lower() for word in stopwords)
+                if stopwords is not None
+                else defaults.stopwords
+            ),
+        )
+
+    def conversation_policy(self) -> ConversationPolicy:
+        """How the being holds a MULTI-TURN conversation about what it has READ
+        (reading R6, extends ADR 0039), from the `conversation:` block of
+        ``config/language.yaml``: `history_window` (how many recent turns fold into a
+        follow-up's retrieval query) and `followup_cues` (the referential words that
+        mark a follow-up — "that"/"more"/"else"/… — vs a message that names its own
+        subject). Absent config yields the safe defaults, so retuning how far back the
+        being looks and what counts as a follow-up is a config change only. Built on
+        `reading_qa_policy` (the single-turn answer); this tunes only the multi-turn
+        history layer."""
+        block = self._language.get("conversation", {}) or {}
+        defaults = ConversationPolicy()
+        cues = block.get("followup_cues")
+        return ConversationPolicy(
+            history_window=int(block.get("history_window", defaults.history_window)),
+            followup_cues=(
+                tuple(str(c).lower() for c in cues)
+                if cues is not None
+                else defaults.followup_cues
+            ),
+        )
+
     def local_model_policy(self) -> LocalModelPolicy:
         """How the `local` narrator provider reaches a locally-served model (S2,
         extends ADR 0022/0032), from the `narrator.local:` block of
@@ -761,6 +888,90 @@ class ConfigService:
             timeout_seconds=float(local.get("timeout_seconds", 30.0)),
         )
 
+    def finetune_policy(self) -> LoRAFinetunePolicy:
+        """How the being LEARNS from a document it reads (reading R1, ADR 0036),
+        from the `finetune:` block of ``config/language.yaml``: the open `base_model`
+        to LoRA-fine-tune and where its `adapter_path` is saved, the ingest chunking
+        (`max_chars`/`overlap`/`min_chunk_chars`) and `valid_fraction`, the MLX-LM LoRA
+        hyperparameters (`iters`/`batch_size`/`learning_rate`/`num_layers`/`rank`/
+        `scale`/`dropout`/`max_seq_length`/`seed`), and the post-train `sample` prompt/
+        length. Absent config yields the READING_VOICEBOX §6 test-scale defaults
+        (Qwen2.5-3B-Instruct), so retuning what the being reads and how it trains is a
+        config change only — never a code one."""
+        finetune = self._language.get("finetune", {}) or {}
+        ingest = finetune.get("ingest", {}) or {}
+        lora = finetune.get("lora", {}) or {}
+        sample = finetune.get("sample", {}) or {}
+        defaults = LoRAFinetunePolicy()
+        return LoRAFinetunePolicy(
+            base_model=str(finetune.get("base_model", defaults.base_model)),
+            adapter_path=str(finetune.get("adapter_path", defaults.adapter_path)),
+            max_chars=int(ingest.get("max_chars", defaults.max_chars)),
+            overlap=int(ingest.get("overlap", defaults.overlap)),
+            min_chunk_chars=int(ingest.get("min_chunk_chars", defaults.min_chunk_chars)),
+            valid_fraction=float(ingest.get("valid_fraction", defaults.valid_fraction)),
+            iters=int(lora.get("iters", defaults.iters)),
+            batch_size=int(lora.get("batch_size", defaults.batch_size)),
+            learning_rate=float(lora.get("learning_rate", defaults.learning_rate)),
+            num_layers=int(lora.get("num_layers", defaults.num_layers)),
+            rank=int(lora.get("rank", defaults.rank)),
+            scale=float(lora.get("scale", defaults.scale)),
+            dropout=float(lora.get("dropout", defaults.dropout)),
+            max_seq_length=int(lora.get("max_seq_length", defaults.max_seq_length)),
+            seed=int(lora.get("seed", defaults.seed)),
+            sample_prompt=str(sample.get("prompt", defaults.sample_prompt)),
+            sample_max_tokens=int(sample.get("max_tokens", defaults.sample_max_tokens)),
+        )
+
+    def serve_policy(self) -> OllamaServePolicy:
+        """How OUR fine-tuned model is SERVED locally and reached behind the
+        `LanguageModelPort` (reading R2, ADR 0037), from the `serve:` block of
+        ``config/language.yaml``: the Ollama `model_name` created (which must match
+        `narrator.local.model`, so the `local` narrator calls our model), the
+        `fused_path`/`gguf_file` artifact locations, the serve `port`, and the
+        config-driven Modelfile `params`/`system`. `base_model` and `adapter_path`
+        are REUSED from the `finetune:` block — one source of truth for R1's
+        artifacts, never re-declared. Absent config yields the READING_VOICEBOX §6
+        defaults, so retuning how the being's voice is served is a config change
+        only — never a code one."""
+        finetune = self._language.get("finetune", {}) or {}
+        serve = self._language.get("serve", {}) or {}
+        defaults = OllamaServePolicy()
+        return OllamaServePolicy(
+            model_name=str(serve.get("model_name", defaults.model_name)),
+            base_model=str(finetune.get("base_model", defaults.base_model)),
+            adapter_path=str(finetune.get("adapter_path", defaults.adapter_path)),
+            fused_path=str(serve.get("fused_path", defaults.fused_path)),
+            gguf_file=str(serve.get("gguf_file", defaults.gguf_file)),
+            port=int(serve.get("port", defaults.port)),
+            params={
+                str(k): v for k, v in (serve.get("params", {}) or {}).items()
+            },
+            system=str(serve.get("system", "")),
+        )
+
+    def consolidation_policy(self) -> ConsolidationPolicy:
+        """How the being CONSOLIDATES what it has read into its own weights on its
+        'sleep' cycle (reading R5, ADR 0041), from the `consolidation:` block of
+        ``config/language.yaml``: whether it is `enabled` (default OFF, so the
+        shipped tick is byte-identical), the `sleep_threshold` the `sleep` need must
+        cross to trigger a pass (the rising edge -- the being falling asleep), how
+        many `pair_count` Q/A pairs to synthesize FROM the accumulated knowledge
+        store, the `synthesis_prompt`/`pair_template` the BUILD-time model renders
+        them with, and the dataset `source` label. Absent config yields safe,
+        disabled defaults, so turning consolidation on and retuning it is a config
+        change only -- never a code one."""
+        block = self._language.get("consolidation", {}) or {}
+        defaults = ConsolidationPolicy()
+        return ConsolidationPolicy(
+            enabled=bool(block.get("enabled", defaults.enabled)),
+            sleep_threshold=int(block.get("sleep_threshold", defaults.sleep_threshold)),
+            pair_count=int(block.get("pair_count", defaults.pair_count)),
+            synthesis_prompt=str(block.get("synthesis_prompt", defaults.synthesis_prompt)),
+            pair_template=str(block.get("pair_template", defaults.pair_template)),
+            source=str(block.get("source", defaults.source)),
+        )
+
     def voice_policy(self) -> VoicePolicy:
         """How the being SPEAKS its self-report aloud (S4, ADR 0035), from
         ``config/voice.yaml``: which `engine` backs the `VoicePort`, the neutral
@@ -772,12 +983,14 @@ class ConfigService:
             str(name): {str(k): int(v) for k, v in (spec or {}).items()}
             for name, spec in (voice.get("emotion", {}) or {}).items()
         }
+        read_aloud = voice.get("read_aloud", {}) or {}
         return VoicePolicy(
             engine=str(voice.get("engine", "espeak-ng")),
             voice=str(voice.get("voice", "en")),
             rate=int(voice.get("rate", 175)),
             pitch=int(voice.get("pitch", 50)),
             emotion_params=emotion_params,
+            read_aloud_max_chars=int(read_aloud.get("max_chars", 2000)),
         )
 
     # --- render / commands ------------------------------------------------
@@ -851,6 +1064,34 @@ class ConfigService:
             neural_weight=float(prediction.get("neural_weight", 0.5)),
             rule_weight=float(prediction.get("rule_weight", 0.5)),
             fallback_to_rules_on_error=bool(prediction.get("fallback_to_rules_on_error", True)),
+        )
+
+    def models_policy(self) -> ModelsPolicy:
+        """Where each learned model's inference RUNS (v8, ADR 0043), from
+        `config/models.yaml`: a per-model `routing:` entry (`mode`
+        inprocess/http, `active_version`, `fallback`) plus the shared sidecar
+        `endpoint:` defaults. Absent config yields all-``inprocess`` routing with
+        fallback on, so the being is byte-identical to before v8. The sidecar base
+        URL is env-overridable (`MODEL_SERVICE_URL`) — deploy config, never authored
+        YAML — so the same routing points at a local container or a prod GPU host by
+        an endpoint swap. Retuning where a model runs is a config/env change only."""
+        endpoint = self._models.get("endpoint", {}) or {}
+        routing = self._models.get("routing", {}) or {}
+
+        def _route(name: str) -> ModelRoutePolicy:
+            entry = routing.get(name, {}) or {}
+            return ModelRoutePolicy(
+                mode=str(entry.get("mode", "inprocess")),
+                active_version=str(entry.get("active_version", "")),
+                fallback=bool(entry.get("fallback", True)),
+            )
+
+        return ModelsPolicy(
+            outcome=_route("outcome"),
+            instinct=_route("instinct"),
+            base_url=str(endpoint.get("base_url", "")),
+            base_url_env=str(endpoint.get("base_url_env", "MODEL_SERVICE_URL")),
+            timeout_seconds=float(endpoint.get("timeout_seconds", 5.0)),
         )
 
 

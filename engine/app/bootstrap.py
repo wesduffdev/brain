@@ -53,8 +53,10 @@ from app.adapters.in_memory_event_bus import InMemoryEventBus
 from app.adapters.kafka_event_bus import BOOTSTRAP_ENV, KafkaEventBus
 from app.ml.inference import load_predictor
 from app.ml.instinct_inference import load_instinct_predictor
+from app.adapters.http_prediction_client import HttpPredictionClient
+from app.ports.prediction_client import FallbackPredictionClient, InProcessPredictionClient
 from app.ports.events import EventConsumer, EventPublisher
-from app.ports.predictor import PredictorPort
+from app.ports.predictor import PredictorPort, RuleBasedPredictor
 from app.ports.instinct import InstinctPredictorPort
 from app.ports.repositories import (
     BeliefRepository,
@@ -183,8 +185,6 @@ def build_simulation(
         belief_repository = PostgresBeliefRepository(session)
         similarity_repository = PostgresSimilarityRepository(session)
         graph_repository = PostgresGraphRepository(session)
-        if predictor is None:
-            predictor = _load_predictor(config, env)
         close = _teardown(session, engine)
 
     # A DB-less being still REMEMBERS in-process (S1, ADR 0032): on the pure
@@ -194,6 +194,17 @@ def build_simulation(
     # like every other in-memory being's state — lost on restart, no DB required.
     if not url and not persistence_injected and memory_repository is None:
         memory_repository = InMemoryMemoryRepository()
+
+    # Outcome prediction: WHERE inference runs (v8, ADR 0043). `inprocess` (the
+    # default) reproduces today's gating EXACTLY -- a predictor is loaded on the
+    # DB path only, None-able -- so the being is byte-identical to before v8;
+    # `http` routes outcome scoring to the model-service via a fallback-safe
+    # client that degrades to the rule baseline on an outage, so the sim never
+    # stalls. An injected predictor always wins (the injection contract).
+    if predictor is None:
+        predictor = _build_outcome_predictor(
+            config, env, on_db_path=bool(url and not persistence_injected)
+        )
 
     # Instinct chain wiring (RUNTIME-WIRE): the deployed runtime drives the
     # perception -> instinct -> reaction chain LIVE, in shadow (ADR 0024/0026/
@@ -208,7 +219,7 @@ def build_simulation(
     # env-only, like DATABASE_URL). Injected predictor/bus always win over this
     # auto-wiring, so tests drive the whole chain with fakes and no broker.
     if instinct_predictor is None and config.instinct_runtime_enabled():
-        instinct_predictor = _load_instinct_predictor(config, env)
+        instinct_predictor = _build_instinct_predictor(config, env)
     if (
         instinct_predictor is not None
         and event_publisher is None
@@ -301,6 +312,56 @@ def _load_instinct_predictor(
     whose feature/label contract disagrees with config (ADR 0026)."""
     model_path = env.get("INSTINCT_MODEL_PATH", str(_DEFAULT_INSTINCT_MODEL_PATH))
     return load_instinct_predictor(config=config, model_path=model_path)
+
+
+def _build_outcome_predictor(config: ConfigService, env: Mapping[str, str], *, on_db_path: bool):
+    """The outcome predictor, its inference site chosen by `config/models.yaml`
+    (v8, ADR 0043). `http` returns a fallback-safe `model-service` client (degrades
+    to the rule baseline on an outage); `inprocess` (default) reproduces today's
+    gating exactly -- the shadow/active predictor loaded on the DB path only,
+    None-able -- so the being is byte-identical to before v8."""
+    route = config.models_policy().outcome
+    if route.mode == "http":
+        return _prediction_client(config, env, route=route)
+    if on_db_path:
+        return _load_predictor(config, env)
+    return None
+
+
+def _build_instinct_predictor(config: ConfigService, env: Mapping[str, str]):
+    """The instinct predictor, its inference site chosen by `config/models.yaml`
+    (v8, ADR 0043). `http` returns a fallback-safe `model-service` client (degrades
+    to the safe no-reaction baseline on an outage); `inprocess` (default) is
+    today's None-safe artifact load, so the chain stays inert without a model."""
+    route = config.models_policy().instinct
+    if route.mode == "http":
+        return _prediction_client(config, env, route=route)
+    return _load_instinct_predictor(config, env)
+
+
+def _prediction_client(config: ConfigService, env: Mapping[str, str], *, route):
+    """A `model-service` HTTP client covering BOTH ports, wrapped (unless the
+    model's `fallback` flag is off) in a `FallbackPredictionClient` whose safe
+    baseline is the rule predictor for outcomes and no-reaction for instinct -- so
+    a service outage degrades rather than stalls the sim (v8, ADR 0043)."""
+    models = config.models_policy()
+    http = HttpPredictionClient(
+        base_url=models.base_url,
+        base_url_env=models.base_url_env,
+        timeout=models.timeout_seconds,
+        outcome_version=models.outcome.active_version,
+        instinct_version=models.instinct.active_version,
+        env=env,
+    )
+    if not route.fallback:
+        return http
+    baseline = InProcessPredictionClient(
+        outcome=RuleBasedPredictor(config.action_policies(), config.outcome_labels()),
+        instinct=None,  # the safe no-reaction baseline
+        outcome_labels=config.outcome_labels(),
+        instinct_labels=config.instinct_labels(),
+    )
+    return FallbackPredictionClient(primary=http, fallback=baseline)
 
 
 def _build_event_bus(config: ConfigService, env: Mapping[str, str]):

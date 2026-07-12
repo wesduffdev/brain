@@ -52,6 +52,11 @@ def _hermetic_database_url(request, monkeypatch):
     `@integration` tests keep it, since exercising a live Postgres is their point."""
     if request.node.get_closest_marker("integration") is None:
         monkeypatch.delenv("DATABASE_URL", raising=False)
+    # Same isolation for the model-service endpoint: an ambient MODEL_SERVICE_URL
+    # must not route a plain behavior test through the sidecar. `model_service`
+    # tests keep it -- a live round-trip is their point (v8, ADR 0043).
+    if request.node.get_closest_marker("model_service") is None:
+        monkeypatch.delenv("MODEL_SERVICE_URL", raising=False)
 
 
 @pytest.fixture

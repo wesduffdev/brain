@@ -255,11 +255,6 @@ the being may take and validated before it becomes a player command; a request,
 never an application.
 _Avoid_: chat, prompt, instruction, order.
 
-**Narration**:
-Readable, non-authoritative text describing the being's current state, derived
-from a state snapshot and never fed back into the sim.
-_Avoid_: description, log, caption, commentary.
-
 **Memory summary**:
 Readable text summarising the being's memory log; read-only, non-authoritative.
 _Avoid_: recap, digest, report.
@@ -706,10 +701,12 @@ red thing"), never a developer label, and it describes; it never acts.
 _Avoid_: introspection, confession, status, log dump, self-awareness.
 
 **Narration**:
-Turning the being's state or memories into readable text laid ON TOP of the
-simulation — non-authoritative and read-only. Narration reflects the being; it
-never controls it, feeds back into a decision, or mutates state.
-_Avoid_: narrative, story, commentary, voice-over, dialogue.
+Readable, non-authoritative text laid ON TOP of the being's state and memories,
+derived from a state snapshot. Narration reflects the being; it is read-only — it
+never controls the sim, feeds back into a decision, or mutates state.
+_Avoid_: description, log, caption, commentary, narrative, story, voice-over,
+dialogue; self-report (that names the narration OF the being's own first-person
+experience — a distinct term); and any implication that narration writes state.
 
 **Narrator provider**:
 Which voice phrases the being's self-report behind the one language-model seam,

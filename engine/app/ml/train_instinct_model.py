@@ -2,24 +2,30 @@
 (ADR 0026), mirroring `train_outcome_model` but with instinct's own contract,
 seed data, and mixed classification+regression objective.
 
-The v0 learning loop: rule-labeled stimulus windows are the source of truth, and
-this tiny net learns to imitate them (the rule labels only *seed* the model —
-production inference is neural; no rule table ships as the runtime path). Instinct
-has no persisted training examples yet (`EVT-PERSIST` adds the
-`instinct_training_examples` table), so every run seeds itself from a
-config-derived **synthetic seed set** — the whole loop (encode -> train ->
-evaluate -> persist) runs standalone, with no database.
+The v0 learning loop: the being's real stimulus->reaction pairs are the source of
+truth once it has lived them. `run_training` reads the persisted
+`instinct_training_examples` (EVT-PERSIST) through the repository port when the
+table holds any and trains on THEM; with an empty table (or no database) it falls
+back to a config-derived **synthetic seed set** of rule-labeled stimulus windows,
+so the whole loop (encode -> train -> evaluate -> persist) still runs standalone.
+This mirrors `train_outcome_model`, which already prefers stored `training_examples`
+over its synthetic seed. The rule labels only *seed* the model — production
+inference is neural; no rule table ships as the runtime path.
 
 Public surface:
   - `LabeledStimulus` / `synthetic_examples(config)` — the rule-labeled seed set
     (pure, no torch).
+  - `training_rows(config, training_repo)` — the dataset the trainer will learn
+    from and where it came from: the persisted `instinct_training_examples` read
+    through the port when present, else the synthetic seed. Pure (no torch), so
+    the selection + fallback is testable offline.
   - `train(...)` / `train_and_save(...)` — train a model and (optionally) persist
     it with metrics, given pre-`LabeledStimulus` examples and an encoder.
   - `run_training(...)` — the orchestration used by the instinct trainer entry:
-    build the synthetic seed set, train, save the artifact, and — when a
-    `model_run_repo` is present — record one `ModelRun` in one unit of work (ADR
-    0017). Repositories and the timestamp are seams the caller supplies, so it is
-    testable without a wall clock or a database.
+    choose the dataset (persisted examples else synthetic seed) via `training_rows`,
+    train, save the artifact, and — when a `model_run_repo` is present — record one
+    `ModelRun` in one unit of work (ADR 0017). Repositories and the timestamp are
+    seams the caller supplies, so it is testable without a wall clock or a database.
   - `main()` — the `python -m app.ml.train_instinct_model` entry.
 
 PyTorch is imported lazily inside the training functions, so importing this module
@@ -49,6 +55,11 @@ _DEFAULT_MODEL_PATH = _REPO_ROOT / "models" / "instinct.pt"
 # of the torch training seed.
 _DATA_SEED = 20260711
 _PER_ARCHETYPE = 24
+
+# The explicit no-reaction label (ADR 0026): it names "nothing fired", so it is
+# excluded when reading a persisted row's intensity target (see `_intensity_from_labels`)
+# and, like the config's reaction thresholds, it never counts as a protective response.
+_NO_REACTION_LABEL = "ignore"
 
 
 @dataclass(frozen=True)
@@ -148,6 +159,60 @@ def synthetic_examples(config) -> List[LabeledStimulus]:
             reactions, intensity = _reactions_for(stimulus)
             examples.append(LabeledStimulus(stimulus, reactions, intensity))
     return examples
+
+
+# --- dataset selection (pure, no torch) ------------------------------------
+
+
+def _intensity_from_labels(labels: Sequence[float], label_names: Sequence[str]) -> float:
+    """The intensity regression target for a PERSISTED row.
+
+    `InstinctTrainingExample` stores only the multi-hot reaction labels — the
+    scalar reaction intensity the model also predicts is not persisted (ADR 0026).
+    So read the training target as the strength of the being's strongest
+    PROTECTIVE reaction: the max label value across every slot except
+    `ignore` (the explicit no-reaction outcome), and 0.0 when only `ignore` fired.
+    Pure, so it is exercised offline with the rest of `training_rows`."""
+    protective = [
+        float(value)
+        for name, value in zip(label_names, labels)
+        if name != _NO_REACTION_LABEL
+    ]
+    return max(protective) if protective else 0.0
+
+
+def training_rows(config, training_repo=None) -> Tuple[List[_EncodedRow], str]:
+    """The dataset the instinct trainer will learn from, and where it came from.
+
+    Source of truth: the persisted `instinct_training_examples` read through the
+    injected repository (EVT-PERSIST) when the table holds any — already encoded to
+    the frozen 14-feature / 5-label contract at write time, so they are used
+    directly (the intensity target, which the row does not persist, is read from
+    the labels via `_intensity_from_labels`). Otherwise the config-derived
+    synthetic seed set, so a run needs no database. This mirrors
+    `train_outcome_model`'s stored-else-synthetic selection. Pure — no torch — so
+    the selection and byte-identical fallback are testable offline. Returns
+    (encoded rows, source: ``"instinct_training_examples"`` | ``"synthetic"``)."""
+    encoder = InstinctFeatureEncoder.from_config(config)
+
+    stored = list(training_repo.all()) if training_repo is not None else []
+    if stored:
+        label_names = encoder.label_names()
+        rows: List[_EncodedRow] = [
+            (
+                tuple(float(f) for f in ex.input_features),
+                tuple(float(l) for l in ex.output_labels),
+                _intensity_from_labels(ex.output_labels, label_names),
+            )
+            for ex in stored
+        ]
+        return rows, "instinct_training_examples"
+
+    rows = [
+        (encoder.encode_features(ex.stimulus), encoder.encode_labels(ex.reactions), float(ex.intensity))
+        for ex in synthetic_examples(config)
+    ]
+    return rows, "synthetic"
 
 
 # --- training --------------------------------------------------------------
@@ -303,6 +368,7 @@ def run_training(
     *,
     config,
     output_path: str,
+    training_repo=None,
     model_run_repo=None,
     unit_of_work=None,
     timestamp: datetime,
@@ -313,22 +379,24 @@ def run_training(
     seed: int = 0,
     intensity_loss: str = "bce",
 ) -> Dict:
-    """Train the instinct model on the config-derived synthetic seed set, save the
-    artifact (+ optional metrics sidecar), and — when a `model_run_repo` is present
-    — record one `ModelRun` (artifact path, metrics, injected `timestamp`; no wall
-    clock here) in one unit of work (ADR 0017), so the run row commits atomically.
-    `unit_of_work` defaults to the no-op in-memory unit for the standalone/no-DB
-    path. Returns the metrics with an added `source` key ("synthetic" — stored
-    instinct training examples arrive with `EVT-PERSIST`)."""
+    """Train the instinct model and record the run.
+
+    Source of truth for the data (via `training_rows`): the persisted
+    `instinct_training_examples` read through `training_repo` (the EVT-PERSIST
+    `InstinctTrainingExampleRepository`) when it holds any; otherwise the
+    config-derived synthetic seed set, so a run needs no database — mirroring
+    `train_outcome_model`. Saves the artifact (+ optional metrics sidecar), and —
+    when a `model_run_repo` is present — records one `ModelRun` (artifact path,
+    metrics, injected `timestamp`; no wall clock here) in one unit of work (ADR
+    0017), so the run row commits atomically. `unit_of_work` defaults to the no-op
+    in-memory unit for the standalone/no-DB path. Returns the metrics with an added
+    `source` key ("instinct_training_examples" or "synthetic")."""
     from app.db.unit_of_work import NullUnitOfWork
 
     unit_of_work = unit_of_work or NullUnitOfWork()
     encoder = InstinctFeatureEncoder.from_config(config)
 
-    rows: List[_EncodedRow] = [
-        (encoder.encode_features(ex.stimulus), encoder.encode_labels(ex.reactions), float(ex.intensity))
-        for ex in synthetic_examples(config)
-    ]
+    rows, source = training_rows(config, training_repo)
     model, metrics = _train_rows(
         rows=rows,
         feature_size=encoder.feature_size,
@@ -340,7 +408,7 @@ def run_training(
         seed=seed,
         intensity_loss=intensity_loss,
     )
-    metrics["source"] = "synthetic"
+    metrics["source"] = source
 
     _save_artifact(model, encoder, metrics, output_path, metrics_path)
 
@@ -353,26 +421,34 @@ def run_training(
     return metrics
 
 
-def _open_model_run_repo():
-    """The Postgres-backed model-run repository when `DATABASE_URL` is configured,
-    else `(None, None)` so the synthetic path runs standalone with no database.
-    Returns the open session too so `main` can close it. The connection string is
-    env-only (ADR 0005), never guessed."""
+def _open_repositories():
+    """The Postgres-backed instinct-training-example + model-run repositories when
+    `DATABASE_URL` is configured, else `(None, None, None)` so the synthetic path
+    runs standalone with no database. Returns the open session too so `main` can
+    close it. The connection string is env-only (ADR 0005), never guessed."""
     if not os.environ.get("DATABASE_URL"):
-        return None, None
+        return None, None, None
 
     from app.db.session import create_db_engine, session_factory
-    from app.repositories import PostgresModelRunRepository
+    from app.repositories import (
+        PostgresInstinctTrainingExampleRepository,
+        PostgresModelRunRepository,
+    )
 
     session = session_factory(create_db_engine())()
-    return PostgresModelRunRepository(session), session
+    return (
+        PostgresInstinctTrainingExampleRepository(session),
+        PostgresModelRunRepository(session),
+        session,
+    )
 
 
 def main() -> None:
-    """Train the instinct model on the synthetic seed set, write
-    `models/instinct.pt` + a metrics sidecar, and record a `model_runs` row when a
-    database is configured. Paths and tuning are config/env-driven so the container
-    and local training share this path."""
+    """Train the instinct model on the persisted `instinct_training_examples` when a
+    database holds them, else the synthetic seed set, write `models/instinct.pt` +
+    a metrics sidecar, and record a `model_runs` row when a database is configured.
+    Paths and tuning are config/env-driven so the container and local training
+    share this path."""
     from app.config_service import ConfigService
 
     config_root = os.environ.get("CONFIG_ROOT", str(_DEFAULT_CONFIG_ROOT))
@@ -381,7 +457,7 @@ def main() -> None:
     config = ConfigService.from_files(config_root)
     policy = config.instinct_model_policy()
 
-    model_run_repo, session = _open_model_run_repo()
+    training_repo, model_run_repo, session = _open_repositories()
     unit_of_work = None
     if session is not None:
         from app.db.unit_of_work import SessionUnitOfWork
@@ -391,6 +467,7 @@ def main() -> None:
         metrics = run_training(
             config=config,
             output_path=output_path,
+            training_repo=training_repo,
             model_run_repo=model_run_repo,
             unit_of_work=unit_of_work,
             timestamp=datetime.now(timezone.utc),

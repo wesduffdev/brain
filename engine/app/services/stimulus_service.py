@@ -35,7 +35,7 @@ from typing import Dict, List, Mapping, Optional
 from app.domain.event import DomainEvent
 from app.domain.motion import Motion
 from app.policies import MotionPolicy
-from app.ports.events import EventPublisher
+from app.ports.events import EventConsumer, EventPublisher
 
 # The one topic the stimuli travel on, and how each event names itself (matches
 # the EVT-BUS catalogue, ADR 0024). Approach is WORLD-MOTION's; the sound spike
@@ -46,6 +46,13 @@ OBJECT_APPROACHED = "being.perception.object_approached"
 SOUND_SPIKE = "being.perception.sound_spike"
 OBJECT_CONTACTED = "being.perception.object_contacted"
 _SOURCE_SERVICE = "perception-service"
+# The perceived-room FRAME the being ingests each tick — the INPUT side of the
+# sensory-stimulus seam (TICK-EVENT-MIGRATE, ADR 0024/0025), distinct from
+# PERCEPTION_TOPIC (which carries this service's OUTPUT stimuli). With perception
+# routing on, `ingest` publishes a `PERCEPTION_TAKEN` event here and this service's
+# own handler turns it back into `observe(...)` — the responsibility, on the backbone.
+PERCEPTION_INPUT_TOPIC = "being.perception.input"
+PERCEPTION_TAKEN = "being.perception.taken"
 # A sound is not tied to a catalogued object — this is the perceived SOURCE token
 # a sound-spike stimulus keys on (a heard signal, not a developer label).
 SOUND_SOURCE_ID = "ambient_sound"
@@ -63,10 +70,21 @@ class StimulusService:
         *,
         being_id: str,
         publisher: Optional[EventPublisher] = None,
+        consumer: Optional[EventConsumer] = None,
+        route_via_events: bool = False,
     ) -> None:
         self._policy = policy
         self._being_id = being_id
         self._publisher = publisher
+        # Perception routing (TICK-EVENT-MIGRATE, ADR 0024/0025): when on AND a
+        # publisher is wired, `ingest` routes the perceived frame onto the backbone
+        # instead of calling `observe` directly. When a consumer is wired this service
+        # also SUBSCRIBES to that frame — it consumes what `ingest` publishes. Firing is
+        # gated by publication, so an un-routed being never triggers the handler and is
+        # byte-identical.
+        self._route_via_events = route_via_events
+        if consumer is not None:
+            consumer.subscribe(PERCEPTION_INPUT_TOPIC, self._on_perception_taken)
         # The live kinematic state (seeded from config) and last tick's, so
         # between-tick rates (acceleration, looming) have a `prior` to read.
         self._motions: Dict[str, Motion] = policy.initial_motions()
@@ -74,6 +92,30 @@ class StimulusService:
         # The last sound category heard — the baseline a spike is a transition from.
         self._sound = _UNSET
         self._stimuli: List[Dict] = []
+
+    def ingest(
+        self, *, perceived: List[Mapping], tick: int, sound: Optional[str] = None
+    ) -> None:
+        """Take this tick's perceived-room FRAME and run the sensory-stimulus step on
+        it — the single entry point `Simulation` calls. With perception routing on AND
+        a publisher wired, the frame is PUBLISHED as a `being.perception.taken` domain
+        event at this seam and this service CONSUMES it (the migrated backbone path,
+        TICK-EVENT-MIGRATE); otherwise it calls `observe` directly (the pre-migration
+        inline path). The two are byte-identical — the toggle only chooses the plumbing.
+        `observe` stays the work method both routes converge on."""
+        if self._route_via_events and self._publisher is not None:
+            self._publisher.publish(
+                PERCEPTION_INPUT_TOPIC,
+                DomainEvent.create(
+                    event_type=PERCEPTION_TAKEN,
+                    event_version=1,
+                    source_service=_SOURCE_SERVICE,
+                    being_id=self._being_id,
+                    payload={"tick": tick, "sound": sound, "objects": list(perceived)},
+                ),
+            )
+            return
+        self.observe(perceived=perceived, tick=tick, sound=sound)
 
     def observe(
         self, *, perceived: List[Mapping], tick: int, sound: Optional[str] = None
@@ -150,6 +192,19 @@ class StimulusService:
         if features is None:
             return None
         return {"objectId": SOUND_SOURCE_ID, "features": features}
+
+    def _on_perception_taken(self, event: DomainEvent) -> None:
+        """Consume a `being.perception.taken` frame off the backbone and run the SAME
+        sensory-stimulus step the direct call runs (TICK-EVENT-MIGRATE). Only the frame
+        event is handled; anything else on the topic is ignored."""
+        if event.event_type != PERCEPTION_TAKEN:
+            return
+        payload = event.payload
+        self.observe(
+            perceived=list(payload.get("objects", ())),
+            tick=int(payload["tick"]),
+            sound=payload.get("sound"),
+        )
 
     def _publish(self, event_type: str, stimulus: Dict, tick: int) -> None:
         if self._publisher is None:

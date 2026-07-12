@@ -948,6 +948,21 @@ class InstinctConsumePolicy:
 
 
 @dataclass(frozen=True)
+class PerceptionRoutingPolicy:
+    """How the perceived-room frame reaches the sensory-stimulus subsystem
+    (TICK-EVENT-MIGRATE, ADR 0024/0025). Off (the default), `Simulation` hand-feeds
+    the frame straight into `StimulusService.observe(...)` — the pre-migration inline
+    call (TICK-INV #5). On, and only when an event bus is wired, the frame is PUBLISHED
+    as a `being.perception.taken` domain event at that seam and the StimulusService
+    CONSUMES it — the same responsibility, routed onto the backbone. The two routes are
+    proven byte-identical; the toggle governs which one drives, so migration is a config
+    flip and the default keeps the current behavior. Lives in the `perception:` block of
+    `config/motion.yaml` (the sensory-stimulus config); retuning it is a config change only."""
+
+    route_via_events: bool = False
+
+
+@dataclass(frozen=True)
 class ReactionTemperamentPolicy:
     """How the being's EFFECTIVE instinct thresholds DRIFT with experience — the slow
     PERSONALIZATION of the reaction GATING owned by `InstinctRuntimePolicy` (adaptive

@@ -24,6 +24,15 @@ normalization:
 approach:
   min_closing_speed: 0.0
 
+# perception (TICK-EVENT-MIGRATE, ADR 0024/0025): how the perceived-room FRAME reaches
+# the sensory-stimulus subsystem each tick. Off (the default) keeps the pre-migration
+# inline call (Simulation -> StimulusService.observe). On -- and only when an event bus
+# is wired -- the frame is PUBLISHED as a `being.perception.taken` event the
+# StimulusService consumes, migrating that seam onto the backbone. The two routes are
+# proven byte-identical; flip this to route via the bus. Retuning is a config change only.
+perception:
+  route_via_events: false
+
 # sensory_defaults: the features still without a world source — the being's
 # fast-loop internal state, folded in later by the instinct consumer, not here.
 # (`sound_spike_intensity` and `touch_intensity` ARE sourced now — see `sound:`

@@ -39,6 +39,7 @@ from app.policies import (
     NeedTickPolicy,
     OllamaServePolicy,
     OutcomeEffectPolicy,
+    PerceptionRoutingPolicy,
     PredictionBlendPolicy,
     PreferencePolicy,
     ReactionResponsePolicy,
@@ -367,6 +368,19 @@ class ConfigService:
             contact_distance=float(contact.get("contact_distance", 0.0)),
             contact_min_touch=float(contact.get("min_touch_intensity", 0.0)),
             contact_unexpectedness=float(contact.get("unexpectedness", 0.0)),
+        )
+
+    def perception_routing_policy(self) -> PerceptionRoutingPolicy:
+        """Whether the being routes its perceived-room frame to the sensory-stimulus
+        subsystem THROUGH the event backbone (TICK-EVENT-MIGRATE, ADR 0024/0025), from
+        the `perception:` block of `config/motion.yaml`. Off (the default) keeps the
+        pre-migration inline `StimulusService.observe(...)` call; on — and only when an
+        event bus is wired — the frame is published as a `being.perception.taken` event
+        the StimulusService consumes. Absent config yields the default (off), so every
+        pre-migration slice behaves unchanged. Flipping the route is a config change only."""
+        perception = (self._motion or {}).get("perception", {}) or {}
+        return PerceptionRoutingPolicy(
+            route_via_events=bool(perception.get("route_via_events", False))
         )
 
     def resolve_object(self, selector: str) -> str:

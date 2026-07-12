@@ -203,6 +203,8 @@ flowchart TB
     Env --> Perc
     Motion --> Stim
     Room --> Stim
+    Perc -->|perceived frame| Stim
+    Bus -.->|routed frame via being.perception.taken| Stim
     Perc --> Bus
     Stim --> Bus
     Bus --- Topics

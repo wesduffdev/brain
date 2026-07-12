@@ -809,11 +809,13 @@ _Avoid_: learning from text, the model remembering, importing knowledge, indexin
 (the knowledge store), text-to-memory.
 
 **Ingest**:
-To turn a document the being reads into training-ready text — reading it,
-cleaning it (uniform whitespace and line endings), and chunking it into ordered
-passages. Ingest is pure and deterministic: it produces the corpus a fine-tune
-learns from, and touches no model or GPU. The same document always ingests the
-same way.
+To turn a document the being reads into cleaned, chunked, training-ready text —
+reading it, normalising it (uniform whitespace and line endings), and chunking it
+into ordered passages. Ingest is pure and deterministic (no model, no GPU); the
+same document always ingests the same way. It is the shared FRONT of reading: the
+same ingested text feeds the fine-tune corpus, the growing knowledge store, and
+reading-as-perception. Handing the being a document to READ at runtime ingests it
+live, so it becomes answerable+cited and remembered at once.
 _Avoid_: parse, tokenize, preprocess, load, index (the retrieval store).
 
 **Chunk**:

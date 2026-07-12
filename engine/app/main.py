@@ -35,7 +35,7 @@ from app import auth
 from app.auth import AuthConfig, require_auth
 from app.adapters.narrator import build_narrator
 from app.language.embedding import build_embedder
-from app.language.knowledge_store import KnowledgeStore
+from app.language.knowledge_store import KnowledgeStore, index_document
 from app.language.ingest import ingest_text
 from app.adapters.voice import build_voice
 from app.bootstrap import BuiltSimulation, build_simulation
@@ -82,6 +82,7 @@ def create_app(
     self_report_service: Optional[SelfReportService] = None,
     reading_qa_service: Optional[ReadingQAService] = None,
     conversation_service: Optional[ConversationService] = None,
+    knowledge_store: Optional[KnowledgeStore] = None,
     voice: Optional[VoicePort] = None,
     voice_policy: Optional[VoicePolicy] = None,
 ) -> FastAPI:
@@ -106,6 +107,7 @@ def create_app(
         or self_report_service is None
         or reading_qa_service is None
         or conversation_service is None
+        or knowledge_store is None
         or voice is None
     ):
         config = ConfigService.from_files(
@@ -130,17 +132,23 @@ def create_app(
             # The grounded self-report surface (S1, ADR 0032): a narrator behind
             # the LanguageModelPort renders the being's own memories into prose.
             self_report_service = _build_self_report(config)
+        if knowledge_store is None:
+            # The ONE shared knowledge store (reading R3, ADR 0038): /ingest
+            # WRITES into it and reading QA + conversation READ from it, so a
+            # document read at runtime is immediately answerable + citable.
+            # In-memory by default (per-process; not persisted across a restart).
+            knowledge_store = _build_knowledge_store(config)
         if reading_qa_service is None:
             # The reading-QA surface (reading R4, ADR 0039): grounded, cited
             # answers from the being's growing knowledge store. A fresh store is
             # empty, so a being that has read nothing declines honestly.
-            reading_qa_service = _build_reading_qa(config)
+            reading_qa_service = _build_reading_qa(config, knowledge_store)
         if conversation_service is None:
             # The multi-turn conversation surface (reading R6): a
             # ConversationService over the SAME grounded reading QA, adding
             # history so follow-ups resolve to earlier turns. A fresh turn
             # store is empty, so the first turn has no history to lean on.
-            conversation_service = _build_conversation(config)
+            conversation_service = _build_conversation(config, knowledge_store)
         if voice is None:
             # The voicebox (S4, ADR 0035): the VoicePort engine is selected from
             # config, and the espeak-ng adapter degrades to a no-op on a host with
@@ -308,6 +316,27 @@ def create_app(
             voice, voice_policy, text=text, source=source, emotion=emotion
         )
 
+    @app.post("/ingest", dependencies=[Depends(guard)])
+    async def post_ingest(payload: dict = Body(...)):
+        # Let the being READ a PROVIDED document at runtime (INGEST-ENDPOINT). One
+        # call, two validated paths: (a) INDEX the cleaned + chunked text into the
+        # SHARED knowledge store (R3, ADR 0038) so /ask/reading + /chat then answer
+        # about it GROUNDED + CITED (R4/R6, ADR 0039); and (b) route it through the
+        # VALIDATED reading-as-perception door (R7, ADR 0040) via Simulation.read,
+        # so memories/concepts form -- the language model NEVER writes state (ADR
+        # 0022). Mirrors /read's 422-on-empty. Behind the always-on JWT guard (ADR
+        # 0005). The store is in-memory (per-process), so an ingest is not persisted
+        # across a restart.
+        text = str(payload.get("text", ""))
+        if not text.strip():
+            raise HTTPException(status_code=422, detail="no document text to ingest")
+        source = str(payload.get("source") or "document")
+        # (a) index into the shared knowledge store (grounded, cited retrieval).
+        chunks = index_document(ingest_text(text, source=source), knowledge_store)
+        # (b) read through the validated perception/cognition door (memories/concepts).
+        perceived = simulation.read(text, source=source)
+        return {"source": source, "chunks": chunks, "perceived": len(perceived)}
+
     @app.websocket("/ws")
     async def stream(websocket: WebSocket):
         # Verify the handshake token (query `?token=` or the Authorization
@@ -399,7 +428,20 @@ def _build_self_report(config: ConfigService) -> SelfReportService:
     )
 
 
-def _build_reading_qa(config: ConfigService) -> ReadingQAService:
+def _build_knowledge_store(config: ConfigService) -> KnowledgeStore:
+    """The being's growing knowledge store (reading R3, ADR 0038): the config-
+    selected embedder over an in-memory chunk repository. ONE instance is built in
+    `create_app` and SHARED by /ingest (writes) and reading QA + conversation
+    (reads), so a document read at runtime is immediately answerable + citable.
+    In-memory = per-process: not persisted across a restart (a durable store is a
+    repository swap behind the same seam, ADR 0038)."""
+    return KnowledgeStore(
+        embedder=build_embedder(config.knowledge_retrieval_policy()),
+        repository=InMemoryKnowledgeChunkRepository(),
+    )
+
+
+def _build_reading_qa(config: ConfigService, store: KnowledgeStore) -> ReadingQAService:
     """Wire the reading-QA surface from config (reading R4, ADR 0039). The being
     retrieves from its growing knowledge store (the R3 `KnowledgeStore` over the
     config-selected embedder; in-memory by default — a fresh being has read
@@ -409,16 +451,12 @@ def _build_reading_qa(config: ConfigService) -> ReadingQAService:
     offline template default there is no generative model, so the answer is
     EXTRACTIVE — it quotes what it read — and grounding + citation hold with no
     model call. Read-only throughout (ADR 0022)."""
-    store = KnowledgeStore(
-        embedder=build_embedder(config.knowledge_retrieval_policy()),
-        repository=InMemoryKnowledgeChunkRepository(),
-    )
     kind = config.self_report_policy().narrator_kind
     model = None if kind in ("deterministic", "template") else build_narrator(config)
     return ReadingQAService(store, model=model, policy=config.reading_qa_policy())
 
 
-def _build_conversation(config: ConfigService) -> ConversationService:
+def _build_conversation(config: ConfigService, store: KnowledgeStore) -> ConversationService:
     """Wire the multi-turn conversation surface from config (reading R6, extends ADR
     0039). It reuses `_build_reading_qa` for the grounded, cited single-turn answer
     (so citation + unread-honesty carry over unchanged) and adds an in-memory
@@ -428,7 +466,7 @@ def _build_conversation(config: ConfigService) -> ConversationService:
     offline in-memory store, so a fresh being converses with no database. Read-only
     throughout (ADR 0022)."""
     return ConversationService(
-        _build_reading_qa(config),
+        _build_reading_qa(config, store),
         InMemoryConversationTurnRepository(),
         policy=config.conversation_policy(),
     )

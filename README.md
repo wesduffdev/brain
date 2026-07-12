@@ -32,7 +32,10 @@ being has grown well past it. Today it:
   PyTorch **outcome predictor** trains from interactions (or a synthetic seed
   set via the `ml-trainer` sidecar) and runs in **shadow mode**, with a config
   flip to **active blended prediction** that shapes the decision (safety still
-  gates).
+  gates); model inference can run out-of-process behind a config-selected
+  **model-service** sidecar (a **PredictionClient** seam: in-process / HTTP /
+  fallback) that degrades to the rules/baseline if it is unavailable, so the
+  sim never stalls.
 - **Runs on an event backbone with an instinct layer.** Domain events travel over
   an **EventBus** (in-memory by default, **Kafka** at runtime), with a
   **transactional outbox** that projects into an idempotent **event log**. A
@@ -45,7 +48,7 @@ being has grown well past it. Today it:
   API** (always-on JWT) serves state and render frames to a **PixiJS renderer**;
   persistence is **Postgres** behind a repository port with **unit-of-work**
   commits; the whole thing runs as a **Docker Compose** stack (engine + postgres
-  + kafka + renderer + ml-trainer).
+  + kafka + renderer + ml-trainer + model-service (profile-gated)).
 - **Has a language faculty — on top of the sim, never driving it.** It gives a
   first-person **self-report** (`POST /ask`) grounded only in its own memories,
   answers **subject queries** ("what do you know about hot things?") from its
@@ -70,7 +73,7 @@ fake/deterministic model) run anywhere. See
 
 The full **as-built map is the Architecture diagram below**; the ordered,
 status-bearing plan is the **Roadmap**; the decisions behind each seam are the
-[ADRs](docs/adr/) (0001–0041). Domain terms are defined in
+[ADRs](docs/adr/) (0001–0043). Domain terms are defined in
 [`CONTEXT.md`](CONTEXT.md). Where things live:
 
 ```
@@ -93,7 +96,7 @@ engine/app/
   db/ · repositories.py · outbox_relay.py   # Postgres persistence + outbox relay
 engine/tests/               # behavior-driven tests (lean suite; postgres/kafka/torch gated)
 docs/                       # BRIEF, RUNBOOK, SELF_NARRATION, READING_VOICEBOX, adr/
-docker-compose.yml          # engine + postgres + kafka + renderer + ml-trainer
+docker-compose.yml          # engine + postgres + kafka + renderer + ml-trainer + model-service
 ```
 
 ## Architecture

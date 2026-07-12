@@ -55,8 +55,9 @@ being has grown well past it. Today it:
   learned concepts, and phrases both through a **config-selected narrator**
   (deterministic template by default; Claude or a local model optional; always
   falling back to the template). A **voicebox** speaks its report (`/speak`) and
-  reads a document aloud (`/read`). It keeps a **growing, persistent knowledge
-  store** of everything it has read, gives **grounded, cited answers** about it
+  reads a document aloud (`/read`). You can **hand it a document to read at
+  runtime** (`POST /ingest`): it keeps a **growing, persistent knowledge store**
+  of everything it has read, gives **grounded, cited answers** about it
   (`/ask/reading`), holds **multi-turn conversations** (`/chat`), and takes
   documents in as **reading-as-perception** — forming real memories and concepts
   through the same validated door a lived interaction uses (language never writes
@@ -86,7 +87,7 @@ engine/app/
   simulation.py             # the public interface: tick(), state(), read(), + queries
   config_service.py         # YAML -> typed policies (the only config-aware code)
   bootstrap.py              # wires the being from config + ports
-  main.py                   # FastAPI: /state /ws /command /ask /ask/reading /chat /speak /read
+  main.py                   # FastAPI: /state /ws /command /ask /ask/reading /chat /speak /read /ingest
   domain/                   # BeingState, Room, objects, concepts, events, reactions
   services/                 # the cognition / instinct / learning / language services
   ml/                       # outcome + instinct predictors (encode, model, trainer)
@@ -314,6 +315,7 @@ flowchart TB
     API -->|"/speak"| Self
     Self -->|self-report text| VPort
     API -->|"/read: voice a document aloud"| Ingest
+    API -->|"/ingest: hand the being a document to READ at runtime — indexes it (grounded/cited) + walks the validated door (memories/concepts)"| Ingest
     Ingest -.->|cleaned + chunked read-aloud utterances| VPort
     ReadingQA -.->|"answer text (speak=true)"| VPort
     Convo -.->|"answer text (speak=true)"| VPort

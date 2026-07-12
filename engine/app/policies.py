@@ -280,6 +280,40 @@ class PredictionBlendPolicy:
 
 
 @dataclass(frozen=True)
+class ModelRoutePolicy:
+    """Where ONE learned model's inference runs (v8, ADR 0043), from a `routing:`
+    entry of `config/models.yaml`. `mode` is ``inprocess`` (the default — torch or
+    rules in the engine process, byte-identical to before v8) or ``http`` (the
+    out-of-process `model-service` sidecar). `active_version` is the served model
+    version the sidecar is asked for (advisory; the sidecar owns what it loads).
+    `fallback` wraps the HTTP client in a fallback-safe client so a service outage
+    degrades to the rule/safe baseline rather than stalling the sim. Retuning where
+    a model runs — or turning the sidecar on — is a config change only; the sidecar
+    ENDPOINT is deploy config (env), never authored here."""
+
+    mode: str = "inprocess"
+    active_version: str = ""
+    fallback: bool = True
+
+
+@dataclass(frozen=True)
+class ModelsPolicy:
+    """Per-model inference ROUTING for both learned models plus the shared sidecar
+    endpoint defaults (v8, ADR 0043), from `config/models.yaml`. `outcome` and
+    `instinct` each carry a `ModelRoutePolicy`; `base_url`/`base_url_env`/
+    `timeout_seconds` are the `model-service` endpoint defaults, with the base URL
+    OVERRIDABLE by an environment variable at deploy time (`MODEL_SERVICE_URL` by
+    default) — a deploy detail like `DATABASE_URL`, so only the default lives in
+    YAML. Both models default to ``inprocess``, so the shipped being is unchanged."""
+
+    outcome: ModelRoutePolicy = field(default_factory=ModelRoutePolicy)
+    instinct: ModelRoutePolicy = field(default_factory=ModelRoutePolicy)
+    base_url: str = ""
+    base_url_env: str = "MODEL_SERVICE_URL"
+    timeout_seconds: float = 5.0
+
+
+@dataclass(frozen=True)
 class MemoryPriorityPolicy:
     """How a Memory's PRIORITY (salience) is scored (card v1). Salience is a
     weighted sum of two signals the being cares about most:

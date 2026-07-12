@@ -196,6 +196,8 @@ flowchart TB
     end
 
     Trainer["ml-trainer sidecar: trains outcome + instinct models (.pt)"]
+    ModelSvc["model-service sidecar (v8): serves BOTH models out-of-process — /predict/outcome + /predict/instinct + /health + /models/active; loads the .pt artifacts; profile-gated"]
+    PredClient["PredictionClient seam (v8): InProcess / Http / Fallback — covers BOTH model ports; degrades to the rule/safe baseline on a service outage"]
     Doc(["Document you hand the being (reading R1)"])
 
     %% ---- Sensing flow ----
@@ -223,6 +225,10 @@ flowchart TB
     RResp -->|emotion bias| Emo
     Emo --> Dec
     Pred -->|anticipated cost| Dec
+    Pred -.->|outcome inference| PredClient
+    IModel -.->|instinct inference| PredClient
+    PredClient -->|http mode| ModelSvc
+    Trainer -.->|.pt artifacts| ModelSvc
     Concepts -->|anticipated discomfort| Dec
     Curio -->|exploration| Dec
     Mem --> Dec

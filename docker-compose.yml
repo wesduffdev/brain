@@ -32,6 +32,11 @@ services:
       # the broker starts only under the `events` profile (see the kafka service).
       # Nothing consumes it yet — wired when the sim moves onto the bus (INS-RT).
       KAFKA_BOOTSTRAP_SERVERS: kafka:9094
+      # Model-service sidecar (v8, ADR 0043). Endpoint is deploy config, like
+      # DATABASE_URL; routing/flags live in config/models.yaml (default:
+      # inprocess, so nothing calls out unless a model is routed `http`). The
+      # sidecar starts only under the `models` profile (see model-service).
+      MODEL_SERVICE_URL: ${MODEL_SERVICE_URL:-http://model-service:8500}
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,6 +142,35 @@ services:
     restart: "no"
     profiles:
       - events
+
+  model-service:
+    # Model-inference sidecar (v8, ADR 0043): serves the outcome + instinct models
+    # OUT-OF-PROCESS over HTTP (/predict/outcome, /predict/instinct, /health,
+    # /models/active) so torch stays out of the lean engine image. Gated behind the
+    # `models` profile so the default stack (engine + postgres) is byte-for-byte
+    # unchanged; `docker compose --profile models up` brings it online, and the
+    # engine only calls it when config/models.yaml routes a model to `http`.
+    # Built from the repo root so the image can copy the engine `app` package.
+    build:
+      context: .
+      dockerfile: model-service/Dockerfile
+    command: uvicorn service:app --host 0.0.0.0 --port 8500
+    ports:
+      - "8500:8500"
+    volumes:
+      - ./config:/config
+      - ./models:/models
+    environment:
+      CONFIG_ROOT: /config
+      MODEL_PATH: /models/outcome_predictor.pt
+      INSTINCT_MODEL_PATH: /models/instinct.pt
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8500/health').status==200 else 1)\" || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+    profiles:
+      - models
 
   postgres:
     image: postgres:16

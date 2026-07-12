@@ -1,0 +1,6 @@
+# model-service serving-only deps (v8, ADR 0043), installed ON TOP of the engine
+# runtime requirements (fastapi / uvicorn / pyyaml). torch + numpy load and run
+# the .pt artifacts container-side; kept OUT of the lean engine image, exactly as
+# the training deps live in engine/requirements-train.txt.
+torch==2.2.*
+numpy>=1.24,<2

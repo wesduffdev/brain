@@ -240,6 +240,7 @@ flowchart TB
     Mem --> Curio
     Inst --> Outbox
     Action --> Outbox
+    RResp -->|stages reaction events| Outbox
     Outbox --> Elog
     Outbox --> PG
     Elog --> PG

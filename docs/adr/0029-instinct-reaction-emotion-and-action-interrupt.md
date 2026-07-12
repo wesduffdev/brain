@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. The decision that `EmotionBiasApplied` / `ActionInterrupted` are **transient** and "published straight through, not staged in a persistence unit of work" (Decision steps 1 & 2 and the final Consequence) is **superseded by [ADR 0042](0042-persist-reaction-events-via-transactional-outbox.md)** — those events are now staged through the transactional outbox (ADR 0028) and projected into the idempotent event log. The reaction → emotion/interrupt *behaviour* and the inviolable safety floor below are unchanged.
 
 ## Date
 

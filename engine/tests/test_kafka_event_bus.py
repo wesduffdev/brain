@@ -121,6 +121,117 @@ def test_publishing_a_non_event_is_refused_before_touching_the_broker():
         bus.publish("   ", _object_approached())
 
 
+# --- consume tolerates a transient UNKNOWN_TOPIC_OR_PART (broker-free) -------
+#
+# On a FRESH broker the bootstrap creates the being.* topics, but a brand-new
+# consumer polls before that topic metadata has propagated to it, and
+# librdkafka reports a TRANSIENT UNKNOWN_TOPIC_OR_PART for a poll or two. That
+# is not a missing topic and must NOT crash the consumer: it is tolerated like
+# end-of-partition and the poll loop keeps going until the metadata catches up.
+# Exercised with a stub consumer (no broker) — confluent_kafka is imported only
+# for its error CODES, which needs no broker.
+
+
+class _StubError:
+    """A librdkafka error carrying a specific code, like `msg.error()`."""
+
+    def __init__(self, code: int) -> None:
+        self._code = code
+
+    def code(self) -> int:
+        return self._code
+
+    def __str__(self) -> str:  # matches the RuntimeError message shape
+        return f"KafkaError{{code={self._code}}}"
+
+
+class _StubMessage:
+    """A polled message: an error signal (`value`/`topic` unused) or a real
+    payload (`error()` is None)."""
+
+    def __init__(self, *, error=None, topic=None, value=None) -> None:
+        self._error, self._topic, self._value = error, topic, value
+
+    def error(self):
+        return self._error
+
+    def topic(self):
+        return self._topic
+
+    def value(self):
+        return self._value
+
+
+class _StubConsumer:
+    """Replays a fixed list of poll results, then None (poll budget exhausted).
+    Records committed messages so a test can assert only resolved offsets commit."""
+
+    def __init__(self, poll_results) -> None:
+        self._results = list(poll_results)
+        self.committed: List = []
+
+    def poll(self, timeout):
+        return self._results.pop(0) if self._results else None
+
+    def subscribe(self, topics):  # the stub is already "subscribed"
+        pass
+
+    def commit(self, *, message, asynchronous):
+        self.committed.append(message)
+
+    def close(self):
+        pass
+
+
+def _bus_with_consumer(stub) -> KafkaEventBus:
+    bus = KafkaEventBus(
+        bootstrap_servers="unused:9092",
+        topics=EventTopicsPolicy(names=("being.test.topic",), partitions=1, dlq_suffix=".dlq"),
+    )
+    bus._consumer = stub  # inject the stub consumer — no broker is ever opened
+    return bus
+
+
+def test_a_transient_unknown_topic_or_part_on_poll_is_tolerated_not_fatal():
+    # The fresh-broker bug (#78): a new consumer's first polls report
+    # UNKNOWN_TOPIC_OR_PART while topic metadata propagates. consume() must skip
+    # it and keep polling, so the real event that follows is still delivered —
+    # not raise and crash the runtime loop.
+    from confluent_kafka import KafkaError  # noqa: PLC0415
+
+    event = _object_approached()
+    topic = "being.test.topic"
+    stub = _StubConsumer(
+        [
+            _StubMessage(error=_StubError(KafkaError.UNKNOWN_TOPIC_OR_PART)),
+            _StubMessage(topic=topic, value=serialize_event(event)),
+        ]
+    )
+    bus = _bus_with_consumer(stub)
+    received: List[DomainEvent] = []
+    bus.subscribe(topic, received.append)
+
+    dispatched = bus.consume(max_messages=1, timeout=0.0)
+
+    assert dispatched == 1  # tolerated the transient signal and delivered the event
+    assert received[0].event_id == event.event_id
+    # only the resolved real message committed; the transient signal did not.
+    assert len(stub.committed) == 1
+
+
+def test_a_genuine_consume_error_is_still_fatal():
+    # Tolerance is narrow: a real broker/transport failure (not the two benign
+    # signals) still raises, so genuine problems are never swallowed.
+    from confluent_kafka import KafkaError  # noqa: PLC0415
+
+    stub = _StubConsumer([_StubMessage(error=_StubError(KafkaError._ALL_BROKERS_DOWN))])
+    bus = _bus_with_consumer(stub)
+    bus.subscribe("being.test.topic", lambda _e: None)
+
+    with pytest.raises(RuntimeError):
+        bus.consume(max_messages=1, timeout=0.0)
+
+
 # --- live broker: publish -> consume, dedupe, DLQ (skips with no broker) -----
 
 

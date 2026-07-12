@@ -33,6 +33,7 @@ below are usable — and testable — with no broker present.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections import defaultdict
 from typing import Dict, List, Optional
@@ -43,6 +44,8 @@ from app.ports.events import EventHandler
 
 # The env var the broker URL is read from — deploy config, never authored YAML.
 BOOTSTRAP_ENV = "KAFKA_BOOTSTRAP_SERVERS"
+
+_LOG = logging.getLogger("being.events.kafka")
 
 
 def serialize_event(event: DomainEvent) -> bytes:
@@ -159,11 +162,29 @@ class KafkaEventBus:
             if message is None:
                 break  # no message within the timeout — stop waiting
             if message.error():
-                # Benign end-of-partition is not an error to us; anything else is
-                # a broker/transport problem the caller should see.
+                # A poll result can carry a librdkafka SIGNAL instead of a payload.
+                # TWO are transient and must NOT crash the consumer — skip them and
+                # keep polling within the timeout budget:
+                #   * _PARTITION_EOF — reached the end of a partition (benign).
+                #   * UNKNOWN_TOPIC_OR_PART — a freshly-created topic (or a brand-new
+                #     consumer) whose metadata has not yet propagated to THIS client.
+                #     On a FRESH broker the bootstrap has already created the being.*
+                #     topics, so this is a metadata-propagation lag, not a missing
+                #     topic; librdkafka refreshes metadata and delivery then proceeds.
+                # Any OTHER error is a genuine broker/transport problem the caller
+                # should see, and stays fatal.
                 from confluent_kafka import KafkaError  # noqa: PLC0415
 
-                if message.error().code() == KafkaError._PARTITION_EOF:
+                code = message.error().code()
+                if code == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                    _LOG.debug(
+                        "tolerating transient %s (topic=%s) — metadata not yet "
+                        "propagated; continuing to poll",
+                        message.error(),
+                        message.topic(),
+                    )
+                    continue
+                if code == KafkaError._PARTITION_EOF:
                     continue
                 raise RuntimeError(f"kafka consume error: {message.error()}")
             handled = self._handle(message)
